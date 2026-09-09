@@ -20,6 +20,7 @@ All documents follow the Ref-ID naming standard:
 | [`REF-REQ-004`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-001-hardware-power-profiling.md#24-ref-req-004-hardware-to-process-power-attribution) | Hardware-to-Process Power Attribution | Draft | [`REF-RES-003`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-003-hardware-to-process-attribution.md) |
 | [`REF-REQ-005`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-002-profiler-reporting-engine.md) | Detailed Hardware-to-Software Power Profiler & Report Generator | Approved | [`REF-ARCH-002`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-002-profiler-implementation.md) |
 | [`REF-REQ-006`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-003-pgo-pmu-optimization.md) | Release Optimization, PMU/ASM Analysis & PGO Pipeline | Approved | [`REF-ARCH-003`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-003-pgo-pmu-pipeline.md) |
+| [`REF-REQ-007`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-004-resident-daemon-direct-access.md) | Resident Background Daemon & Direct Kernel/Hardware Access Specification | Approved | [`REF-ARCH-004`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-004-resident-daemon-event-loop.md) |
 
 ---
 
@@ -43,3 +44,5 @@ All documents follow the Ref-ID naming standard:
 | [`REF-TEST-002`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-002-profiler-implementation.md#3-ref-test-002-oracle-gate-test-specifications) | Profiler Unit Testing & Oracle Gate Benchmarks | Unit Tests, Allocations, and Oracle Gate | Approved |
 | [`REF-ARCH-003`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-003-pgo-pmu-pipeline.md) | Release Build Pipeline: PGO, Hardware PMU Telemetry & ASM Verification | PGO 2-stage compiler pipeline & ASM verification | Approved |
 | [`REF-TEST-003`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-003-pgo-pmu-pipeline.md#3-ref-test-003-empirical-pmu-benchmark-verification) | Empirical PMU Benchmark Verification | PMU hardware assertions (< 0.1% dTLB miss) | Approved |
+| [`REF-ARCH-004`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-004-resident-daemon-event-loop.md) | Resident Daemon & Direct Access Epoll Architecture | Persistent FDs, Abstract Socket Singleton, Epoll Loop | Approved |
+| [`REF-TEST-004`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-004-resident-daemon-event-loop.md#3-ref-test-004-oracle-gate-unit-test-specifications) | Singleton Lock and Direct Sysfs Access Tests | Socket conflict test, pread persistent reading test | Approved |

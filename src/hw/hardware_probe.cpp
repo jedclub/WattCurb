@@ -5,13 +5,109 @@
 #include <system_error>
 #include <unistd.h>
 #include <array>
-#include <cstring>
+#include <utility>
 
 namespace wattcurb::hw {
+
+namespace {
+
+int open_ro_cloexec(const std::filesystem::path& path) {
+    if (path.empty()) return -1;
+    return ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+}
+
+void safe_close(int& fd) noexcept {
+    if (fd >= 0) {
+        ::close(fd);
+        fd = -1;
+    }
+}
+
+} // namespace
 
 HardwareProbe::HardwareProbe(std::filesystem::path sysfs_root)
     : sysfs_root_(std::move(sysfs_root)) {
     refresh_device_paths();
+}
+
+HardwareProbe::~HardwareProbe() {
+    close_fds();
+}
+
+HardwareProbe::HardwareProbe(HardwareProbe&& other) noexcept
+    : sysfs_root_(std::move(other.sysfs_root_)),
+      battery_path_(std::move(other.battery_path_)),
+      rapl_pkg_path_(std::move(other.rapl_pkg_path_)),
+      rapl_core_path_(std::move(other.rapl_core_path_)),
+      gpu_power_path_(std::move(other.gpu_power_path_)),
+      backlight_path_(std::move(other.backlight_path_)),
+      battery_power_fd_(std::exchange(other.battery_power_fd_, -1)),
+      battery_status_fd_(std::exchange(other.battery_status_fd_, -1)),
+      battery_voltage_fd_(std::exchange(other.battery_voltage_fd_, -1)),
+      battery_current_fd_(std::exchange(other.battery_current_fd_, -1)),
+      rapl_pkg_fd_(std::exchange(other.rapl_pkg_fd_, -1)),
+      rapl_core_fd_(std::exchange(other.rapl_core_fd_, -1)),
+      gpu_power_fd_(std::exchange(other.gpu_power_fd_, -1)),
+      backlight_cur_fd_(std::exchange(other.backlight_cur_fd_, -1)),
+      backlight_max_fd_(std::exchange(other.backlight_max_fd_, -1)) {}
+
+HardwareProbe& HardwareProbe::operator=(HardwareProbe&& other) noexcept {
+    if (this != &other) {
+        close_fds();
+        sysfs_root_ = std::move(other.sysfs_root_);
+        battery_path_ = std::move(other.battery_path_);
+        rapl_pkg_path_ = std::move(other.rapl_pkg_path_);
+        rapl_core_path_ = std::move(other.rapl_core_path_);
+        gpu_power_path_ = std::move(other.gpu_power_path_);
+        backlight_path_ = std::move(other.backlight_path_);
+
+        battery_power_fd_ = std::exchange(other.battery_power_fd_, -1);
+        battery_status_fd_ = std::exchange(other.battery_status_fd_, -1);
+        battery_voltage_fd_ = std::exchange(other.battery_voltage_fd_, -1);
+        battery_current_fd_ = std::exchange(other.battery_current_fd_, -1);
+        rapl_pkg_fd_ = std::exchange(other.rapl_pkg_fd_, -1);
+        rapl_core_fd_ = std::exchange(other.rapl_core_fd_, -1);
+        gpu_power_fd_ = std::exchange(other.gpu_power_fd_, -1);
+        backlight_cur_fd_ = std::exchange(other.backlight_cur_fd_, -1);
+        backlight_max_fd_ = std::exchange(other.backlight_max_fd_, -1);
+    }
+    return *this;
+}
+
+void HardwareProbe::close_fds() noexcept {
+    safe_close(battery_power_fd_);
+    safe_close(battery_status_fd_);
+    safe_close(battery_voltage_fd_);
+    safe_close(battery_current_fd_);
+    safe_close(rapl_pkg_fd_);
+    safe_close(rapl_core_fd_);
+    safe_close(gpu_power_fd_);
+    safe_close(backlight_cur_fd_);
+    safe_close(backlight_max_fd_);
+}
+
+void HardwareProbe::open_persistent_fds() {
+    close_fds();
+
+    if (!battery_path_.empty()) {
+        battery_power_fd_ = open_ro_cloexec(battery_path_ / "power_now");
+        battery_status_fd_ = open_ro_cloexec(battery_path_ / "status");
+        battery_voltage_fd_ = open_ro_cloexec(battery_path_ / "voltage_now");
+        battery_current_fd_ = open_ro_cloexec(battery_path_ / "current_now");
+    }
+    if (!rapl_pkg_path_.empty()) {
+        rapl_pkg_fd_ = open_ro_cloexec(rapl_pkg_path_);
+    }
+    if (!rapl_core_path_.empty()) {
+        rapl_core_fd_ = open_ro_cloexec(rapl_core_path_);
+    }
+    if (!gpu_power_path_.empty()) {
+        gpu_power_fd_ = open_ro_cloexec(gpu_power_path_);
+    }
+    if (!backlight_path_.empty()) {
+        backlight_cur_fd_ = open_ro_cloexec(backlight_path_ / "brightness");
+        backlight_max_fd_ = open_ro_cloexec(backlight_path_ / "max_brightness");
+    }
 }
 
 void HardwareProbe::refresh_device_paths() {
@@ -24,7 +120,7 @@ void HardwareProbe::refresh_device_paths() {
             const auto filename = entry.path().filename().string();
             if (filename.rfind("BAT", 0) == 0) {
                 battery_path_ = entry.path();
-                break; // Use primary battery
+                break;
             }
         }
     }
@@ -78,65 +174,64 @@ void HardwareProbe::refresh_device_paths() {
             }
         }
     }
+
+    open_persistent_fds();
 }
 
 HardwareSample HardwareProbe::capture_sample() const {
     HardwareSample sample;
     sample.timestamp = std::chrono::steady_clock::now();
 
-    // 1. Read Battery
-    if (!battery_path_.empty()) {
-        auto status_str = read_string_file(battery_path_ / "status");
+    // 1. Read Battery via persistent pread
+    if (battery_status_fd_ >= 0) {
+        auto status_str = read_string_fd(battery_status_fd_);
         sample.is_discharging = (status_str.rfind("Discharging", 0) == 0);
+    }
 
-        auto power = read_uint64_file(battery_path_ / "power_now");
-        if (power.has_value()) {
-            sample.battery_power_uw = power;
-        } else {
-            // Fallback to V x I
-            auto v = read_uint64_file(battery_path_ / "voltage_now");
-            auto i = read_int64_file(battery_path_ / "current_now");
-            if (v.has_value() && i.has_value()) {
-                sample.battery_voltage_uv = v;
-                sample.battery_current_ua = i;
-                int64_t abs_curr = *i < 0 ? -*i : *i;
-                sample.battery_power_uw = static_cast<uint64_t>((*v * static_cast<uint64_t>(abs_curr)) / 1'000'000ULL);
-            }
+    if (battery_power_fd_ >= 0) {
+        sample.battery_power_uw = read_uint64_fd(battery_power_fd_);
+    } else if (battery_voltage_fd_ >= 0 && battery_current_fd_ >= 0) {
+        auto v = read_uint64_fd(battery_voltage_fd_);
+        auto i = read_int64_fd(battery_current_fd_);
+        if (v.has_value() && i.has_value()) {
+            sample.battery_voltage_uv = v;
+            sample.battery_current_ua = i;
+            int64_t abs_curr = *i < 0 ? -*i : *i;
+            sample.battery_power_uw = static_cast<uint64_t>((*v * static_cast<uint64_t>(abs_curr)) / 1'000'000ULL);
         }
     }
 
-    // 2. Read RAPL (may fail if unprivileged)
-    if (!rapl_pkg_path_.empty()) {
-        sample.rapl_package_uj = read_uint64_file(rapl_pkg_path_);
+    // 2. Read RAPL via persistent pread
+    if (rapl_pkg_fd_ >= 0) {
+        sample.rapl_package_uj = read_uint64_fd(rapl_pkg_fd_);
     }
-    if (!rapl_core_path_.empty()) {
-        sample.rapl_core_uj = read_uint64_file(rapl_core_path_);
-    }
-
-    // 3. Read GPU
-    if (!gpu_power_path_.empty()) {
-        sample.gpu_power_uw = read_uint64_file(gpu_power_path_);
+    if (rapl_core_fd_ >= 0) {
+        sample.rapl_core_uj = read_uint64_fd(rapl_core_fd_);
     }
 
-    // 4. Read Backlight
-    if (!backlight_path_.empty()) {
-        auto cur_b = read_uint64_file(backlight_path_ / "brightness");
-        auto max_b = read_uint64_file(backlight_path_ / "max_brightness");
+    // 3. Read GPU via persistent pread
+    if (gpu_power_fd_ >= 0) {
+        sample.gpu_power_uw = read_uint64_fd(gpu_power_fd_);
+    }
+
+    // 4. Read Backlight via persistent pread
+    if (backlight_cur_fd_ >= 0) {
+        auto cur_b = read_uint64_fd(backlight_cur_fd_);
         if (cur_b.has_value()) sample.backlight_brightness = static_cast<uint32_t>(*cur_b);
+    }
+    if (backlight_max_fd_ >= 0) {
+        auto max_b = read_uint64_fd(backlight_max_fd_);
         if (max_b.has_value()) sample.backlight_max_brightness = static_cast<uint32_t>(*max_b);
     }
 
     return sample;
 }
 
-std::optional<uint64_t> HardwareProbe::read_uint64_file(const std::filesystem::path& path) {
-    int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+std::optional<uint64_t> HardwareProbe::read_uint64_fd(int fd) {
     if (fd < 0) return std::nullopt;
 
     std::array<char, 64> buffer{};
-    ssize_t bytes_read = ::read(fd, buffer.data(), buffer.size() - 1);
-    ::close(fd);
-
+    ssize_t bytes_read = ::pread(fd, buffer.data(), buffer.size() - 1, 0);
     if (bytes_read <= 0) return std::nullopt;
     buffer[static_cast<size_t>(bytes_read)] = '\0';
 
@@ -152,14 +247,11 @@ std::optional<uint64_t> HardwareProbe::read_uint64_file(const std::filesystem::p
     return std::nullopt;
 }
 
-std::optional<int64_t> HardwareProbe::read_int64_file(const std::filesystem::path& path) {
-    int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+std::optional<int64_t> HardwareProbe::read_int64_fd(int fd) {
     if (fd < 0) return std::nullopt;
 
     std::array<char, 64> buffer{};
-    ssize_t bytes_read = ::read(fd, buffer.data(), buffer.size() - 1);
-    ::close(fd);
-
+    ssize_t bytes_read = ::pread(fd, buffer.data(), buffer.size() - 1, 0);
     if (bytes_read <= 0) return std::nullopt;
     buffer[static_cast<size_t>(bytes_read)] = '\0';
 
@@ -175,15 +267,13 @@ std::optional<int64_t> HardwareProbe::read_int64_file(const std::filesystem::pat
     return std::nullopt;
 }
 
-std::string HardwareProbe::read_string_file(const std::filesystem::path& path) {
-    int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+std::string HardwareProbe::read_string_fd(int fd) {
     if (fd < 0) return {};
 
     std::array<char, 64> buffer{};
-    ssize_t bytes_read = ::read(fd, buffer.data(), buffer.size() - 1);
-    ::close(fd);
-
+    ssize_t bytes_read = ::pread(fd, buffer.data(), buffer.size() - 1, 0);
     if (bytes_read <= 0) return {};
+
     while (bytes_read > 0 && (buffer[static_cast<size_t>(bytes_read - 1)] == '\n' ||
                               buffer[static_cast<size_t>(bytes_read - 1)] == '\r' ||
                               buffer[static_cast<size_t>(bytes_read - 1)] == ' ')) {

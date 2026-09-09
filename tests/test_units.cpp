@@ -1,3 +1,5 @@
+#include "core/singleton_lock.hpp"
+#include "hw/hardware_probe.hpp"
 #include "proc/process_analyzer.hpp"
 #include "policy/attribution_engine.hpp"
 
@@ -135,6 +137,35 @@ void test_oracle_gate_performance_benchmark() {
     std::cout << " [ORACLE GATE PASS] Performance within extreme efficiency threshold (< 0.5 us/op)\n";
 }
 
+void test_singleton_lock() {
+    // Primary acquisition
+    wattcurb::core::SingletonLock lock1("wattcurb.test_singleton");
+    assert(lock1.is_locked() && "First lock acquisition must succeed");
+
+    // Secondary acquisition with same abstract address must fail
+    wattcurb::core::SingletonLock lock2("wattcurb.test_singleton");
+    assert(!lock2.is_locked() && "Duplicate lock acquisition must fail");
+
+    // Release primary
+    lock1.release();
+    assert(!lock1.is_locked());
+
+    // Tertiary acquisition after release must succeed
+    wattcurb::core::SingletonLock lock3("wattcurb.test_singleton");
+    assert(lock3.is_locked() && "Lock acquisition after release must succeed");
+    std::cout << " [PASS] test_singleton_lock\n";
+}
+
+void test_persistent_hw_probe() {
+    wattcurb::hw::HardwareProbe probe;
+    auto s1 = probe.capture_sample();
+    auto s2 = probe.capture_sample();
+    assert(s2.timestamp >= s1.timestamp);
+    (void)s1;
+    (void)s2;
+    std::cout << " [PASS] test_persistent_hw_probe\n";
+}
+
 } // namespace test
 
 int main() {
@@ -144,6 +175,8 @@ int main() {
     test::test_proc_io_parsing();
     test::test_drm_fdinfo_parsing();
     test::test_attribution_engine();
+    test::test_singleton_lock();
+    test::test_persistent_hw_probe();
     test::test_oracle_gate_performance_benchmark();
     std::cout << "=== ALL TESTS & ORACLE GATE PASSED SUCCESSFULLY ===\n";
     return 0;

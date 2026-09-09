@@ -47,6 +47,8 @@ endif()
 
 # Core Library Sources
 set(WATTCURB_LIB_SOURCES
+    src/core/singleton_lock.cpp
+    src/core/daemon_runner.cpp
     src/hw/hardware_probe.cpp
     src/proc/process_analyzer.cpp
     src/policy/attribution_engine.cpp
