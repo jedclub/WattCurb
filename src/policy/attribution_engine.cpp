@@ -175,8 +175,14 @@ AnalysisReportData AttributionEngine::compute_attribution(
     double delta_sec = static_cast<double>(dur_ns) / 1'000'000'000.0;
     if (delta_sec <= 0.001) delta_sec = 0.001; // Avoid division by zero
     report.sample_duration = std::chrono::duration_cast<std::chrono::milliseconds>(hw2.timestamp - hw1.timestamp);
+    report.sample_count = 1;
+    report.is_short_window = (delta_sec < 3.0);
 
     report.hardware = compute_hardware_power(hw1, hw2, delta_sec);
+    double total_sys_power = report.hardware.total_system_watts > 0.0 ? report.hardware.total_system_watts :
+        (report.hardware.cpu_package_watts + report.hardware.gpu_watts + report.hardware.display_watts +
+         report.hardware.fan_estimated_watts + report.hardware.storage_estimated_watts + report.hardware.uncore_and_platform_watts);
+    report.total_energy_joules = total_sys_power * delta_sec;
     report.total_monitored_processes = proc2.size();
 
     // Map proc1 by PID
@@ -470,4 +476,149 @@ AnalysisReportData AttributionEngine::compute_attribution(
     return report;
 }
 
+AnalysisReportData AttributionEngine::compute_windowed_attribution(
+    const std::vector<HardwareSample>& hw_samples,
+    const std::vector<std::vector<ProcessSample>>& proc_samples,
+    size_t top_n
+) const {
+    if (hw_samples.empty() || proc_samples.empty()) {
+        return AnalysisReportData{};
+    }
+    if (hw_samples.size() == 1 || proc_samples.size() == 1) {
+        return compute_attribution(hw_samples.front(), hw_samples.front(), proc_samples.front(), proc_samples.front(), top_n);
+    }
+    if (hw_samples.size() == 2 && proc_samples.size() == 2) {
+        return compute_attribution(hw_samples.front(), hw_samples.back(), proc_samples.front(), proc_samples.back(), top_n);
+    }
+
+    size_t num_intervals = std::min(hw_samples.size(), proc_samples.size()) - 1;
+
+    // 1. Process intermediate delta accumulation
+    std::unordered_map<int32_t, ProcessSample> accumulated_procs;
+    accumulated_procs.reserve(proc_samples.front().size() + 64);
+
+    for (size_t step = 1; step <= num_intervals; ++step) {
+        const auto& prev_procs = proc_samples[step - 1];
+        const auto& cur_procs = proc_samples[step];
+
+        std::unordered_map<int32_t, const ProcessSample*> prev_map;
+        prev_map.reserve(prev_procs.size());
+        for (const auto& p : prev_procs) {
+            prev_map[p.pid] = &p;
+        }
+
+        for (const auto& cur : cur_procs) {
+            auto& acc = accumulated_procs[cur.pid];
+            acc.pid = cur.pid;
+            acc.ppid = cur.ppid;
+            acc.comm = cur.comm;
+            acc.uid = cur.uid;
+            acc.drm_vram_kib = std::max(acc.drm_vram_kib, cur.drm_vram_kib);
+
+            auto it = prev_map.find(cur.pid);
+            if (it != prev_map.end()) {
+                const auto* prev = it->second;
+                if (cur.utime_ticks >= prev->utime_ticks) acc.utime_ticks += (cur.utime_ticks - prev->utime_ticks);
+                if (cur.stime_ticks >= prev->stime_ticks) acc.stime_ticks += (cur.stime_ticks - prev->stime_ticks);
+                if (cur.voluntary_ctxt_switches >= prev->voluntary_ctxt_switches)
+                    acc.voluntary_ctxt_switches += (cur.voluntary_ctxt_switches - prev->voluntary_ctxt_switches);
+                if (cur.nonvoluntary_ctxt_switches >= prev->nonvoluntary_ctxt_switches)
+                    acc.nonvoluntary_ctxt_switches += (cur.nonvoluntary_ctxt_switches - prev->nonvoluntary_ctxt_switches);
+                if (cur.read_bytes >= prev->read_bytes) acc.read_bytes += (cur.read_bytes - prev->read_bytes);
+                if (cur.write_bytes >= prev->write_bytes) acc.write_bytes += (cur.write_bytes - prev->write_bytes);
+                if (cur.io_syscalls >= prev->io_syscalls) acc.io_syscalls += (cur.io_syscalls - prev->io_syscalls);
+                if (cur.drm_engine_gfx_ns >= prev->drm_engine_gfx_ns)
+                    acc.drm_engine_gfx_ns += (cur.drm_engine_gfx_ns - prev->drm_engine_gfx_ns);
+                if (cur.drm_engine_compute_ns >= prev->drm_engine_compute_ns)
+                    acc.drm_engine_compute_ns += (cur.drm_engine_compute_ns - prev->drm_engine_compute_ns);
+                if (cur.drm_engine_dec_ns >= prev->drm_engine_dec_ns)
+                    acc.drm_engine_dec_ns += (cur.drm_engine_dec_ns - prev->drm_engine_dec_ns);
+                if (cur.drm_engine_enc_ns >= prev->drm_engine_enc_ns)
+                    acc.drm_engine_enc_ns += (cur.drm_engine_enc_ns - prev->drm_engine_enc_ns);
+            } else {
+                acc.utime_ticks += cur.utime_ticks;
+                acc.stime_ticks += cur.stime_ticks;
+                acc.voluntary_ctxt_switches += cur.voluntary_ctxt_switches;
+                acc.nonvoluntary_ctxt_switches += cur.nonvoluntary_ctxt_switches;
+                acc.read_bytes += cur.read_bytes;
+                acc.write_bytes += cur.write_bytes;
+                acc.io_syscalls += cur.io_syscalls;
+                acc.drm_engine_gfx_ns += cur.drm_engine_gfx_ns;
+                acc.drm_engine_compute_ns += cur.drm_engine_compute_ns;
+                acc.drm_engine_dec_ns += cur.drm_engine_dec_ns;
+                acc.drm_engine_enc_ns += cur.drm_engine_enc_ns;
+            }
+        }
+    }
+
+    // 2. Hardware telemetry averaging
+    HardwareSample hw_start = hw_samples.front();
+    HardwareSample hw_end = hw_samples.back();
+
+    double sum_battery_power = 0.0; size_t count_bat = 0;
+    double sum_gpu_power = 0.0; size_t count_gpu = 0;
+    double sum_fan_rpm = 0.0; size_t count_fan = 0;
+    double sum_cpu_temp = 0.0; size_t count_cpu_temp = 0;
+    double sum_cpu_freq = 0.0; size_t count_cpu_freq = 0;
+    double sum_gpu_busy = 0.0; size_t count_gpu_busy = 0;
+    double sum_gpu_freq = 0.0; size_t count_gpu_freq = 0;
+    double sum_gpu_temp = 0.0; size_t count_gpu_temp = 0;
+    double sum_gpu_vram = 0.0; size_t count_gpu_vram = 0;
+    double sum_nvme_temp = 0.0; size_t count_nvme_temp = 0;
+
+    for (const auto& h : hw_samples) {
+        if (h.battery_power_uw.has_value()) { sum_battery_power += *h.battery_power_uw; count_bat++; }
+        if (h.gpu_power_uw.has_value()) { sum_gpu_power += *h.gpu_power_uw; count_gpu++; }
+        if (h.fan_rpm.has_value()) { sum_fan_rpm += *h.fan_rpm; count_fan++; }
+        if (h.cpu_temp_mdeg.has_value()) { sum_cpu_temp += *h.cpu_temp_mdeg; count_cpu_temp++; }
+        if (h.cpu_freq_avg_khz > 0) { sum_cpu_freq += h.cpu_freq_avg_khz; count_cpu_freq++; }
+        if (h.gpu_busy_percent.has_value()) { sum_gpu_busy += *h.gpu_busy_percent; count_gpu_busy++; }
+        if (h.gpu_freq_hz.has_value()) { sum_gpu_freq += *h.gpu_freq_hz; count_gpu_freq++; }
+        if (h.gpu_temp_mdeg.has_value()) { sum_gpu_temp += *h.gpu_temp_mdeg; count_gpu_temp++; }
+        if (h.gpu_vram_used_bytes.has_value()) { sum_gpu_vram += *h.gpu_vram_used_bytes; count_gpu_vram++; }
+        if (h.nvme_temp_composite_mdeg.has_value()) { sum_nvme_temp += *h.nvme_temp_composite_mdeg; count_nvme_temp++; }
+    }
+
+    if (count_bat > 0) hw_end.battery_power_uw = static_cast<uint64_t>(sum_battery_power / count_bat);
+    if (count_gpu > 0) hw_end.gpu_power_uw = static_cast<uint64_t>(sum_gpu_power / count_gpu);
+    if (count_fan > 0) hw_end.fan_rpm = static_cast<uint32_t>(sum_fan_rpm / count_fan);
+    if (count_cpu_temp > 0) hw_end.cpu_temp_mdeg = static_cast<int32_t>(sum_cpu_temp / count_cpu_temp);
+    if (count_cpu_freq > 0) hw_end.cpu_freq_avg_khz = static_cast<uint32_t>(sum_cpu_freq / count_cpu_freq);
+    if (count_gpu_busy > 0) hw_end.gpu_busy_percent = static_cast<uint32_t>(sum_gpu_busy / count_gpu_busy);
+    if (count_gpu_freq > 0) hw_end.gpu_freq_hz = static_cast<uint64_t>(sum_gpu_freq / count_gpu_freq);
+    if (count_gpu_temp > 0) hw_end.gpu_temp_mdeg = static_cast<int32_t>(sum_gpu_temp / count_gpu_temp);
+    if (count_gpu_vram > 0) hw_end.gpu_vram_used_bytes = static_cast<uint64_t>(sum_gpu_vram / count_gpu_vram);
+    if (count_nvme_temp > 0) hw_end.nvme_temp_composite_mdeg = static_cast<int32_t>(sum_nvme_temp / count_nvme_temp);
+
+    // 3. Construct synthetic zero-base proc1 and accumulated delta proc2
+    std::vector<ProcessSample> proc_zero;
+    std::vector<ProcessSample> proc_delta;
+    proc_zero.reserve(accumulated_procs.size());
+    proc_delta.reserve(accumulated_procs.size());
+
+    for (const auto& [pid, acc] : accumulated_procs) {
+        ProcessSample z{};
+        z.pid = pid;
+        z.ppid = acc.ppid;
+        z.comm = acc.comm;
+        z.uid = acc.uid;
+        proc_zero.push_back(z);
+
+        proc_delta.push_back(acc);
+    }
+
+    auto report = compute_attribution(hw_start, hw_end, proc_zero, proc_delta, top_n);
+    report.sample_count = num_intervals;
+    auto dur_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(hw_end.timestamp - hw_start.timestamp).count();
+    double total_sec = static_cast<double>(dur_ns) / 1'000'000'000.0;
+    report.is_short_window = (total_sec < 3.0);
+    double total_sys_power = report.hardware.total_system_watts > 0.0 ? report.hardware.total_system_watts :
+        (report.hardware.cpu_package_watts + report.hardware.gpu_watts + report.hardware.display_watts +
+         report.hardware.fan_estimated_watts + report.hardware.storage_estimated_watts + report.hardware.uncore_and_platform_watts);
+    report.total_energy_joules = total_sys_power * total_sec;
+
+    return report;
+}
+
 } // namespace wattcurb::policy
+

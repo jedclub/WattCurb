@@ -25,6 +25,8 @@ All documents follow the Ref-ID naming standard:
 | [`REF-REQ-009`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-006-cpuid-simd-optimization.md) | Compile-Time SIMD & Dynamic CPUID Hardware Specialization Specification | Approved | [`REF-ARCH-003`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-003-pgo-pmu-pipeline.md), [`REF-ARCH-004`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-004-resident-daemon-event-loop.md) |
 | [`REF-REQ-010`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-007-extreme-hardware-telemetry.md) | Full-Domain Physical Hardware Power & Telemetry Probe Specification | Approved | [`REF-ARCH-002`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-002-profiler-implementation.md), [`REF-ARCH-004`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-004-resident-daemon-event-loop.md) |
 | [`REF-REQ-011`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-008-process-hardware-feature-tracking.md) | Process-to-Hardware Feature Attribution & Physical Causation Tracking Engine | Approved | [`REF-ARCH-002`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-002-profiler-implementation.md), [`REF-RES-003`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-003-hardware-to-process-attribution.md) |
+| [`REF-REQ-012`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-009-continuous-window-evaluation.md) | Multi-Sample Continuous Window Evaluation & Steady-State Telemetry | Approved | [`REF-ARCH-002`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-002-profiler-implementation.md), [`REF-ARCH-004`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-004-resident-daemon-event-loop.md) |
+
 
 ---
 

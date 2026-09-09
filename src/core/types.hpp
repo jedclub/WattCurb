@@ -197,7 +197,7 @@ struct DomainCulprit {
     std::vector<ProcessDomainShare> top_culprits;
 };
 
-// Implements REF-REQ-005, REF-REQ-011 & REF-ARCH-002
+// Implements REF-REQ-005, REF-REQ-011, REF-REQ-012 & REF-ARCH-002
 struct AnalysisReportData {
     std::chrono::milliseconds sample_duration{0};
     HardwarePowerBreakdown hardware;
@@ -205,6 +205,10 @@ struct AnalysisReportData {
     std::vector<DomainCulprit> domain_culprits;
     size_t total_monitored_processes{0};
     uint64_t total_system_wakeups_per_sec{0};
+    size_t sample_count{1};
+    double total_energy_joules{0.0};
+    bool is_short_window{false};
 };
+
 
 } // namespace wattcurb

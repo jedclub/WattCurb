@@ -18,6 +18,14 @@ public:
         size_t top_n = 15
     ) const;
 
+    // Implements REF-REQ-012 (Continuous Multi-Sample Window Evaluation)
+    [[nodiscard]] AnalysisReportData compute_windowed_attribution(
+        const std::vector<HardwareSample>& hw_samples,
+        const std::vector<std::vector<ProcessSample>>& proc_samples,
+        size_t top_n = 15
+    ) const;
+
+
 private:
     [[nodiscard]] HardwarePowerBreakdown compute_hardware_power(
         const HardwareSample& hw1,

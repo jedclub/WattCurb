@@ -121,6 +121,39 @@ void test_attribution_engine() {
     std::cout << " [PASS] test_attribution_engine\n";
 }
 
+void test_windowed_attribution_engine() {
+    auto now = std::chrono::steady_clock::now();
+    std::vector<wattcurb::HardwareSample> hw_list;
+    std::vector<std::vector<wattcurb::ProcessSample>> proc_list;
+
+    for (int i = 0; i < 4; ++i) {
+        wattcurb::HardwareSample h;
+        h.timestamp = now + std::chrono::seconds(i);
+        h.battery_power_uw = 15'000'000;
+        h.is_discharging = true;
+        h.gpu_power_uw = 6'000'000;
+        hw_list.push_back(h);
+
+        std::vector<wattcurb::ProcessSample> procs = {
+            {.pid = 201, .comm = "continuous_worker", .utime_ticks = static_cast<uint64_t>(100 + i * 50), .stime_ticks = 10},
+            {.pid = 202, .comm = "ephemeral_task", .utime_ticks = (i == 2 ? 30ULL : 0ULL), .stime_ticks = 0}
+        };
+        proc_list.push_back(procs);
+    }
+
+    wattcurb::policy::AttributionEngine engine;
+    auto report = engine.compute_windowed_attribution(hw_list, proc_list, 5);
+
+    assert(report.sample_count == 3);
+    assert(report.sample_duration.count() >= 3000);
+    assert(!report.is_short_window);
+    assert(report.total_energy_joules > 0.0);
+    assert(report.top_processes.size() >= 1);
+    assert(report.top_processes[0].pid == 201);
+    std::cout << " [PASS] test_windowed_attribution_engine\n";
+}
+
+
 void test_oracle_gate_performance_benchmark() {
     std::cout << " [ORACLE GATE] Running micro-benchmark on zero-allocation parser...\n";
     std::string sample_line = "54321 (bench_proc) R 1 1 1 0 0 0 0 0 0 0 1000 500 0 0 20 0 1 0 999 100 200";
@@ -309,6 +342,7 @@ int main() {
     test::test_proc_io_parsing();
     test::test_drm_fdinfo_parsing();
     test::test_attribution_engine();
+    test::test_windowed_attribution_engine();
     test::test_singleton_lock();
     test::test_persistent_hw_probe();
     test::test_oracle_gate_performance_benchmark();

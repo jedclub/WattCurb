@@ -47,9 +47,23 @@ void ReportGenerator::render_terminal(const AnalysisReportData& r, std::ostream&
     out << RESET;
 
     out << DIM << " Observation Window : " << RESET << BOLD << r.sample_duration.count() << " ms" << RESET;
+    if (r.sample_count > 1) {
+        out << DIM << " (" << r.sample_count << " continuous samples)" << RESET;
+    }
+    if (r.total_energy_joules > 0.0) {
+        out << DIM << " | Total Energy : " << RESET << BOLD << std::fixed << std::setprecision(1) << r.total_energy_joules << " J" << RESET;
+    }
     out << DIM << " | Monitored Processes : " << RESET << BOLD << r.total_monitored_processes << RESET;
     out << DIM << " | System Wakeups : " << RESET << BOLD << r.total_system_wakeups_per_sec << " /sec" << RESET;
     out << "\n";
+
+    if (r.is_short_window) {
+        out << YELLOW << " [!] Notice: Short evaluation window (" << std::fixed << std::setprecision(1)
+            << (static_cast<double>(r.sample_duration.count()) / 1000.0)
+            << "s). Physical hardware telemetry (Battery Fuel Gauge, Fan Thermal Lag, NVMe APST) may exhibit transient variance.\n"
+            << "            Use '--duration 10' or '-c 5' for sustained attribution without transient noise." << RESET << "\n";
+    }
+
 
     // 1. Hardware Power Breakdown Section
     out << "\n" << BOLD << "[1] Physical Hardware Power Breakdown" << RESET << "\n";
@@ -206,6 +220,9 @@ void ReportGenerator::render_terminal(const AnalysisReportData& r, std::ostream&
 void ReportGenerator::render_json(const AnalysisReportData& r, std::ostream& out) {
     out << "{\n";
     out << "  \"sample_duration_ms\": " << r.sample_duration.count() << ",\n";
+    out << "  \"sample_count\": " << r.sample_count << ",\n";
+    out << "  \"total_energy_joules\": " << r.total_energy_joules << ",\n";
+    out << "  \"is_short_window\": " << (r.is_short_window ? "true" : "false") << ",\n";
     out << "  \"total_monitored_processes\": " << r.total_monitored_processes << ",\n";
     out << "  \"total_system_wakeups_per_sec\": " << r.total_system_wakeups_per_sec << ",\n";
     out << "  \"hardware_breakdown\": {\n";
