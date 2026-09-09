@@ -9,6 +9,11 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Optimization Options
+option(WATTCURB_ENABLE_LTO "Enable Link-Time Optimization" ON)
+option(WATTCURB_ENABLE_PGO_GEN "Enable PGO Profile Generation (-fprofile-generate)" OFF)
+option(WATTCURB_ENABLE_PGO_USE "Enable PGO Profile Usage (-fprofile-use)" OFF)
+
 # Compiler optimization and warning flags
 add_compile_options(
     -Wall
@@ -17,8 +22,28 @@ add_compile_options(
     -Wconversion
     -Wsign-conversion
     -O3
+    -march=native
     -fno-omit-frame-pointer
 )
+
+if(WATTCURB_ENABLE_LTO)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
+    if(ipo_supported)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endif()
+endif()
+
+if(WATTCURB_ENABLE_PGO_GEN)
+    message(STATUS "PGO: Instrumentation generation enabled (-fprofile-generate)")
+    add_compile_options(-fprofile-generate)
+    add_link_options(-fprofile-generate)
+elseif(WATTCURB_ENABLE_PGO_USE)
+    message(STATUS "PGO: Profile feedback use enabled (-fprofile-use)")
+    add_compile_options(-fprofile-use -fprofile-correction -Wno-error=coverage-mismatch)
+    add_link_options(-fprofile-use -fprofile-correction)
+endif()
+
 
 # Core Library Sources
 set(WATTCURB_LIB_SOURCES
@@ -40,3 +65,16 @@ enable_testing()
 add_executable(wattcurb_tests tests/test_units.cpp)
 target_link_libraries(wattcurb_tests PRIVATE wattcurb_lib)
 add_test(NAME OracleGate COMMAND wattcurb_tests)
+
+# Custom Target: Generate Verbose Assembly for Hot Paths
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/asm)
+add_custom_target(wattcurb_asm
+    COMMAND ${CMAKE_CXX_COMPILER} -std=c++23 -O3 -march=native -fverbose-asm -masm=intel -S
+            -I${CMAKE_SOURCE_DIR}/src
+            ${CMAKE_SOURCE_DIR}/src/proc/process_analyzer.cpp -o ${CMAKE_BINARY_DIR}/asm/process_analyzer.s
+    COMMAND ${CMAKE_CXX_COMPILER} -std=c++23 -O3 -march=native -fverbose-asm -masm=intel -S
+            -I${CMAKE_SOURCE_DIR}/src
+            ${CMAKE_SOURCE_DIR}/src/policy/attribution_engine.cpp -o ${CMAKE_BINARY_DIR}/asm/attribution_engine.s
+    COMMENT "Generating verbose Intel-syntax assembly dumps in build/asm/..."
+)
+

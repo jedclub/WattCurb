@@ -110,3 +110,45 @@ WattCurb must not treat power as a monolithic system-wide number. It must attrib
    - `AGENTS.md`, source code identifiers, comments, and formal technical docs are maintained in English (or bilingual as needed) to ensure technical precision and compatibility with global engineering standards.
 3. **Non-Intrusive Execution**:
    - The daemon must never compromise system responsiveness. Throttling and freezing actions must be progressive and adhere strictly to safe priority levels (`SCHED_IDLE`, cgroups v2 freezing, affinity masking) before considering process termination.
+
+---
+
+## 8. Release Build Optimization, PMU/ASM Analysis & PGO Pipeline
+
+Release builds must adhere to an empirical, hardware-verified optimization workflow:
+
+1. **PMU Hardware Counter & Assembly (ASM) Performance Audit**:
+   - Release binaries must undergo hardware Performance Monitoring Unit (PMU) analysis (`perf stat` tracking instructions, cycles, IPC, L1-dcache-load-misses, dTLB-load-misses, branch-misses).
+   - Generate and inspect assembly dumps (`-S -fverbose-asm` / `objdump -d -M intel`) to verify:
+     - Vectorization (SIMD / AVX2 / AVX-512 where applicable).
+     - Elimination of dead stores, unnecessary branch jumps, and function inlining verification.
+     - Confirmation that no unintended runtime heap allocations or exception handling landing pads are generated in the inner monitoring loop.
+2. **Profile-Guided Optimization (PGO) Build Pipeline**:
+   - The production build system must support a 2-stage PGO pipeline:
+     - **Stage 1 (Instrumentation)**: Compile with `-fprofile-generate`, `-O3`, and `-flto=auto`.
+     - **Stage 2 (Representative Profile Training)**: Execute automated representative workloads (profiling typical desktop/server process loads).
+     - **Stage 3 (Optimized Compilation)**: Compile the final production artifact with `-fprofile-use`, `-fprofile-correction`, and Link-Time Optimization (`-flto=auto`).
+   - Deliver an empirical performance report documenting IPC gains, cache miss reductions, and latency improvements over standard `-O3`.
+
+---
+
+## 9. C++23 Zero-Cost Abstractions, Cache-Locality & Minimal Memory Footprint
+
+To achieve sub-milliwatt daemon overhead and preserve host battery, software architecture must be tailored to CPU hardware realities:
+
+1. **Clean Layered Separation via Zero-Cost Abstractions**:
+   - Decompose code cleanly into modular subsystems (Hardware Probes, Process Analyzers, Attribution Policy, Mitigation Actuators).
+   - Enforce abstractions using compile-time C++23 mechanisms:
+     - C++23 Concepts and constraints instead of runtime `vtable` virtual dispatch in hot paths.
+     - `constexpr` and `consteval` for compile-time lookup tables, unit conversions, and bitmask calculations.
+     - `std::expected` and `std::optional` for zero-overhead, non-allocating error handling.
+2. **L1 Data (L1D) & Instruction (L1I) Cache Hit Maximization**:
+   - Layout hot structures contiguously to fit inside L1 Data Cache (typically 32 KB ~ 48 KB per core).
+   - Struct-of-Arrays (SoA) or Hot/Cold field splitting: isolate frequently accessed counters (ticks, engine ns, wakeups) from cold string names and metadata.
+   - Cache-line alignment: align hot structures to 64 bytes (`alignas(64)`) to avoid false sharing and misaligned cache line splits.
+   - Keep loop bodies small and tight to fit entirely inside the CPU's L1 Instruction Cache (L1I) and decoded loop buffer.
+3. **TLB & dTLB Miss Minimization**:
+   - Zero dynamic heap allocation (`new`, `malloc`, reallocation of `std::vector`/`std::string`) during steady-state profiling loops.
+   - Eliminate pointer chasing: replace node-based structures (`std::map`, `std::list`, pointers to pointers) with contiguous flat arrays, `std::span`, and fixed-capacity stack buffers.
+   - Restrict the working set memory footprint to a single memory page or small contiguous arena to prevent TLB cache evictions.
+

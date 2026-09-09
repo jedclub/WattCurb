@@ -14,6 +14,7 @@ void test_proc_stat_parsing() {
     wattcurb::ProcessSample sample;
     bool ok = wattcurb::proc::ProcessAnalyzer::parse_proc_stat(mock_stat, sample);
     assert(ok && "parse_proc_stat should succeed");
+    (void)ok;
     assert(sample.pid == 10523);
     assert(sample.comm == "Web Content");
     assert(sample.utime_ticks == 450);
@@ -32,6 +33,7 @@ void test_proc_status_parsing() {
     wattcurb::ProcessSample sample;
     bool ok = wattcurb::proc::ProcessAnalyzer::parse_proc_status(mock_status, sample);
     assert(ok && "parse_proc_status should succeed");
+    (void)ok;
     assert(sample.uid == 1000);
     assert(sample.voluntary_ctxt_switches == 12543);
     assert(sample.nonvoluntary_ctxt_switches == 892);
@@ -49,6 +51,7 @@ void test_proc_io_parsing() {
     wattcurb::ProcessSample sample;
     bool ok = wattcurb::proc::ProcessAnalyzer::parse_proc_io(mock_io, sample);
     assert(ok && "parse_proc_io should succeed");
+    (void)ok;
     assert(sample.read_bytes == 4096000);
     assert(sample.write_bytes == 8192000);
     std::cout << " [PASS] test_proc_io_parsing\n";
@@ -65,6 +68,7 @@ void test_drm_fdinfo_parsing() {
     wattcurb::ProcessSample sample;
     bool ok = wattcurb::proc::ProcessAnalyzer::parse_drm_fdinfo(mock_fdinfo, sample);
     assert(ok && "parse_drm_fdinfo should succeed");
+    (void)ok;
     assert(sample.drm_engine_gfx_ns == 160000000000ULL);
     assert(sample.drm_engine_compute_ns == 2000000000ULL);
     assert(sample.drm_vram_kib == 32768);
