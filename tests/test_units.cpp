@@ -202,7 +202,46 @@ void test_simd_scanner() {
     const char* s_found = wattcurb::core::simd::find_char_fast(short_str.data(), short_str.data() + short_str.size(), ':');
     assert((s_found - short_str.data()) == 5 && "Short string search must succeed");
 
+    // Test whitespace skipping and finding
+    std::string ws_data = "    \t  \t  12345    \t  67890";
+    const char* ws_cur = ws_data.data();
+    const char* ws_end = ws_cur + ws_data.size();
+
+    // Skip leading whitespaces
+    wattcurb::core::simd::skip_whitespace_simd(ws_cur, ws_end);
+    assert(*ws_cur == '1' && "Should land on '1'");
+
+    // Find next whitespace
+    wattcurb::core::simd::find_whitespace_simd(ws_cur, ws_end);
+    assert(*ws_cur == ' ' && "Should land on space after '12345'");
+
     std::cout << " [PASS] test_simd_scanner\n";
+}
+
+void test_hw_isa_primitives() {
+    // 1. Test clear_cacheline_64
+    alignas(64) char cacheline_buf[128];
+    std::memset(cacheline_buf, 0xAA, sizeof(cacheline_buf));
+    wattcurb::core::hw_isa::clear_cacheline_64(cacheline_buf);
+
+    for (int i = 0; i < 64; ++i) {
+        assert(cacheline_buf[i] == 0 && "First 64 bytes must be zeroed by clzero/memset");
+    }
+    for (int i = 64; i < 128; ++i) {
+        assert(cacheline_buf[i] == static_cast<char>(0xAA) && "Trailing 64 bytes untouched");
+    }
+
+    // 2. Test read_core_id
+    uint32_t core_id = wattcurb::core::hw_isa::read_core_id();
+    assert(core_id < 256 && "Core ID must be within valid CPU core range");
+
+    // 3. Test read_tsc
+    uint32_t aux = 0;
+    uint64_t tsc1 = wattcurb::core::hw_isa::read_tsc(&aux);
+    uint64_t tsc2 = wattcurb::core::hw_isa::read_tsc();
+    assert(tsc2 >= tsc1 && "TSC must be monotonically non-decreasing");
+
+    std::cout << " [PASS] test_hw_isa_primitives (Core ID=" << core_id << ", TSC=" << tsc1 << ")\n";
 }
 
 } // namespace test
@@ -210,6 +249,7 @@ void test_simd_scanner() {
 int main() {
     std::cout << "=== WattCurb Unit Test Suite & Oracle Gate Verifier ===\n";
     test::test_cpu_features();
+    test::test_hw_isa_primitives();
     test::test_simd_scanner();
     test::test_proc_stat_parsing();
     test::test_proc_status_parsing();
