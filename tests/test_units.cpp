@@ -163,8 +163,20 @@ void test_persistent_hw_probe() {
     auto s1 = probe.capture_sample();
     auto s2 = probe.capture_sample();
     assert(s2.timestamp >= s1.timestamp);
-    (void)s1;
-    (void)s2;
+
+    std::cout << " [INFO] Hardware Probe Sample Captured:\n"
+              << "   - CPU Temp: " << (s2.cpu_temp_mdeg.has_value() ? std::to_string(static_cast<double>(*s2.cpu_temp_mdeg) / 1000.0) + " C" : "N/A") << "\n"
+              << "   - CPU Cores Online: " << s2.cpu_cores_online << ", Avg Freq: " << (s2.cpu_freq_avg_khz / 1000) << " MHz\n"
+              << "   - C-State POLL=" << s2.cstate_time_us[0] << "us, C1=" << s2.cstate_time_us[1] << "us, C2=" << s2.cstate_time_us[2] << "us, C3=" << s2.cstate_time_us[3] << "us\n"
+              << "   - GPU Power: " << (s2.gpu_power_uw.has_value() ? std::to_string(static_cast<double>(*s2.gpu_power_uw) / 1e6) + " W" : "N/A") << "\n"
+              << "   - GPU Busy: " << (s2.gpu_busy_percent.has_value() ? std::to_string(*s2.gpu_busy_percent) + "%" : "N/A") << "\n"
+              << "   - Fan RPM: " << (s2.fan_rpm.has_value() ? std::to_string(*s2.fan_rpm) : "N/A") << "\n"
+              << "   - Battery Discharging: " << (s2.is_discharging ? "true" : "false") << ", AC Online: " << (s2.is_ac_online ? "true" : "false") << "\n"
+              << "   - Battery Health: " << (s2.battery_energy_full_uwh && s2.battery_energy_full_design_uwh ? std::to_string((static_cast<double>(*s2.battery_energy_full_uwh) * 100.0) / static_cast<double>(*s2.battery_energy_full_design_uwh)) + "%" : "N/A") << "\n"
+              << "   - NVMe Status: " << (s2.nvme_active ? "active" : "suspended") << ", Read sectors: " << s2.disk_read_sectors << "\n";
+
+    assert(s2.cpu_cores_online > 0 && "Must detect at least 1 online CPU core");
+    assert(s2.cstate_time_us[1] > 0 || s2.cstate_time_us[2] > 0 || s2.cstate_time_us[3] > 0);
     std::cout << " [PASS] test_persistent_hw_probe\n";
 }
 

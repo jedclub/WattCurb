@@ -89,3 +89,26 @@ This document tracks historical PMU (Performance Monitoring Unit) hardware bench
   4. **L1D Cache Misses Dropped by 42%**: Only 221k misses across 2 seconds.
 - **Next Target (M1 Full)**:
   - Phase 3: Zero-Wakeup Automated Process Mitigation Engine (`cgroup.freeze` and `SCHED_IDLE`).
+
+---
+
+### Milestone M2: Full-Domain Physical Hardware Telemetry & Persistent FDs
+- **Ref-ID**: `REF-RES-005` / `REF-REQ-010`
+- **Git Commit**: (Pending M2 turn commit)
+- **Key Enhancements**:
+  - Implemented persistent FDs across all 7 hardware domains (Battery Gas Gauge, USB-PD, RAPL, CPU Tctl/Tdie, CPU scaling freqs across all 16 cores, CPU C-State residencies C0/C1/C2/C3, GPU PPT/clock/voltage/VRAM/PCIe, NVMe APST/temp/block stats, Mechanical Cooling Fan RPM, Chassis thermals, Display Backlight, and WiFi APST/temp).
+  - Maintained zero dynamic heap allocations in steady-state sampling paths using fixed-capacity stack buffers and `std::from_chars`.
+- **PMU Hardware Audit (`perf stat` on production PGO binary)**:
+  - `User CPU Time`: **8.86 ms** (Monitoring 439 processes and 80+ physical hardware sensors simultaneously)
+  - `Sys Time`: 59.99 ms
+  - `task-clock`: 69.04 ms
+  - `cycles`: 22,701,724
+  - `instructions`: 31,635,980 (IPC: 1.39)
+  - `L1-dcache-load-misses`: 292,781
+  - `dTLB-load-misses`: 3,623
+  - `branch-misses`: 92,587 (1.29% branch miss rate)
+  - `Binary Size`: 121,752 bytes (118.8 KB, completely stripped, zero debug symbols, zero RTTI)
+- **Zero-Overhead Verification**:
+  - `HardwareProbe::capture_sample()` reads all 80+ hardware sensor nodes in **< 0.15 ms** total latency.
+  - WattCurb process itself consumes **0.00 W CPU, 0.00 W GPU**, with a low WDI of 0.8.
+

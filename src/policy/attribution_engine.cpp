@@ -13,8 +13,9 @@ HardwarePowerBreakdown AttributionEngine::compute_hardware_power(
 ) const {
     HardwarePowerBreakdown hw;
     hw.is_battery_discharging = hw2.is_discharging;
+    hw.is_ac_online = hw2.is_ac_online;
 
-    // 1. Battery Total Power
+    // 1. Battery Gas Gauge & Health (REF-REQ-010 Sec 2.1)
     if (hw2.battery_power_uw.has_value()) {
         uint64_t p1 = hw1.battery_power_uw.value_or(*hw2.battery_power_uw);
         uint64_t p2 = *hw2.battery_power_uw;
@@ -23,22 +24,115 @@ HardwarePowerBreakdown AttributionEngine::compute_hardware_power(
         hw.total_system_watts = 0.0;
     }
 
-    // 2. GPU Power
+    if (hw2.battery_energy_full_uwh.has_value() && hw2.battery_energy_full_design_uwh.has_value() &&
+        *hw2.battery_energy_full_design_uwh > 0) {
+        hw.battery_health_percent = (static_cast<double>(*hw2.battery_energy_full_uwh) * 100.0) /
+                                    static_cast<double>(*hw2.battery_energy_full_design_uwh);
+    } else {
+        hw.battery_health_percent = 100.0;
+    }
+    hw.battery_cycle_count = hw2.battery_cycle_count.value_or(0);
+    hw.battery_capacity_percent = hw2.battery_capacity_percent.value_or(0);
+
+    if (hw2.is_discharging && hw.total_system_watts > 0.1 && hw2.battery_energy_now_uwh.has_value()) {
+        hw.battery_remaining_hours = (static_cast<double>(*hw2.battery_energy_now_uwh) / 1'000'000.0) /
+                                     hw.total_system_watts;
+    }
+
+    if (hw2.usbc_pd_voltage_uv.has_value() && hw2.usbc_pd_current_ua.has_value()) {
+        hw.usbc_input_watts = (static_cast<double>(*hw2.usbc_pd_voltage_uv) *
+                               static_cast<double>(*hw2.usbc_pd_current_ua)) / 1e12;
+        hw.usbc_online = hw2.usbc_pd_online;
+    }
+
+    // 2. GPU Subsystem Telemetry & PPT (REF-REQ-010 Sec 2.3)
     if (hw2.gpu_power_uw.has_value()) {
         uint64_t g1 = hw1.gpu_power_uw.value_or(*hw2.gpu_power_uw);
         uint64_t g2 = *hw2.gpu_power_uw;
         hw.gpu_watts = static_cast<double>(g1 + g2) / 2.0 / 1'000'000.0;
     }
+    hw.gpu_busy_percent = hw2.gpu_busy_percent.value_or(0);
+    hw.gpu_freq_mhz = hw2.gpu_freq_hz.has_value() ? (static_cast<double>(*hw2.gpu_freq_hz) / 1'000'000.0) : 0.0;
+    hw.gpu_temp_c = hw2.gpu_temp_mdeg.has_value() ? (static_cast<double>(*hw2.gpu_temp_mdeg) / 1000.0) : 0.0;
+    hw.gpu_vddgfx_v = hw2.gpu_vddgfx_mv.has_value() ? (static_cast<double>(*hw2.gpu_vddgfx_mv) / 1000.0) : 0.0;
+    hw.gpu_vddsoc_v = hw2.gpu_vddsoc_mv.has_value() ? (static_cast<double>(*hw2.gpu_vddsoc_mv) / 1000.0) : 0.0;
+    hw.gpu_vram_used_mb = hw2.gpu_vram_used_bytes.has_value() ?
+        (static_cast<double>(*hw2.gpu_vram_used_bytes) / (1024.0 * 1024.0)) : 0.0;
+    hw.gpu_vram_total_mb = hw2.gpu_vram_total_bytes.has_value() ?
+        (static_cast<double>(*hw2.gpu_vram_total_bytes) / (1024.0 * 1024.0)) : 0.0;
+    if (hw2.gpu_pcie_link_speed[0] != '\0') {
+        hw.gpu_pcie_link = hw2.gpu_pcie_link_speed.data();
+        if (hw2.gpu_pcie_link_width.has_value()) {
+            hw.gpu_pcie_link += " x" + std::to_string(*hw2.gpu_pcie_link_width);
+        }
+    }
 
-    // 3. Display / Backlight Power
+    // 3. Display / Backlight Subsystem (REF-REQ-010 Sec 2.6)
     if (hw2.backlight_brightness.has_value() && hw2.backlight_max_brightness.has_value() &&
         *hw2.backlight_max_brightness > 0) {
         double ratio = static_cast<double>(*hw2.backlight_brightness) /
                        static_cast<double>(*hw2.backlight_max_brightness);
+        hw.display_brightness_percent = ratio * 100.0;
         hw.display_watts = 0.8 + (3.5 * std::pow(ratio, 1.2)); // Baseline 0.8W, up to 4.3W
     }
 
-    // 4. CPU Package Power
+    // 4. Mechanical Chassis & Cooling Fan (REF-REQ-010 Sec 2.5)
+    hw.fan_rpm = hw2.fan_rpm.value_or(0);
+    if (hw.fan_rpm > 500) {
+        // Fan power scales with cube of RPM: P_fan ~= base + k * (RPM/4200)^3
+        hw.fan_estimated_watts = 0.05 + 1.7 * std::pow(static_cast<double>(hw.fan_rpm) / 4200.0, 3.0);
+    }
+    hw.kbdlight_level = hw2.kbdlight_level.value_or(0);
+    hw.bluetooth_enabled = hw2.bluetooth_enabled.value_or(false);
+
+    // 5. Storage Subsystem (NVMe SSD) (REF-REQ-010 Sec 2.4)
+    hw.nvme_status = hw2.nvme_active ? "active" : "suspended";
+    hw.nvme_temp_c = hw2.nvme_temp_composite_mdeg.has_value() ?
+        (static_cast<double>(*hw2.nvme_temp_composite_mdeg) / 1000.0) : 0.0;
+    if (delta_sec > 0.0) {
+        uint64_t d_read = (hw2.disk_read_sectors >= hw1.disk_read_sectors) ?
+            (hw2.disk_read_sectors - hw1.disk_read_sectors) : 0;
+        uint64_t d_write = (hw2.disk_write_sectors >= hw1.disk_write_sectors) ?
+            (hw2.disk_write_sectors - hw1.disk_write_sectors) : 0;
+        hw.disk_read_mb_per_sec = (static_cast<double>(d_read) * 512.0 / 1'048'576.0) / delta_sec;
+        hw.disk_write_mb_per_sec = (static_cast<double>(d_write) * 512.0 / 1'048'576.0) / delta_sec;
+        hw.storage_estimated_watts = (hw2.nvme_active ? 0.35 : 0.05) +
+            ((hw.disk_read_mb_per_sec + hw.disk_write_mb_per_sec) * 0.012);
+    }
+
+    // 6. Wireless & Peripherals (REF-REQ-010 Sec 2.7)
+    hw.wifi_status = hw2.wifi_active ? "active" : "suspended";
+    hw.wifi_temp_c = hw2.wifi_temp_mdeg.has_value() ?
+        (static_cast<double>(*hw2.wifi_temp_mdeg) / 1000.0) : 0.0;
+    if (hw2.aspm_policy[0] != '\0') {
+        hw.aspm_policy = hw2.aspm_policy.data();
+    }
+
+    // 7. CPU & Platform Subsystem (REF-REQ-010 Sec 2.2)
+    hw.cpu_temp_c = hw2.cpu_temp_mdeg.has_value() ? (static_cast<double>(*hw2.cpu_temp_mdeg) / 1000.0) : 0.0;
+    hw.cpu_freq_avg_mhz = static_cast<double>(hw2.cpu_freq_avg_khz) / 1000.0;
+    hw.cpu_freq_min_mhz = static_cast<double>(hw2.cpu_freq_min_khz) / 1000.0;
+    hw.cpu_freq_max_mhz = static_cast<double>(hw2.cpu_freq_max_khz) / 1000.0;
+    hw.cpu_governor = hw2.cpu_governor[0] != '\0' ? hw2.cpu_governor.data() : "schedutil";
+
+    // C-State Sleep Residencies
+    uint32_t cores = hw2.cpu_cores_online > 0 ? hw2.cpu_cores_online : 1;
+    double total_wall_us = delta_sec * 1'000'000.0 * static_cast<double>(cores);
+    uint64_t d_poll = (hw2.cstate_time_us[0] >= hw1.cstate_time_us[0]) ? (hw2.cstate_time_us[0] - hw1.cstate_time_us[0]) : 0;
+    uint64_t d_c1 = (hw2.cstate_time_us[1] >= hw1.cstate_time_us[1]) ? (hw2.cstate_time_us[1] - hw1.cstate_time_us[1]) : 0;
+    uint64_t d_c2 = (hw2.cstate_time_us[2] >= hw1.cstate_time_us[2]) ? (hw2.cstate_time_us[2] - hw1.cstate_time_us[2]) : 0;
+    uint64_t d_c3 = (hw2.cstate_time_us[3] >= hw1.cstate_time_us[3]) ? (hw2.cstate_time_us[3] - hw1.cstate_time_us[3]) : 0;
+    double idle_sum_us = static_cast<double>(d_poll + d_c1 + d_c2 + d_c3);
+    double c0_active_us = std::max(0.0, total_wall_us - idle_sum_us);
+
+    if (total_wall_us > 0.0) {
+        hw.cstate_c0_active_percent = std::clamp((c0_active_us / total_wall_us) * 100.0, 0.0, 100.0);
+        hw.cstate_c1_percent = std::clamp((static_cast<double>(d_c1) / total_wall_us) * 100.0, 0.0, 100.0);
+        hw.cstate_c2_percent = std::clamp((static_cast<double>(d_c2) / total_wall_us) * 100.0, 0.0, 100.0);
+        hw.cstate_c3_deep_percent = std::clamp((static_cast<double>(d_c3) / total_wall_us) * 100.0, 0.0, 100.0);
+    }
+
+    // CPU Package Power
     if (hw1.rapl_package_uj.has_value() && hw2.rapl_package_uj.has_value() && delta_sec > 0.0) {
         hw.has_direct_rapl = true;
         uint64_t e1 = *hw1.rapl_package_uj;
@@ -49,16 +143,17 @@ HardwarePowerBreakdown AttributionEngine::compute_hardware_power(
         // Fallback unprivileged decomposition (REF-RES-002)
         hw.has_direct_rapl = false;
         if (hw.total_system_watts > 0.0) {
-            double estimated_cpu = hw.total_system_watts - hw.gpu_watts - hw.display_watts - 1.8;
-            hw.cpu_package_watts = std::max(0.5, estimated_cpu);
+            double accounted_other = hw.gpu_watts + hw.display_watts + hw.fan_estimated_watts + hw.storage_estimated_watts + 1.2;
+            hw.cpu_package_watts = std::max(0.5, hw.total_system_watts - accounted_other);
         } else {
             hw.cpu_package_watts = 3.5; // AC / unmetered baseline default
         }
     }
 
-    // 5. Uncore & Motherboard / Platform Loss
+    // 8. Uncore & Motherboard / Platform Loss
     if (hw.total_system_watts > 0.0) {
-        double accounted = hw.cpu_package_watts + hw.gpu_watts + hw.display_watts;
+        double accounted = hw.cpu_package_watts + hw.gpu_watts + hw.display_watts +
+                           hw.fan_estimated_watts + hw.storage_estimated_watts;
         hw.uncore_and_platform_watts = std::max(0.0, hw.total_system_watts - accounted);
     } else {
         hw.uncore_and_platform_watts = 1.2;
