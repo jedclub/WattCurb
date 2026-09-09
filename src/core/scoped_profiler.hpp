@@ -26,7 +26,7 @@ struct ProfileEntry {
 
 class ScopedProfilerRegistry {
 public:
-    static constexpr size_t MAX_ENTRIES = 64;
+    static constexpr size_t MAX_ENTRIES = 128;
 
     static ScopedProfilerRegistry& instance() noexcept {
         static ScopedProfilerRegistry reg;

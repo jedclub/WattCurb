@@ -29,6 +29,37 @@ bool read_file_to_stack_buf(const char* path, char* buf, size_t max_len, size_t&
     return true;
 }
 
+// Ultra-low overhead openat reader avoiding full VFS path walk from root (REF-REQ-009, REF-ARCH-005)
+inline bool read_fileat_to_stack_buf(int dirfd, const char* rel_path, char* buf, size_t max_len, size_t& out_bytes) noexcept {
+    int fd = ::openat(dirfd, rel_path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+
+    ssize_t bytes = ::read(fd, buf, max_len - 1);
+    ::close(fd);
+
+    if (bytes <= 0) return false;
+    buf[bytes] = '\0';
+    out_bytes = static_cast<size_t>(bytes);
+    return true;
+}
+
+// Inlined fast integer to ASCII subpath formatter (completely eliminates std::snprintf)
+inline void format_pid_subpath(char* out, int32_t pid, const char* subpath, size_t subpath_len) noexcept {
+    char* p = out;
+    uint32_t u = static_cast<uint32_t>(pid);
+    char digits[10];
+    int ti = 0;
+    do {
+        digits[ti++] = static_cast<char>('0' + (u % 10));
+        u /= 10;
+    } while (u > 0);
+    while (ti > 0) {
+        *p++ = digits[--ti];
+    }
+    std::memcpy(p, subpath, subpath_len);
+    p[subpath_len] = '\0';
+}
+
 static const ProcessSample* find_prev_sample(const std::vector<ProcessSample>& prev, int32_t pid) noexcept {
     auto it = std::lower_bound(prev.begin(), prev.end(), pid, [](const ProcessSample& s, int32_t p) noexcept {
         return s.pid < p;
@@ -83,6 +114,7 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
 
     DIR* proc_dir = ::opendir(procfs_root_.c_str());
     if (!proc_dir) return samples;
+    int proc_dfd = ::dirfd(proc_dir);
 
     struct dirent* proc_entry = nullptr;
     while ((proc_entry = ::readdir(proc_dir)) != nullptr) {
@@ -99,12 +131,12 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
         ProcessSample sample;
         sample.pid = pid;
 
-        // 1. Read /proc/[pid]/stat
-        std::snprintf(path_buf, sizeof(path_buf), "%s/%d/stat", procfs_root_.c_str(), pid);
+        // 1. Read /proc/[pid]/stat via openat (REF-REQ-009, REF-ARCH-005)
+        format_pid_subpath(path_buf, pid, "/stat", 5);
         size_t bytes = 0;
         {
             WATTCURB_PROFILE_SCOPE("proc.stat_read");
-            if (!read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
+            if (!read_fileat_to_stack_buf(proc_dfd, path_buf, read_buf, sizeof(read_buf), bytes)) {
                 continue;
             }
         }
@@ -153,8 +185,8 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
         // 2. Read /proc/[pid]/status
         {
             WATTCURB_PROFILE_SCOPE("proc.status_read_parse");
-            std::snprintf(path_buf, sizeof(path_buf), "%s/%d/status", procfs_root_.c_str(), pid);
-            if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
+            format_pid_subpath(path_buf, pid, "/status", 7);
+            if (read_fileat_to_stack_buf(proc_dfd, path_buf, read_buf, sizeof(read_buf), bytes)) {
                 parse_proc_status(std::string_view(read_buf, bytes), sample);
             }
         }
@@ -162,8 +194,8 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
         // 3. Read /proc/[pid]/io (may be permission restricted, gracefully ignore)
         {
             WATTCURB_PROFILE_SCOPE("proc.io_read_parse");
-            std::snprintf(path_buf, sizeof(path_buf), "%s/%d/io", procfs_root_.c_str(), pid);
-            if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
+            format_pid_subpath(path_buf, pid, "/io", 3);
+            if (read_fileat_to_stack_buf(proc_dfd, path_buf, read_buf, sizeof(read_buf), bytes)) {
                 parse_proc_io(std::string_view(read_buf, bytes), sample);
             }
         }
@@ -171,8 +203,8 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
         // 4. Read /proc/[pid]/statm (DRAM PSS & RSS - REF-REQ-013)
         {
             WATTCURB_PROFILE_SCOPE("proc.statm_read_parse");
-            std::snprintf(path_buf, sizeof(path_buf), "%s/%d/statm", procfs_root_.c_str(), pid);
-            if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
+            format_pid_subpath(path_buf, pid, "/statm", 6);
+            if (read_fileat_to_stack_buf(proc_dfd, path_buf, read_buf, sizeof(read_buf), bytes)) {
                 parse_proc_statm(std::string_view(read_buf, bytes), sample);
             }
         }
@@ -180,8 +212,8 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
         // 5. Read /proc/[pid]/timerslack_ns (Kernel Timer Coalescing - REF-REQ-013)
         {
             WATTCURB_PROFILE_SCOPE("proc.timerslack_read");
-            std::snprintf(path_buf, sizeof(path_buf), "%s/%d/timerslack_ns", procfs_root_.c_str(), pid);
-            if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
+            format_pid_subpath(path_buf, pid, "/timerslack_ns", 14);
+            if (read_fileat_to_stack_buf(proc_dfd, path_buf, read_buf, sizeof(read_buf), bytes)) {
                 uint64_t slack = 50000;
                 auto [ptr, ec_slack] = std::from_chars(read_buf, read_buf + bytes, slack);
                 if (ec_slack == std::errc()) sample.timerslack_ns = slack;
@@ -246,10 +278,17 @@ bool ProcessAnalyzer::read_pid_details(int32_t pid, ProcessSample& sample) const
 }
 
 void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample) const {
-    char fd_dir_path[128];
-    std::snprintf(fd_dir_path, sizeof(fd_dir_path), "%s/%d/fd", procfs_root_.c_str(), pid);
+    char rel_fd_path[32];
+    format_pid_subpath(rel_fd_path, pid, "/fd", 3);
 
-    DIR* dir = ::opendir(fd_dir_path);
+    char full_fd_path[128];
+    std::snprintf(full_fd_path, sizeof(full_fd_path), "%s/%s", procfs_root_.c_str(), rel_fd_path);
+
+    DIR* dir = nullptr;
+    {
+        WATTCURB_PROFILE_SCOPE("proc.fd_opendir");
+        dir = ::opendir(full_fd_path);
+    }
     if (!dir) return;
 
     char fdinfo_dir_path[128];
@@ -259,23 +298,34 @@ void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample) const 
     alignas(64) char symlink_buf[256];
     int dfd = ::dirfd(dir);
 
+    // 64-bit constants for 1-cycle string matching (REF-ARCH-005)
+    constexpr uint64_t SOCKET_PREFIX = 0x5b3a74656b636f73ULL; // "socket:["
+    constexpr uint64_t DRI_PREFIX    = 0x6972642f7665642fULL; // "/dev/dri"
+
     struct dirent* entry = nullptr;
-    while ((entry = ::readdir(dir)) != nullptr) {
-        if (entry->d_name[0] == '.') continue;
+    {
+        WATTCURB_PROFILE_SCOPE("proc.fd_readlink_loop");
+        while ((entry = ::readdir(dir)) != nullptr) {
+            if (entry->d_name[0] == '.') continue;
 
-        ssize_t len = ::readlinkat(dfd, entry->d_name, symlink_buf, sizeof(symlink_buf) - 1);
-        if (len <= 0) continue;
-        symlink_buf[len] = '\0';
+            ssize_t len = ::readlinkat(dfd, entry->d_name, symlink_buf, sizeof(symlink_buf) - 1);
+            if (len <= 0) continue;
+            symlink_buf[len] = '\0';
 
-        if (len >= 8 && std::memcmp(symlink_buf, "socket:[", 8) == 0) {
-            ++sample.open_sockets;
-        } else if (std::strstr(symlink_buf, "/dev/dri/") != nullptr) {
-            char info_path[160];
-            std::snprintf(info_path, sizeof(info_path), "%s/%s", fdinfo_dir_path, entry->d_name);
+            // 1-cycle 64-bit register comparison
+            if (len >= 8 && (*reinterpret_cast<const uint64_t*>(symlink_buf) == SOCKET_PREFIX)) {
+                ++sample.open_sockets;
+            } else if (len >= 9 && (*reinterpret_cast<const uint64_t*>(symlink_buf) == DRI_PREFIX) && symlink_buf[8] == '/') {
+                char info_path[160];
+                std::snprintf(info_path, sizeof(info_path), "%s/%s", fdinfo_dir_path, entry->d_name);
 
-            size_t bytes = 0;
-            if (read_file_to_stack_buf(info_path, fdinfo_buf, sizeof(fdinfo_buf), bytes)) {
-                parse_drm_fdinfo(std::string_view(fdinfo_buf, bytes), sample);
+                size_t bytes = 0;
+                {
+                    WATTCURB_PROFILE_SCOPE("proc.fd_drm_fdinfo");
+                    if (read_file_to_stack_buf(info_path, fdinfo_buf, sizeof(fdinfo_buf), bytes)) {
+                        parse_drm_fdinfo(std::string_view(fdinfo_buf, bytes), sample);
+                    }
+                }
             }
         }
     }
@@ -323,8 +373,8 @@ bool ProcessAnalyzer::parse_proc_stat(std::string_view content, ProcessSample& o
     const char* p_cur = content.data();
     out_sample.pid = parse_i32_fast(p_cur, content.data() + open_paren);
 
-    // Parse comm
-    out_sample.comm = std::string(content.substr(open_paren + 1, close_paren - open_paren - 1));
+    // Parse comm into zero-allocation ProcessComm (REF-ARCH-005)
+    out_sample.comm = ProcessComm(content.substr(open_paren + 1, close_paren - open_paren - 1));
 
     // Parse fields after ')'
     const char* cur = content.data() + close_paren + 1;

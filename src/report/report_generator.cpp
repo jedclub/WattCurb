@@ -160,7 +160,7 @@ void ReportGenerator::render_terminal(const AnalysisReportData& r, std::ostream&
     out << "------------------------------------------------------------------------------------------------------------------------\n";
 
     for (const auto& p : r.top_processes) {
-        std::string comm_trunc = p.comm.size() > 14 ? p.comm.substr(0, 13) + "…" : p.comm;
+        std::string comm_trunc = p.comm.size() > 14 ? p.comm.substr(0, 13) + "…" : std::string(p.comm.view());
         std::string core_str = p.cpu_core >= 0 ? ("C" + std::to_string(p.cpu_core) + (p.cross_ccx_migration ? "!" : "")) : "-";
         std::string pss_str = p.pss_kib > 0 ? (std::to_string(p.pss_kib / 1024) + "M") : "-";
         std::string skt_str = p.open_sockets > 0 ? std::to_string(p.open_sockets) : "-";
@@ -197,7 +197,7 @@ void ReportGenerator::render_terminal(const AnalysisReportData& r, std::ostream&
 
             for (const auto& c : d.top_culprits) {
                 out << "   -> PID " << std::left << std::setw(7) << c.pid
-                    << std::setw(18) << (c.comm.size() > 16 ? c.comm.substr(0, 15) + "…" : c.comm)
+                    << std::setw(18) << (c.comm.size() > 16 ? c.comm.substr(0, 15) + "…" : std::string(c.comm.view()))
                     << std::right << std::fixed << std::setprecision(2)
                     << std::setw(7) << c.watts << " W "
                     << "(" << std::setw(5) << std::setprecision(1) << c.share_percent << "%) "

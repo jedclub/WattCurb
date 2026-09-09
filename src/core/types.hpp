@@ -3,6 +3,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <string>
 #include <vector>
@@ -79,11 +80,49 @@ struct HardwareSample {
     std::array<char, 32> aspm_policy{};
 };
 
+// Zero-Allocation Fixed-Capacity Process Comm (REF-REQ-009, REF-ARCH-005)
+// TASK_COMM_LEN in Linux kernel is strictly 16 bytes.
+// Making ProcessSample TriviallyCopyable unlocks SIMD vector memmove/sort.
+struct ProcessComm {
+    std::array<char, 16> data{};
+
+    ProcessComm() noexcept = default;
+    ProcessComm(std::string_view sv) noexcept {
+        size_t len = std::min(sv.size(), size_t{15});
+        std::memcpy(data.data(), sv.data(), len);
+        data[len] = '\0';
+    }
+    ProcessComm(const char* s) noexcept {
+        if (!s) return;
+        size_t len = std::min(std::strlen(s), size_t{15});
+        std::memcpy(data.data(), s, len);
+        data[len] = '\0';
+    }
+
+    [[nodiscard]] const char* c_str() const noexcept { return data.data(); }
+    [[nodiscard]] std::string_view view() const noexcept { return std::string_view(data.data()); }
+    [[nodiscard]] size_t size() const noexcept { return std::strlen(data.data()); }
+    [[nodiscard]] bool empty() const noexcept { return data[0] == '\0'; }
+
+    [[nodiscard]] std::string substr(size_t pos = 0, size_t count = std::string_view::npos) const {
+        return std::string(view().substr(pos, count));
+    }
+
+    bool operator==(std::string_view sv) const noexcept { return view() == sv; }
+    bool operator==(const char* s) const noexcept { return std::strcmp(data.data(), s) == 0; }
+    bool operator==(const ProcessComm& o) const noexcept { return data == o.data; }
+
+    friend std::ostream& operator<<(std::ostream& os, const ProcessComm& pc) {
+        return os << pc.data.data();
+    }
+};
+
 // Implements REF-REQ-004, REF-REQ-011 & REF-ARCH-002
+// TriviallyCopyable POD: Zero-allocation, L1D-cache aligned
 struct ProcessSample {
     int32_t pid{0};
     int32_t ppid{0};
-    std::string comm;
+    ProcessComm comm{};
     uint32_t uid{0};
     uint64_t utime_ticks{0};
     uint64_t stime_ticks{0};
@@ -108,6 +147,8 @@ struct ProcessSample {
     uint64_t timerslack_ns{50000};
     uint32_t open_sockets{0};
 };
+
+static_assert(std::is_trivially_copyable_v<ProcessSample>, "ProcessSample must be TriviallyCopyable for SIMD acceleration");
 
 
 // Implements REF-REQ-001, REF-REQ-010 & REF-RES-002
@@ -176,7 +217,7 @@ struct HardwarePowerBreakdown {
 // Implements REF-REQ-004, REF-REQ-011 & REF-RES-003
 struct ProcessAttributedPower {
     int32_t pid{0};
-    std::string comm;
+    ProcessComm comm{};
     uint32_t uid{0};
     double cpu_watts{0.0};
     double gpu_watts{0.0};
@@ -210,7 +251,7 @@ struct ProcessAttributedPower {
 // Implements REF-REQ-011 (Hardware Domain Direct Attribution)
 struct ProcessDomainShare {
     int32_t pid{0};
-    std::string comm;
+    ProcessComm comm{};
     double watts{0.0};
     double share_percent{0.0};
     std::string detail;
