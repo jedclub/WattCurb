@@ -12,7 +12,8 @@ class ProcessAnalyzer {
 public:
     explicit ProcessAnalyzer(std::filesystem::path procfs_root = "/proc");
 
-    [[nodiscard]] std::vector<ProcessSample> capture_active_processes() const;
+    [[nodiscard]] std::vector<ProcessSample> capture_active_processes(
+        const std::vector<ProcessSample>* prev_samples = nullptr) const;
 
     // Exposed for granular unit testing (REF-TEST-002)
     static bool parse_proc_stat(std::string_view content, ProcessSample& out_sample);

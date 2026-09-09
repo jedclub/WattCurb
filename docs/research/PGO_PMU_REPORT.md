@@ -1,6 +1,6 @@
 # [REF-RES-004] WattCurb PGO & PMU Hardware Performance Audit Report
 
-- **Date**: 2026-09-09 16:20:36 UTC
+- **Date**: 2026-09-09 16:25:00 UTC
 - **Architecture**: x86_64 / 
 - **Compiler**: GCC 16 with C++23, Link-Time Optimization (-flto), and Native Tuning (-march=native)
 - **Profile-Guided Optimization**: Active (-fprofile-use -fprofile-correction)
@@ -15,7 +15,7 @@ The test suite was audited using hardware PMU counters via Linux `perf`:
 === WattCurb Unit Test Suite & Oracle Gate Verifier ===
  [INFO] CPU Features detected: AVX2=1 BMI1=1 BMI2=1 POPCNT=1 AVX512F=0
  [PASS] test_cpu_features
- [PASS] test_hw_isa_primitives (Core ID=10, TSC=13693776529106)
+ [PASS] test_hw_isa_primitives (Core ID=5, TSC=14142038132187)
  [PASS] test_ifunc_and_nttp_dispatch (GNU IFUNC & C++23 NTTP verified)
  [PASS] test_simd_scanner
  [PASS] test_proc_stat_parsing
@@ -26,16 +26,16 @@ The test suite was audited using hardware PMU counters via Linux `perf`:
  [PASS] test_singleton_lock
  [PASS] test_persistent_hw_probe
  [ORACLE GATE] Running micro-benchmark on zero-allocation parser...
- [ORACLE GATE] 100k stat parses completed in 13000 us (0.13 us/op)
+ [ORACLE GATE] 100k stat parses completed in 15654 us (0.15654 us/op)
  [ORACLE GATE PASS] Performance within extreme efficiency threshold (< 0.5 us/op)
 === ALL TESTS & ORACLE GATE PASSED SUCCESSFULLY ===
-57268523;;cycles:u;14042230;82.00;;
-103127550;;instructions:u;14032912;82.00;;
-27233;;cache-misses:u;14380395;84.00;;
-10743;;L1-dcache-load-misses:u;15274836;89.00;;
-1140;;dTLB-load-misses:u;15033142;88.00;;
-25070944;;branches:u;15032411;88.00;;
-17857;;branch-misses:u;14396134;84.00;;
+54856333;;cycles:u;15885734;84.00;;
+104991684;;instructions:u;15904500;84.00;;
+30660;;cache-misses:u;15507092;82.00;;
+11196;;L1-dcache-load-misses:u;15963471;84.00;;
+1177;;dTLB-load-misses:u;16887989;89.00;;
+25403294;;branches:u;16887307;89.00;;
+17769;;branch-misses:u;16299353;86.00;;
 ```
 
 ---

@@ -27,14 +27,28 @@ bool read_file_to_stack_buf(const char* path, char* buf, size_t max_len, size_t&
     return true;
 }
 
+static const ProcessSample* find_prev_sample(const std::vector<ProcessSample>& prev, int32_t pid) noexcept {
+    auto it = std::lower_bound(prev.begin(), prev.end(), pid, [](const ProcessSample& s, int32_t p) noexcept {
+        return s.pid < p;
+    });
+    if (it != prev.end() && it->pid == pid) {
+        return &(*it);
+    }
+    return nullptr;
+}
+
 } // namespace
 
 ProcessAnalyzer::ProcessAnalyzer(std::filesystem::path procfs_root)
     : procfs_root_(std::move(procfs_root)) {}
 
-std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes() const {
+std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
+    const std::vector<ProcessSample>* prev_samples) const {
     std::vector<ProcessSample> samples;
-    samples.reserve(384);
+    samples.reserve(448);
+
+    alignas(64) char read_buf[2048];
+    char path_buf[128];
 
     std::error_code ec;
     for (const auto& entry : std::filesystem::directory_iterator(procfs_root_, ec)) {
@@ -47,14 +61,68 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes() const {
 
         ProcessSample sample;
         sample.pid = pid;
-        if (read_pid_details(pid, sample)) {
-            // Only inspect DRM fds for user processes (kernel threads and system daemons don't render)
-            if (sample.ppid != 2 && sample.uid >= 1000) {
-                inspect_pid_drm_fds(pid, sample);
-            }
-            samples.push_back(std::move(sample));
+
+        // 1. Read /proc/[pid]/stat
+        std::snprintf(path_buf, sizeof(path_buf), "%s/%d/stat", procfs_root_.c_str(), pid);
+        size_t bytes = 0;
+        if (!read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
+            continue;
         }
+
+        if (!parse_proc_stat(std::string_view(read_buf, bytes), sample)) {
+            continue;
+        }
+
+        // Lazy Deep Inspection: Skip kernel threads (ppid == 2)
+        if (sample.ppid == 2) {
+            samples.push_back(std::move(sample));
+            continue;
+        }
+
+        // Lazy Deep Inspection: If previous sample exists and CPU ticks did not change,
+        // the process was completely sleeping! Skip reading /proc/[pid]/status, io, and fd/!
+        if (prev_samples != nullptr) {
+            const auto* prev = find_prev_sample(*prev_samples, sample.pid);
+            if (prev != nullptr &&
+                sample.utime_ticks == prev->utime_ticks &&
+                sample.stime_ticks == prev->stime_ticks) {
+                sample.uid = prev->uid;
+                sample.voluntary_ctxt_switches = prev->voluntary_ctxt_switches;
+                sample.nonvoluntary_ctxt_switches = prev->nonvoluntary_ctxt_switches;
+                sample.read_bytes = prev->read_bytes;
+                sample.write_bytes = prev->write_bytes;
+                sample.drm_engine_gfx_ns = prev->drm_engine_gfx_ns;
+                sample.drm_engine_compute_ns = prev->drm_engine_compute_ns;
+                sample.drm_vram_kib = prev->drm_vram_kib;
+                samples.push_back(std::move(sample));
+                continue;
+            }
+        }
+
+        // 2. Read /proc/[pid]/status
+        std::snprintf(path_buf, sizeof(path_buf), "%s/%d/status", procfs_root_.c_str(), pid);
+        if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
+            parse_proc_status(std::string_view(read_buf, bytes), sample);
+        }
+
+        // 3. Read /proc/[pid]/io (may be permission restricted, gracefully ignore)
+        std::snprintf(path_buf, sizeof(path_buf), "%s/%d/io", procfs_root_.c_str(), pid);
+        if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
+            parse_proc_io(std::string_view(read_buf, bytes), sample);
+        }
+
+        // 4. DRM fds: only inspect for user graphical processes (uid >= 1000)
+        if (sample.uid >= 1000) {
+            inspect_pid_drm_fds(pid, sample);
+        }
+
+        samples.push_back(std::move(sample));
     }
+
+    // Always return sorted by PID for O(log N) binary search lookup in next cycle
+    std::sort(samples.begin(), samples.end(), [](const ProcessSample& a, const ProcessSample& b) noexcept {
+        return a.pid < b.pid;
+    });
 
     return samples;
 }
@@ -64,7 +132,6 @@ bool ProcessAnalyzer::read_pid_details(int32_t pid, ProcessSample& sample) const
     alignas(64) char read_buf[2048];
     size_t bytes = 0;
 
-    // 1. Read /proc/[pid]/stat
     std::snprintf(path_buf, sizeof(path_buf), "%s/%d/stat", procfs_root_.c_str(), pid);
     if (!read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
         return false;
@@ -74,18 +141,15 @@ bool ProcessAnalyzer::read_pid_details(int32_t pid, ProcessSample& sample) const
         return false;
     }
 
-    // Lazy Deep Inspection: Kernel threads (ppid == 2) have no user status/io/drm
     if (sample.ppid == 2) {
         return true;
     }
 
-    // 2. Read /proc/[pid]/status
     std::snprintf(path_buf, sizeof(path_buf), "%s/%d/status", procfs_root_.c_str(), pid);
     if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
         parse_proc_status(std::string_view(read_buf, bytes), sample);
     }
 
-    // 3. Read /proc/[pid]/io (may be permission restricted, gracefully ignore)
     std::snprintf(path_buf, sizeof(path_buf), "%s/%d/io", procfs_root_.c_str(), pid);
     if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
         parse_proc_io(std::string_view(read_buf, bytes), sample);

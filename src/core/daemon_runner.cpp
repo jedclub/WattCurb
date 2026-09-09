@@ -139,7 +139,7 @@ int DaemonRunner::run() {
                 (void)s;
 
                 auto hw_cur = hw_probe_.capture_sample();
-                auto proc_cur = proc_analyzer_.capture_active_processes();
+                auto proc_cur = proc_analyzer_.capture_active_processes(&proc_prev);
 
                 cached_report_ = engine_.compute_attribution(hw_prev, hw_cur, proc_prev, proc_cur, 20);
 

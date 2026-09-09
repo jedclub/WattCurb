@@ -98,9 +98,9 @@ int main(int argc, char* argv[]) {
     auto sleep_ms = static_cast<int64_t>(interval_sec * 1000.0);
     std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
 
-    // Snapshot 2 (T2)
+    // Snapshot 2 (T2) - Passes &proc1 for Lazy Deep Inspection (REF-REQ-007)
     auto hw2 = hw_probe.capture_sample();
-    auto proc2 = proc_analyzer.capture_active_processes();
+    auto proc2 = proc_analyzer.capture_active_processes(&proc1);
 
     // Compute attribution
     auto report = engine.compute_attribution(hw1, hw2, proc1, proc2, top_n);
