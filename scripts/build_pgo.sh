@@ -39,6 +39,11 @@ cmake -B "${BUILD_DIR}" -G Ninja \
 
 ninja -C "${BUILD_DIR}" wattcurb wattcurb_tests wattcurb_asm
 
+# Stage final stripped production binary (REF-REQ-008)
+mkdir -p "${ROOT_DIR}/output"
+strip --strip-all "${BUILD_DIR}/wattcurb" -o "${ROOT_DIR}/output/wattcurb"
+echo "Stripped production binary generated: ${ROOT_DIR}/output/wattcurb ($(stat -c%s "${ROOT_DIR}/output/wattcurb") bytes)"
+
 # 4. Execute PMU Hardware Counter Analysis
 echo "[4/4] Conducting PMU hardware counter performance audit..."
 PMU_RAW=$(perf stat -x ';' -e cycles,instructions,cache-misses,L1-dcache-load-misses,dTLB-load-misses,branches,branch-misses \

@@ -171,4 +171,27 @@ To guarantee that WattCurb converges toward zero overhead rather than suffering 
      - Peak Resident Set Size (RSS in MB).
      - Energy Consumption ($J$) & Average Power Overhead ($mW$).
 
+---
+
+## 11. Total Elimination of Debug/Trace/Log Artifacts in Production Release
+
+Production binaries must achieve the absolute minimum binary size and execution overhead by eliminating every trace of development-time scaffolding:
+
+1. **Zero Diagnostic & Log Residue**:
+   - Production release builds must completely eliminate all diagnostic log strings, debugging formatters, and console prints from the binary text and `.rodata` sections.
+   - All diagnostic logging and verbose tracing must be guarded behind compile-time zero-cost constructs (`if constexpr` or macros expanding to `((void)0)`). When compiled with `-DNDEBUG`, zero string literals or formatting instructions may enter the compiled output.
+2. **Elimination of Debug Assertions & Runtime Checks**:
+   - Runtime `assert()` calls and development invariant checks are strictly stripped in release builds via mandatory `-DNDEBUG`.
+   - Critical error paths must use C++23 `std::expected` / `std::optional` returning error codes without allocating exception strings.
+3. **Complete Binary Stripping & Linker Pruning**:
+   - Production artifacts must enforce:
+     - `-DNDEBUG`: Complete removal of assertions.
+     - `-fvisibility=hidden -fvisibility-inlines-hidden`: Elimination of symbol leakage.
+     - `-ffunction-sections -fdata-sections -Wl,--gc-sections`: Elimination of dead or unused code and data.
+     - `-s` / `strip --strip-all`: Complete stripping of debug symbols and ELF symbol tables.
+     - `-fno-rtti`: Elimination of C++ runtime type information tables.
+4. **PGO Instrumentation Purity**:
+   - The final production artifact (Stage 3 PGO) must be compiled exclusively with `-fprofile-use` (and never retain `-fprofile-generate` instrumentation counters or runtime hooks).
+
+
 

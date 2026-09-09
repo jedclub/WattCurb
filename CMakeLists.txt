@@ -26,6 +26,21 @@ add_compile_options(
     -fno-omit-frame-pointer
 )
 
+# REF-REQ-008: Total Elimination of Debug/Trace Residue & Binary Hardening
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_compile_definitions(NDEBUG)
+    add_compile_options(
+        -fvisibility=hidden
+        -fvisibility-inlines-hidden
+        -ffunction-sections
+        -fdata-sections
+        -fno-rtti
+    )
+    add_link_options(
+        -Wl,--gc-sections
+    )
+endif()
+
 if(WATTCURB_ENABLE_LTO)
     include(CheckIPOSupported)
     check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)

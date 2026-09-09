@@ -3,6 +3,7 @@
 #include "proc/process_analyzer.hpp"
 #include "policy/attribution_engine.hpp"
 
+#undef NDEBUG
 #include <cassert>
 #include <chrono>
 #include <iostream>
