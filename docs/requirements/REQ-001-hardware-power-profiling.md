@@ -1,7 +1,7 @@
 # [REF-REQ-001] Hardware Power Profiling and System Specification
 
-- **Ref-ID**: `REF-REQ-001`, `REF-REQ-002`, `REF-REQ-003`
-- **Related Research**: [`REF-RES-001`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-001-prior-art-and-hardware-telemetry.md)
+- **Ref-ID**: `REF-REQ-001`, `REF-REQ-002`, `REF-REQ-003`, `REF-REQ-004`
+- **Related Research**: [`REF-RES-001`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-001-prior-art-and-hardware-telemetry.md), [`REF-RES-002`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-002-hardware-power-measurement-mechanisms.md), [`REF-RES-003`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-003-hardware-to-process-attribution.md)
 - **Related Architecture**: [`REF-ARCH-001`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-001-daemon-architecture.md)
 - **Status**: Draft / Approved
 
@@ -47,3 +47,16 @@ WattCurb is a lightweight background daemon engineered to reduce power consumpti
    - Steady-state daemon CPU usage must remain $< 0.1\%$.
 3. **Oracle Gate Regression Gate**:
    - Continuous verification loop where any degradation in evaluation metrics or test failures halts deployment and triggers targeted remediation.
+
+### 2.4 [`REF-REQ-004`] Hardware-to-Process Power Attribution
+1. **CPU & Memory Attribution**:
+   - Split physical package power into static baseline and dynamic execution power.
+   - Proportional attribution based on process execution delta ($\Delta utime + \Delta stime$) across sampling intervals.
+   - Account for "Wakeup Tax" from context switches forcing package out of deep C-states.
+2. **GPU Attribution via DRM fdinfo**:
+   - Inspect `/proc/[pid]/fdinfo/*` for open DRM clients (`/dev/dri/renderD*`).
+   - Parse `drm-engine-gfx`, `drm-engine-compute`, and `drm-memory-vram`.
+   - Distribute physical GPU power (from `hwmon`/PPT) proportionally to per-process GPU engine runtimes.
+3. **Runaway Workload Scoring (WattCurb Drain Index - WDI)**:
+   - Calculate composite energy score combining CPU, GPU, Storage I/O, and Wakeup frequency.
+   - Distinguish active foreground processes from background runaway processes to avoid penalizing legitimate user tasks.

@@ -14,7 +14,7 @@ All documents follow the Ref-ID naming standard:
 
 | Ref ID | Title | Status | Related Documents |
 | :--- | :--- | :--- | :--- |
-| [`REF-REQ-001`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-001-hardware-power-profiling.md) | Physical Hardware Power Profiling Requirements | Draft | [`REF-RES-001`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-001-prior-art-and-hardware-telemetry.md) |
+| [`REF-REQ-001`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-001-hardware-power-profiling.md) | Physical Hardware Power Profiling Requirements | Draft | [`REF-RES-001`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-001-prior-art-and-hardware-telemetry.md), [`REF-RES-002`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-002-hardware-power-measurement-mechanisms.md), [`REF-RES-003`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-003-hardware-to-process-attribution.md) |
 | [`REF-REQ-002`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-001-hardware-power-profiling.md#ref-req-002) | Zero-Wakeup Daemon & Singleton Execution | Draft | [`REF-ARCH-001`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-001-daemon-architecture.md) |
 | [`REF-REQ-003`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-001-hardware-power-profiling.md#ref-req-003) | Automated Evaluation & Oracle Gate Testing | Draft | [`REF-TEST-001`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-001-daemon-architecture.md#ref-test-001) |
 
@@ -25,6 +25,8 @@ All documents follow the Ref-ID naming standard:
 | Ref ID | Title | Focus Area | Date |
 | :--- | :--- | :--- | :--- |
 | [`REF-RES-001`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-001-prior-art-and-hardware-telemetry.md) | Prior Art, Academic Papers, and Hardware Energy Telemetry Survey | RAPL, Scaphandre, Kepler, TLP, Powertop, GPU/NVMe | 2026-09-10 |
+| [`REF-RES-002`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-002-hardware-power-measurement-mechanisms.md) | Physical Hardware-Level Power Measurement Mechanisms in Modern Linux | RAPL (MSR/sysfs), Battery gas gauge, GPU hwmon/NVML, Backlight PWM, NVMe APST | 2026-09-10 |
+| [`REF-RES-003`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-003-hardware-to-process-attribution.md) | Hardware-to-Process Power Attribution: Correlating Physical Energy Drain with Software Workloads | DRM fdinfo GPU telemetry, CPU execution quantum, Wakeup Tax, Storage APST penalty, WattCurb Drain Index (WDI) | 2026-09-10 |
 
 ---
 
