@@ -152,3 +152,23 @@ To achieve sub-milliwatt daemon overhead and preserve host battery, software arc
    - Eliminate pointer chasing: replace node-based structures (`std::map`, `std::list`, pointers to pointers) with contiguous flat arrays, `std::span`, and fixed-capacity stack buffers.
    - Restrict the working set memory footprint to a single memory page or small contiguous arena to prevent TLB cache evictions.
 
+---
+
+## 10. Continuous PMU Milestone Telemetry & LLM Optimization Feedback Loop
+
+To guarantee that WattCurb converges toward zero overhead rather than suffering gradual performance degradation:
+
+1. **Feature-Level PMU Documentation Mandate**:
+   - For every major functional unit, algorithmic revision, or subsystem refactor, the agent must run an empirical hardware PMU audit (`perf stat` tracking task-clock, cycles, instructions, IPC, L1D-misses, dTLB-misses, memory RSS, and power overhead).
+   - Results must be formally documented in `docs/research/PMU_BENCHMARKS.md` ([`REF-RES-005`](file:///home/jedclub/Develop/WattCurb/docs/research/PMU_BENCHMARKS.md)) with clear milestone versioning.
+2. **LLM Optimization Feedback & Guardrail**:
+   - The AI Agent (LLM) must actively reference historical PMU metrics as design constraints when implementing subsequent features.
+   - If a new feature or refactor regresses CPU active time, introduces heap allocations, or degrades IPC, the agent must perform assembly/syscall analysis and iteratively optimize the implementation until the regression is eliminated.
+3. **Metric Conversion Standards**:
+   - All PMU records must report both raw hardware counters and converted real-world metrics:
+     - Active CPU Task-Clock (ms) & Core Utilization Percentage.
+     - System-wide CPU Percentage (normalized across all host threads).
+     - Peak Resident Set Size (RSS in MB).
+     - Energy Consumption ($J$) & Average Power Overhead ($mW$).
+
+

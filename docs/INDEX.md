@@ -32,6 +32,7 @@ All documents follow the Ref-ID naming standard:
 | [`REF-RES-002`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-002-hardware-power-measurement-mechanisms.md) | Physical Hardware-Level Power Measurement Mechanisms in Modern Linux | RAPL (MSR/sysfs), Battery gas gauge, GPU hwmon/NVML, Backlight PWM, NVMe APST | 2026-09-10 |
 | [`REF-RES-003`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-003-hardware-to-process-attribution.md) | Hardware-to-Process Power Attribution: Correlating Physical Energy Drain with Software Workloads | DRM fdinfo GPU telemetry, CPU execution quantum, Wakeup Tax, Storage APST penalty, WattCurb Drain Index (WDI) | 2026-09-10 |
 | [`REF-RES-004`](file:///home/jedclub/Develop/WattCurb/docs/research/PGO_PMU_REPORT.md) | WattCurb PGO & PMU Hardware Performance Audit Report | Hardware PMU counters (IPC 3.64, L1D, dTLB), ASM inspection | 2026-09-10 |
+| [`REF-RES-005`](file:///home/jedclub/Develop/WattCurb/docs/research/PMU_BENCHMARKS.md) | Continuous PMU Milestone Benchmark & Optimization History | Living PMU tracking history across development milestones | 2026-09-10 |
 
 ---
 
