@@ -1,7 +1,9 @@
 #include "proc/process_analyzer.hpp"
+#include "core/cpu_features.hpp"
 
 #include <array>
 #include <charconv>
+#include <cstdio>
 #include <cstring>
 #include <fcntl.h>
 #include <system_error>
@@ -11,17 +13,18 @@ namespace wattcurb::proc {
 
 namespace {
 
-std::string read_small_file(const std::filesystem::path& path, size_t max_bytes = 4096) {
-    int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
-    if (fd < 0) return {};
+// Fast, zero-allocation stack buffer reader (REF-REQ-007, REF-ARCH-005)
+bool read_file_to_stack_buf(const char* path, char* buf, size_t max_len, size_t& out_bytes) noexcept {
+    int fd = ::open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return false;
 
-    std::string content(max_bytes, '\0');
-    ssize_t bytes = ::read(fd, content.data(), max_bytes);
+    ssize_t bytes = ::read(fd, buf, max_len - 1);
     ::close(fd);
 
-    if (bytes <= 0) return {};
-    content.resize(static_cast<size_t>(bytes));
-    return content;
+    if (bytes <= 0) return false;
+    buf[bytes] = '\0';
+    out_bytes = static_cast<size_t>(bytes);
+    return true;
 }
 
 } // namespace
@@ -31,7 +34,7 @@ ProcessAnalyzer::ProcessAnalyzer(std::filesystem::path procfs_root)
 
 std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes() const {
     std::vector<ProcessSample> samples;
-    samples.reserve(256);
+    samples.reserve(384);
 
     std::error_code ec;
     for (const auto& entry : std::filesystem::directory_iterator(procfs_root_, ec)) {
@@ -45,7 +48,10 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes() const {
         ProcessSample sample;
         sample.pid = pid;
         if (read_pid_details(pid, sample)) {
-            inspect_pid_drm_fds(pid, sample);
+            // Only inspect DRM fds for user processes (kernel threads and system daemons don't render)
+            if (sample.ppid != 2 && sample.uid >= 1000) {
+                inspect_pid_drm_fds(pid, sample);
+            }
             samples.push_back(std::move(sample));
         }
     }
@@ -54,48 +60,65 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes() const {
 }
 
 bool ProcessAnalyzer::read_pid_details(int32_t pid, ProcessSample& sample) const {
-    auto pid_dir = procfs_root_ / std::to_string(pid);
+    char path_buf[128];
+    alignas(64) char read_buf[2048];
+    size_t bytes = 0;
 
     // 1. Read /proc/[pid]/stat
-    auto stat_content = read_small_file(pid_dir / "stat", 1024);
-    if (stat_content.empty() || !parse_proc_stat(stat_content, sample)) {
+    std::snprintf(path_buf, sizeof(path_buf), "%s/%d/stat", procfs_root_.c_str(), pid);
+    if (!read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
         return false;
     }
 
-    // 2. Read /proc/[pid]/status
-    auto status_content = read_small_file(pid_dir / "status", 2048);
-    if (!status_content.empty()) {
-        parse_proc_status(status_content, sample);
+    if (!parse_proc_stat(std::string_view(read_buf, bytes), sample)) {
+        return false;
     }
 
-    // 3. Read /proc/[pid]/io (may fail if permissions are restricted, gracefully ignore)
-    auto io_content = read_small_file(pid_dir / "io", 1024);
-    if (!io_content.empty()) {
-        parse_proc_io(io_content, sample);
+    // Lazy Deep Inspection: Kernel threads (ppid == 2) have no user status/io/drm
+    if (sample.ppid == 2) {
+        return true;
+    }
+
+    // 2. Read /proc/[pid]/status
+    std::snprintf(path_buf, sizeof(path_buf), "%s/%d/status", procfs_root_.c_str(), pid);
+    if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
+        parse_proc_status(std::string_view(read_buf, bytes), sample);
+    }
+
+    // 3. Read /proc/[pid]/io (may be permission restricted, gracefully ignore)
+    std::snprintf(path_buf, sizeof(path_buf), "%s/%d/io", procfs_root_.c_str(), pid);
+    if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
+        parse_proc_io(std::string_view(read_buf, bytes), sample);
     }
 
     return true;
 }
 
 void ProcessAnalyzer::inspect_pid_drm_fds(int32_t pid, ProcessSample& sample) const {
-    auto fd_dir = procfs_root_ / std::to_string(pid) / "fd";
-    auto fdinfo_dir = procfs_root_ / std::to_string(pid) / "fdinfo";
+    char fd_dir_path[128];
+    char fdinfo_dir_path[128];
+    std::snprintf(fd_dir_path, sizeof(fd_dir_path), "%s/%d/fd", procfs_root_.c_str(), pid);
+    std::snprintf(fdinfo_dir_path, sizeof(fdinfo_dir_path), "%s/%d/fdinfo", procfs_root_.c_str(), pid);
 
     std::error_code ec;
+    std::filesystem::path fd_dir(fd_dir_path);
     if (!std::filesystem::exists(fd_dir, ec)) return;
+
+    alignas(64) char fdinfo_buf[2048];
 
     for (const auto& fd_entry : std::filesystem::directory_iterator(fd_dir, ec)) {
         auto target = std::filesystem::read_symlink(fd_entry.path(), ec);
         if (ec) continue;
 
         auto target_str = target.string();
-        // Check if pointing to DRM render node or card
         if (target_str.find("/dev/dri/") != std::string::npos) {
             auto fd_name = fd_entry.path().filename().string();
-            auto info_file = fdinfo_dir / fd_name;
-            auto fdinfo_content = read_small_file(info_file, 2048);
-            if (!fdinfo_content.empty()) {
-                parse_drm_fdinfo(fdinfo_content, sample);
+            char info_path[160];
+            std::snprintf(info_path, sizeof(info_path), "%s/%s", fdinfo_dir_path, fd_name.c_str());
+
+            size_t bytes = 0;
+            if (read_file_to_stack_buf(info_path, fdinfo_buf, sizeof(fdinfo_buf), bytes)) {
+                parse_drm_fdinfo(std::string_view(fdinfo_buf, bytes), sample);
             }
         }
     }
@@ -120,14 +143,26 @@ bool ProcessAnalyzer::parse_proc_stat(std::string_view content, ProcessSample& o
     out_sample.comm = std::string(content.substr(open_paren + 1, close_paren - open_paren - 1));
 
     // Parse fields after ')'
-    // State is right after ') '
     auto remaining = content.substr(close_paren + 1);
     const char* cur = remaining.data();
     const char* end = remaining.data() + remaining.size();
 
-    // Skip state (single char) and 10 preceding numbers to reach field 14 (utime)
     // Field 3: state
+    core::simd::skip_whitespace_simd(cur, end);
+    if (cur < end) ++cur; // skip single state char
+
     // Field 4: ppid
+    core::simd::skip_whitespace_simd(cur, end);
+    if (cur < end) {
+        int32_t ppid = 0;
+        auto [pp_ptr, pp_ec] = std::from_chars(cur, end, ppid);
+        if (pp_ec == std::errc()) {
+            out_sample.ppid = ppid;
+            cur = pp_ptr;
+        }
+    }
+
+    // Skip fields 5 through 13 to reach field 14 (utime)
     // Field 5: pgrp
     // Field 6: session
     // Field 7: tty_nr
@@ -137,20 +172,16 @@ bool ProcessAnalyzer::parse_proc_stat(std::string_view content, ProcessSample& o
     // Field 11: cminflt
     // Field 12: majflt
     // Field 13: cmajflt
-    // Field 14: utime
-    // Field 15: stime
-
-    // Skip whitespace and tokens
-    int token_count = 2; // pid and comm are tokens 1 & 2
+    int token_count = 4; // We already passed tokens 1, 2, 3, 4
     while (cur < end && token_count < 13) {
-        while (cur < end && (*cur == ' ' || *cur == '\t')) ++cur;
+        core::simd::skip_whitespace_simd(cur, end);
         if (cur >= end) break;
-        while (cur < end && *cur != ' ' && *cur != '\t') ++cur;
+        core::simd::find_whitespace_simd(cur, end);
         ++token_count;
     }
 
     // Now at field 14: utime
-    while (cur < end && (*cur == ' ' || *cur == '\t')) ++cur;
+    core::simd::skip_whitespace_simd(cur, end);
     if (cur < end) {
         uint64_t utime = 0;
         auto [u_ptr, u_ec] = std::from_chars(cur, end, utime);
@@ -161,7 +192,7 @@ bool ProcessAnalyzer::parse_proc_stat(std::string_view content, ProcessSample& o
     }
 
     // Now at field 15: stime
-    while (cur < end && (*cur == ' ' || *cur == '\t')) ++cur;
+    core::simd::skip_whitespace_simd(cur, end);
     if (cur < end) {
         uint64_t stime = 0;
         auto [s_ptr, s_ec] = std::from_chars(cur, end, stime);
@@ -174,33 +205,34 @@ bool ProcessAnalyzer::parse_proc_stat(std::string_view content, ProcessSample& o
 }
 
 bool ProcessAnalyzer::parse_proc_status(std::string_view content, ProcessSample& out_sample) {
-    size_t pos = 0;
-    while (pos < content.size()) {
-        auto next_nl = content.find('\n', pos);
-        if (next_nl == std::string_view::npos) next_nl = content.size();
-        auto line = content.substr(pos, next_nl - pos);
-        pos = next_nl + 1;
+    const char* cur = content.data();
+    const char* end = cur + content.size();
+
+    while (cur < end) {
+        const char* next_nl = core::simd::find_char_fast(cur, end, '\n');
+        std::string_view line(cur, static_cast<size_t>(next_nl - cur));
+        cur = (next_nl < end) ? next_nl + 1 : end;
 
         if (line.rfind("Uid:", 0) == 0) {
-            const char* cur = line.data() + 4;
-            const char* end = line.data() + line.size();
-            while (cur < end && (*cur == ' ' || *cur == '\t')) ++cur;
+            const char* l_cur = line.data() + 4;
+            const char* l_end = line.data() + line.size();
+            core::simd::skip_whitespace_simd(l_cur, l_end);
             uint32_t uid = 0;
-            auto [ptr, ec] = std::from_chars(cur, end, uid);
+            auto [ptr, ec] = std::from_chars(l_cur, l_end, uid);
             if (ec == std::errc()) out_sample.uid = uid;
         } else if (line.rfind("voluntary_ctxt_switches:", 0) == 0) {
-            const char* cur = line.data() + 24;
-            const char* end = line.data() + line.size();
-            while (cur < end && (*cur == ' ' || *cur == '\t')) ++cur;
+            const char* l_cur = line.data() + 24;
+            const char* l_end = line.data() + line.size();
+            core::simd::skip_whitespace_simd(l_cur, l_end);
             uint64_t val = 0;
-            auto [ptr, ec] = std::from_chars(cur, end, val);
+            auto [ptr, ec] = std::from_chars(l_cur, l_end, val);
             if (ec == std::errc()) out_sample.voluntary_ctxt_switches = val;
         } else if (line.rfind("nonvoluntary_ctxt_switches:", 0) == 0) {
-            const char* cur = line.data() + 27;
-            const char* end = line.data() + line.size();
-            while (cur < end && (*cur == ' ' || *cur == '\t')) ++cur;
+            const char* l_cur = line.data() + 27;
+            const char* l_end = line.data() + line.size();
+            core::simd::skip_whitespace_simd(l_cur, l_end);
             uint64_t val = 0;
-            auto [ptr, ec] = std::from_chars(cur, end, val);
+            auto [ptr, ec] = std::from_chars(l_cur, l_end, val);
             if (ec == std::errc()) out_sample.nonvoluntary_ctxt_switches = val;
         }
     }
@@ -208,26 +240,27 @@ bool ProcessAnalyzer::parse_proc_status(std::string_view content, ProcessSample&
 }
 
 bool ProcessAnalyzer::parse_proc_io(std::string_view content, ProcessSample& out_sample) {
-    size_t pos = 0;
-    while (pos < content.size()) {
-        auto next_nl = content.find('\n', pos);
-        if (next_nl == std::string_view::npos) next_nl = content.size();
-        auto line = content.substr(pos, next_nl - pos);
-        pos = next_nl + 1;
+    const char* cur = content.data();
+    const char* end = cur + content.size();
+
+    while (cur < end) {
+        const char* next_nl = core::simd::find_char_fast(cur, end, '\n');
+        std::string_view line(cur, static_cast<size_t>(next_nl - cur));
+        cur = (next_nl < end) ? next_nl + 1 : end;
 
         if (line.rfind("read_bytes:", 0) == 0) {
-            const char* cur = line.data() + 11;
-            const char* end = line.data() + line.size();
-            while (cur < end && (*cur == ' ' || *cur == '\t')) ++cur;
+            const char* l_cur = line.data() + 11;
+            const char* l_end = line.data() + line.size();
+            core::simd::skip_whitespace_simd(l_cur, l_end);
             uint64_t val = 0;
-            auto [ptr, ec] = std::from_chars(cur, end, val);
+            auto [ptr, ec] = std::from_chars(l_cur, l_end, val);
             if (ec == std::errc()) out_sample.read_bytes = val;
         } else if (line.rfind("write_bytes:", 0) == 0) {
-            const char* cur = line.data() + 12;
-            const char* end = line.data() + line.size();
-            while (cur < end && (*cur == ' ' || *cur == '\t')) ++cur;
+            const char* l_cur = line.data() + 12;
+            const char* l_end = line.data() + line.size();
+            core::simd::skip_whitespace_simd(l_cur, l_end);
             uint64_t val = 0;
-            auto [ptr, ec] = std::from_chars(cur, end, val);
+            auto [ptr, ec] = std::from_chars(l_cur, l_end, val);
             if (ec == std::errc()) out_sample.write_bytes = val;
         }
     }
@@ -235,35 +268,36 @@ bool ProcessAnalyzer::parse_proc_io(std::string_view content, ProcessSample& out
 }
 
 bool ProcessAnalyzer::parse_drm_fdinfo(std::string_view content, ProcessSample& out_sample) {
-    size_t pos = 0;
-    while (pos < content.size()) {
-        auto next_nl = content.find('\n', pos);
-        if (next_nl == std::string_view::npos) next_nl = content.size();
-        auto line = content.substr(pos, next_nl - pos);
-        pos = next_nl + 1;
+    const char* cur = content.data();
+    const char* end = cur + content.size();
+
+    while (cur < end) {
+        const char* next_nl = core::simd::find_char_fast(cur, end, '\n');
+        std::string_view line(cur, static_cast<size_t>(next_nl - cur));
+        cur = (next_nl < end) ? next_nl + 1 : end;
 
         if (line.rfind("drm-engine-gfx:", 0) == 0) {
-            const char* cur = line.data() + 15;
-            const char* end = line.data() + line.size();
-            while (cur < end && (*cur == ' ' || *cur == '\t')) ++cur;
+            const char* l_cur = line.data() + 15;
+            const char* l_end = line.data() + line.size();
+            core::simd::skip_whitespace_simd(l_cur, l_end);
             uint64_t val = 0;
-            auto [ptr, ec] = std::from_chars(cur, end, val);
+            auto [ptr, ec] = std::from_chars(l_cur, l_end, val);
             if (ec == std::errc()) out_sample.drm_engine_gfx_ns += val;
         } else if (line.rfind("drm-engine-compute:", 0) == 0) {
-            const char* cur = line.data() + 19;
-            const char* end = line.data() + line.size();
-            while (cur < end && (*cur == ' ' || *cur == '\t')) ++cur;
+            const char* l_cur = line.data() + 19;
+            const char* l_end = line.data() + line.size();
+            core::simd::skip_whitespace_simd(l_cur, l_end);
             uint64_t val = 0;
-            auto [ptr, ec] = std::from_chars(cur, end, val);
+            auto [ptr, ec] = std::from_chars(l_cur, l_end, val);
             if (ec == std::errc()) out_sample.drm_engine_compute_ns += val;
         } else if (line.rfind("drm-memory-vram:", 0) == 0 || line.rfind("drm-resident-vram:", 0) == 0) {
-            auto colon = line.find(':');
-            if (colon != std::string_view::npos) {
-                const char* cur = line.data() + colon + 1;
-                const char* end = line.data() + line.size();
-                while (cur < end && (*cur == ' ' || *cur == '\t')) ++cur;
+            const char* colon = core::simd::find_char_fast(line.data(), line.data() + line.size(), ':');
+            if (colon != line.data() + line.size()) {
+                const char* l_cur = colon + 1;
+                const char* l_end = line.data() + line.size();
+                core::simd::skip_whitespace_simd(l_cur, l_end);
                 uint64_t val = 0;
-                auto [ptr, ec] = std::from_chars(cur, end, val);
+                auto [ptr, ec] = std::from_chars(l_cur, l_end, val);
                 if (ec == std::errc() && val > out_sample.drm_vram_kib) {
                     out_sample.drm_vram_kib = val;
                 }

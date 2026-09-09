@@ -26,6 +26,7 @@ struct HardwareSample {
 // Implements REF-REQ-004 & REF-ARCH-002
 struct ProcessSample {
     int32_t pid{0};
+    int32_t ppid{0};
     std::string comm;
     uint32_t uid{0};
     uint64_t utime_ticks{0};
