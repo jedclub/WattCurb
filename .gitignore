@@ -1,7 +1,10 @@
 # Build and compilation outputs
 build/
+build*/
 output/
 tmp/
+*.gcda
+*.gcno
 *.o
 *.obj
 *.so

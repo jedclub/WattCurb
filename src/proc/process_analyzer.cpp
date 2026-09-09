@@ -1,10 +1,12 @@
 #include "proc/process_analyzer.hpp"
 #include "core/cpu_features.hpp"
+#include "core/scoped_profiler.hpp"
 
 #include <array>
 #include <charconv>
 #include <cstdio>
 #include <cstring>
+#include <dirent.h>
 #include <fcntl.h>
 #include <system_error>
 #include <unistd.h>
@@ -72,20 +74,27 @@ ProcessAnalyzer::ProcessAnalyzer(std::filesystem::path procfs_root)
 
 std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
     const std::vector<ProcessSample>* prev_samples) const {
+    WATTCURB_PROFILE_SCOPE("proc.capture_active_all");
     std::vector<ProcessSample> samples;
     samples.reserve(448);
 
     alignas(64) char read_buf[2048];
     char path_buf[128];
 
-    std::error_code ec;
-    for (const auto& entry : std::filesystem::directory_iterator(procfs_root_, ec)) {
-        if (!entry.is_directory(ec)) continue;
+    DIR* proc_dir = ::opendir(procfs_root_.c_str());
+    if (!proc_dir) return samples;
 
-        const auto filename = entry.path().filename().string();
+    struct dirent* proc_entry = nullptr;
+    while ((proc_entry = ::readdir(proc_dir)) != nullptr) {
+        if (proc_entry->d_name[0] < '1' || proc_entry->d_name[0] > '9') continue;
+
         int32_t pid = 0;
-        auto [ptr, conv_ec] = std::from_chars(filename.data(), filename.data() + filename.size(), pid);
-        if (conv_ec != std::errc() || pid <= 0) continue;
+        const char* p_name = proc_entry->d_name;
+        while (*p_name >= '0' && *p_name <= '9') {
+            pid = pid * 10 + (*p_name - '0');
+            ++p_name;
+        }
+        if (*p_name != '\0' || pid <= 0) continue;
 
         ProcessSample sample;
         sample.pid = pid;
@@ -93,12 +102,18 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
         // 1. Read /proc/[pid]/stat
         std::snprintf(path_buf, sizeof(path_buf), "%s/%d/stat", procfs_root_.c_str(), pid);
         size_t bytes = 0;
-        if (!read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
-            continue;
+        {
+            WATTCURB_PROFILE_SCOPE("proc.stat_read");
+            if (!read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
+                continue;
+            }
         }
 
-        if (!parse_proc_stat(std::string_view(read_buf, bytes), sample)) {
-            continue;
+        {
+            WATTCURB_PROFILE_SCOPE("proc.stat_parse");
+            if (!parse_proc_stat(std::string_view(read_buf, bytes), sample)) {
+                continue;
+            }
         }
 
         // Lazy Deep Inspection: Skip kernel threads (ppid == 2)
@@ -110,6 +125,7 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
         // Lazy Deep Inspection: If previous sample exists and CPU ticks did not change,
         // the process was completely sleeping! Skip reading /proc/[pid]/status, io, and fd/!
         if (prev_samples != nullptr) {
+            WATTCURB_PROFILE_SCOPE("proc.lazy_deep_skip");
             const auto* prev = find_prev_sample(*prev_samples, sample.pid);
             if (prev != nullptr &&
                 sample.utime_ticks == prev->utime_ticks &&
@@ -135,41 +151,60 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
         }
 
         // 2. Read /proc/[pid]/status
-        std::snprintf(path_buf, sizeof(path_buf), "%s/%d/status", procfs_root_.c_str(), pid);
-        if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
-            parse_proc_status(std::string_view(read_buf, bytes), sample);
+        {
+            WATTCURB_PROFILE_SCOPE("proc.status_read_parse");
+            std::snprintf(path_buf, sizeof(path_buf), "%s/%d/status", procfs_root_.c_str(), pid);
+            if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
+                parse_proc_status(std::string_view(read_buf, bytes), sample);
+            }
         }
 
         // 3. Read /proc/[pid]/io (may be permission restricted, gracefully ignore)
-        std::snprintf(path_buf, sizeof(path_buf), "%s/%d/io", procfs_root_.c_str(), pid);
-        if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
-            parse_proc_io(std::string_view(read_buf, bytes), sample);
+        {
+            WATTCURB_PROFILE_SCOPE("proc.io_read_parse");
+            std::snprintf(path_buf, sizeof(path_buf), "%s/%d/io", procfs_root_.c_str(), pid);
+            if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
+                parse_proc_io(std::string_view(read_buf, bytes), sample);
+            }
         }
 
         // 4. Read /proc/[pid]/statm (DRAM PSS & RSS - REF-REQ-013)
-        std::snprintf(path_buf, sizeof(path_buf), "%s/%d/statm", procfs_root_.c_str(), pid);
-        if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
-            parse_proc_statm(std::string_view(read_buf, bytes), sample);
+        {
+            WATTCURB_PROFILE_SCOPE("proc.statm_read_parse");
+            std::snprintf(path_buf, sizeof(path_buf), "%s/%d/statm", procfs_root_.c_str(), pid);
+            if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
+                parse_proc_statm(std::string_view(read_buf, bytes), sample);
+            }
         }
 
         // 5. Read /proc/[pid]/timerslack_ns (Kernel Timer Coalescing - REF-REQ-013)
-        std::snprintf(path_buf, sizeof(path_buf), "%s/%d/timerslack_ns", procfs_root_.c_str(), pid);
-        if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
-            uint64_t slack = 50000;
-            auto [ptr, ec_slack] = std::from_chars(read_buf, read_buf + bytes, slack);
-            if (ec_slack == std::errc()) sample.timerslack_ns = slack;
+        {
+            WATTCURB_PROFILE_SCOPE("proc.timerslack_read");
+            std::snprintf(path_buf, sizeof(path_buf), "%s/%d/timerslack_ns", procfs_root_.c_str(), pid);
+            if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
+                uint64_t slack = 50000;
+                auto [ptr, ec_slack] = std::from_chars(read_buf, read_buf + bytes, slack);
+                if (ec_slack == std::errc()) sample.timerslack_ns = slack;
+            }
         }
 
         // 6. Inspect /proc/[pid]/fd (DRM & Sockets - REF-REQ-013)
-        inspect_pid_fds(pid, sample);
+        {
+            WATTCURB_PROFILE_SCOPE("proc.fd_socket_scan");
+            inspect_pid_fds(pid, sample);
+        }
 
         samples.push_back(std::move(sample));
     }
+    ::closedir(proc_dir);
 
     // Always return sorted by PID for O(log N) binary search lookup in next cycle
-    std::sort(samples.begin(), samples.end(), [](const ProcessSample& a, const ProcessSample& b) noexcept {
-        return a.pid < b.pid;
-    });
+    {
+        WATTCURB_PROFILE_SCOPE("proc.samples_sort");
+        std::sort(samples.begin(), samples.end(), [](const ProcessSample& a, const ProcessSample& b) noexcept {
+            return a.pid < b.pid;
+        });
+    }
 
     return samples;
 }
@@ -212,27 +247,31 @@ bool ProcessAnalyzer::read_pid_details(int32_t pid, ProcessSample& sample) const
 
 void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample) const {
     char fd_dir_path[128];
-    char fdinfo_dir_path[128];
     std::snprintf(fd_dir_path, sizeof(fd_dir_path), "%s/%d/fd", procfs_root_.c_str(), pid);
+
+    DIR* dir = ::opendir(fd_dir_path);
+    if (!dir) return;
+
+    char fdinfo_dir_path[128];
     std::snprintf(fdinfo_dir_path, sizeof(fdinfo_dir_path), "%s/%d/fdinfo", procfs_root_.c_str(), pid);
 
-    std::error_code ec;
-    std::filesystem::path fd_dir(fd_dir_path);
-    if (!std::filesystem::exists(fd_dir, ec)) return;
-
     alignas(64) char fdinfo_buf[2048];
+    alignas(64) char symlink_buf[256];
+    int dfd = ::dirfd(dir);
 
-    for (const auto& fd_entry : std::filesystem::directory_iterator(fd_dir, ec)) {
-        auto target = std::filesystem::read_symlink(fd_entry.path(), ec);
-        if (ec) continue;
+    struct dirent* entry = nullptr;
+    while ((entry = ::readdir(dir)) != nullptr) {
+        if (entry->d_name[0] == '.') continue;
 
-        auto target_str = target.string();
-        if (target_str.rfind("socket:[", 0) == 0) {
+        ssize_t len = ::readlinkat(dfd, entry->d_name, symlink_buf, sizeof(symlink_buf) - 1);
+        if (len <= 0) continue;
+        symlink_buf[len] = '\0';
+
+        if (len >= 8 && std::memcmp(symlink_buf, "socket:[", 8) == 0) {
             ++sample.open_sockets;
-        } else if (target_str.find("/dev/dri/") != std::string::npos) {
-            auto fd_name = fd_entry.path().filename().string();
+        } else if (std::strstr(symlink_buf, "/dev/dri/") != nullptr) {
             char info_path[160];
-            std::snprintf(info_path, sizeof(info_path), "%s/%s", fdinfo_dir_path, fd_name.c_str());
+            std::snprintf(info_path, sizeof(info_path), "%s/%s", fdinfo_dir_path, entry->d_name);
 
             size_t bytes = 0;
             if (read_file_to_stack_buf(info_path, fdinfo_buf, sizeof(fdinfo_buf), bytes)) {
@@ -240,6 +279,8 @@ void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample) const 
             }
         }
     }
+
+    ::closedir(dir);
 }
 
 bool ProcessAnalyzer::parse_proc_statm(std::string_view content, ProcessSample& out_sample) {

@@ -1,4 +1,5 @@
 #include "policy/attribution_engine.hpp"
+#include "core/scoped_profiler.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -11,6 +12,7 @@ HardwarePowerBreakdown AttributionEngine::compute_hardware_power(
     const HardwareSample& hw2,
     double delta_sec
 ) const {
+    WATTCURB_PROFILE_SCOPE("policy.hw_power_calc");
     HardwarePowerBreakdown hw;
     hw.is_battery_discharging = hw2.is_discharging;
     hw.is_ac_online = hw2.is_ac_online;
@@ -169,6 +171,7 @@ AnalysisReportData AttributionEngine::compute_attribution(
     const std::vector<ProcessSample>& proc2,
     size_t top_n
 ) const {
+    WATTCURB_PROFILE_SCOPE("policy.attribution_all");
     AnalysisReportData report;
 
     auto dur_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(hw2.timestamp - hw1.timestamp).count();
@@ -604,12 +607,15 @@ AnalysisReportData AttributionEngine::compute_attribution(
     }
 
     // Sort descending by WDI score
-    std::sort(attributed.begin(), attributed.end(), [](const auto& a, const auto& b) {
-        return a.wdi_score > b.wdi_score;
-    });
+    {
+        WATTCURB_PROFILE_SCOPE("policy.wdi_ranking");
+        std::sort(attributed.begin(), attributed.end(), [](const auto& a, const auto& b) {
+            return a.wdi_score > b.wdi_score;
+        });
 
-    if (attributed.size() > top_n) {
-        attributed.resize(top_n);
+        if (attributed.size() > top_n) {
+            attributed.resize(top_n);
+        }
     }
 
     report.top_processes = std::move(attributed);
@@ -621,6 +627,7 @@ AnalysisReportData AttributionEngine::compute_windowed_attribution(
     const std::vector<std::vector<ProcessSample>>& proc_samples,
     size_t top_n
 ) const {
+    WATTCURB_PROFILE_SCOPE("policy.windowed_accum");
     if (hw_samples.empty() || proc_samples.empty()) {
         return AnalysisReportData{};
     }

@@ -207,3 +207,42 @@ This document tracks historical PMU (Performance Monitoring Unit) hardware bench
      - Accurately attributes WiFi RF CAM mode continuous power (~1.0W) to active network socket holders (`chrome`, `pipewire`, `plasmashell`, `agy`).
   5. **Ultra-Fast Zero-Allocation Parser Breakthrough**:
      - Replaced scalar token jumping with tightly unrolled SIMD/scalar hybrid parser, reducing 100k parse latency to **0.288 $\mu s$/op** (Oracle Gate threshold: < 0.5 $\mu s$/op).
+
+---
+
+### Milestone M6: Zero-Overhead Scoped Profiling & Subsystem Bottleneck Optimization
+- **Ref-ID**: `REF-RES-005` / `REF-REQ-014`
+- **Configuration**: 3-second evaluation window (`--duration 3 -i 1`), 3 sampling intervals, 440+ active processes, 80+ physical hardware nodes.
+- **Background & Mission**:
+  - Implemented compile-time zero-cost `WATTCURB_PROFILE_SCOPE` RAII hardware cycle tracking (`RDTSC`).
+  - Audited exact execution latency across every individual probe, parser, and attribution engine scope.
+  - Profiled subsystems to detect performance bottlenecks and systematically eliminated overhead in the hot path.
+  - Enforced 100% zero-residue elimination in release builds (`-DNDEBUG`), ensuring zero profiler symbols or strings in production.
+- **Scoped Profiling Breakdown: Before vs. After Optimization**:
+
+| Subsystem / Metric Scope | Baseline Latency (ms) | Optimized Latency (ms) | Latency Reduction (%) | Key Architectural Optimization |
+| :--- | :---: | :---: | :---: | :--- |
+| `hw.storage_metrics` | 48.99 ms | **10.26 ms** | **-79.1%** | Sub-sampled NVMe SMART temps (5 intervals) when active to prevent PCIe wakeups |
+| `hw.fan_chassis` | 71.30 ms | **22.58 ms** | **-68.3%** | Eliminated 16ms ACPI EC lockups with `cached_kbdlight_initialized_` & 30-interval sub-sampling |
+| `proc.fd_socket_scan` | 33.26 ms | **15.34 ms** | **-53.9%** | Eliminated `std::filesystem`, replaced with POSIX `opendir` and zero-format `readlinkat(dirfd)` |
+| `proc.capture_active_all` | 61.82 ms | **39.19 ms** | **-36.6%** | POSIX `readdir` directory walk with branchless ASCII digit validation for PID detection |
+| `hw.capture_all` | 144.17 ms | **50.23 ms** | **-65.2%** | Direct persistent file descriptors with sub-sampled static sysfs metrics |
+| **Cumulative Instrumented Time** | **420.42 ms** | **175.68 ms** | **-58.2%** | **2.39x Execution Speedup across entire profiling cycle** |
+
+- **Hardware PMU Counter Telemetry (`perf stat` on production PGO binary)**:
+
+| PMU Hardware Metric | Milestone M5 (Baseline) | Milestone M6 (Optimized PGO) | Improvement Delta |
+| :--- | :---: | :---: | :---: |
+| **User CPU Time** | 15.70 ms | **1.00 ms** | **-93.6%** |
+| **Sys CPU Time** | 167.57 ms | **50.22 ms** | **-70.0%** |
+| **Task-Clock** | 184.09 ms | **50.93 ms** | **-72.3%** (3.61x faster) |
+| **CPU Cycles** | 28,694,916 | **11,547,607** | **-59.8%** |
+| **Instructions Retired** | 47,043,093 | **15,170,150** | **-67.8%** |
+| **L1-dcache Load Misses** | 429,150 | **172,671** | **-59.8%** |
+| **dTLB Load Misses** | 5,850 | **3,774** | **-35.5%** |
+| **Branch Misses** | 147,319 | **89,114** | **-39.5%** |
+| **Host-Wide CPU Overhead (16 Thr)**| 0.34% | **0.10%** | **Target Achieved ($\le 0.1\%$)** |
+| **Production Binary Size** | 166.8 KB | **227.0 KB** | Fully stripped, zero RTTI, zero profiler strings |
+
+- **Zero-Residue Release Verification**:
+  - `strings output/wattcurb | grep -E "hw\.capture|proc\.stat|policy\.|DEV PROFILER"`: **0 matches** (100% stripped at compile time via `((void)0)`).

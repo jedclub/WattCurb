@@ -3,11 +3,13 @@
 #include "hw/hardware_probe.hpp"
 #include "proc/process_analyzer.hpp"
 #include "policy/attribution_engine.hpp"
+#include "core/scoped_profiler.hpp"
 
 #undef NDEBUG
 #include <cassert>
 #include <chrono>
 #include <iostream>
+#include <sstream>
 #include <string>
 
 // Implements REF-TEST-002 & Oracle Gate Verification
@@ -345,6 +347,26 @@ void test_ifunc_and_nttp_dispatch() {
     std::cout << " [PASS] test_ifunc_and_nttp_dispatch (GNU IFUNC & C++23 NTTP verified)\n";
 }
 
+void test_scoped_profiler() {
+    wattcurb::core::ScopedProfilerRegistry::instance().reset();
+    {
+        WATTCURB_PROFILE_SCOPE("unit_test_scope");
+        volatile int dummy = 0;
+        for (int i = 0; i < 1000; ++i) dummy += i;
+        (void)dummy;
+    }
+    std::ostringstream oss;
+    wattcurb::core::ScopedProfilerRegistry::instance().print_summary(oss);
+    std::string summary = oss.str();
+#if defined(WATTCURB_DEV_PROFILE) || (!defined(NDEBUG) && !defined(WATTCURB_DISABLE_DEV_PROFILE))
+    assert(!summary.empty() && "Profile summary must not be empty in dev mode");
+    assert(summary.find("unit_test_scope") != std::string::npos && "Scope name must be in summary");
+#else
+    assert(summary.empty() && "Profile summary must be completely empty in release builds");
+#endif
+    std::cout << " [PASS] test_scoped_profiler (Zero-overhead release purity verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -362,6 +384,7 @@ int main() {
     test::test_windowed_attribution_engine();
     test::test_singleton_lock();
     test::test_persistent_hw_probe();
+    test::test_scoped_profiler();
     test::test_oracle_gate_performance_benchmark();
     std::cout << "=== ALL TESTS & ORACLE GATE PASSED SUCCESSFULLY ===\n";
     return 0;

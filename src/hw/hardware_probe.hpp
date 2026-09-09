@@ -141,6 +141,18 @@ private:
     int wifi_temp_fd_{-1};
     int aspm_policy_fd_{-1};
 
+    // Sub-sampling caches to eliminate ACPI EC & NVMe wake latency
+    mutable uint64_t sample_counter_{0};
+    mutable bool cached_kbdlight_initialized_{false};
+    mutable uint32_t cached_kbdlight_level_{0};
+    mutable bool cached_bluetooth_enabled_{false};
+    mutable std::optional<int32_t> cached_nvme_temp1_{std::nullopt};
+    mutable std::optional<int32_t> cached_nvme_temp2_{std::nullopt};
+    mutable bool cached_battery_static_initialized_{false};
+    mutable std::optional<uint64_t> cached_energy_full_{std::nullopt};
+    mutable std::optional<uint64_t> cached_energy_full_design_{std::nullopt};
+    mutable std::optional<uint32_t> cached_cycle_count_{std::nullopt};
+
     void open_persistent_fds();
     void close_fds() noexcept;
 };

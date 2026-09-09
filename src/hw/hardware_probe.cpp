@@ -1,4 +1,5 @@
 #include "hw/hardware_probe.hpp"
+#include "core/scoped_profiler.hpp"
 
 #include <algorithm>
 #include <array>
@@ -502,190 +503,229 @@ void HardwareProbe::refresh_device_paths() {
 }
 
 HardwareSample HardwareProbe::capture_sample() const {
+    WATTCURB_PROFILE_SCOPE("hw.capture_all");
+    ++sample_counter_;
     HardwareSample sample;
     sample.timestamp = std::chrono::steady_clock::now();
 
     // 1. Battery & Power Rail
-    if (battery_status_fd_ >= 0) {
-        std::array<char, 32> stat_buf{};
-        if (read_string_buf(battery_status_fd_, stat_buf.data(), stat_buf.size())) {
-            sample.is_discharging = (std::strncmp(stat_buf.data(), "Discharging", 11) == 0);
+    {
+        WATTCURB_PROFILE_SCOPE("hw.battery_rail");
+        if (battery_status_fd_ >= 0) {
+            std::array<char, 32> stat_buf{};
+            if (read_string_buf(battery_status_fd_, stat_buf.data(), stat_buf.size())) {
+                sample.is_discharging = (std::strncmp(stat_buf.data(), "Discharging", 11) == 0);
+            }
         }
-    }
 
-    if (battery_power_fd_ >= 0) {
-        sample.battery_power_uw = read_uint64_fd(battery_power_fd_);
-    } else if (battery_voltage_fd_ >= 0 && battery_current_fd_ >= 0) {
-        auto v = read_uint64_fd(battery_voltage_fd_);
-        auto i = read_int64_fd(battery_current_fd_);
-        if (v.has_value() && i.has_value()) {
-            sample.battery_voltage_uv = v;
-            sample.battery_current_ua = i;
-            int64_t abs_curr = *i < 0 ? -*i : *i;
-            sample.battery_power_uw = static_cast<uint64_t>((*v * static_cast<uint64_t>(abs_curr)) / 1'000'000ULL);
+        if (battery_power_fd_ >= 0) {
+            sample.battery_power_uw = read_uint64_fd(battery_power_fd_);
+        } else if (battery_voltage_fd_ >= 0 && battery_current_fd_ >= 0) {
+            auto v = read_uint64_fd(battery_voltage_fd_);
+            auto i = read_int64_fd(battery_current_fd_);
+            if (v.has_value() && i.has_value()) {
+                sample.battery_voltage_uv = v;
+                sample.battery_current_ua = i;
+                int64_t abs_curr = *i < 0 ? -*i : *i;
+                sample.battery_power_uw = static_cast<uint64_t>((*v * static_cast<uint64_t>(abs_curr)) / 1'000'000ULL);
+            }
         }
-    }
 
-    if (battery_voltage_fd_ >= 0 && !sample.battery_voltage_uv) {
-        sample.battery_voltage_uv = read_uint64_fd(battery_voltage_fd_);
-    }
-    if (battery_current_fd_ >= 0 && !sample.battery_current_ua) {
-        sample.battery_current_ua = read_int64_fd(battery_current_fd_);
-    }
-    if (battery_energy_now_fd_ >= 0) sample.battery_energy_now_uwh = read_uint64_fd(battery_energy_now_fd_);
-    if (battery_energy_full_fd_ >= 0) sample.battery_energy_full_uwh = read_uint64_fd(battery_energy_full_fd_);
-    if (battery_energy_full_design_fd_ >= 0) sample.battery_energy_full_design_uwh = read_uint64_fd(battery_energy_full_design_fd_);
-    if (battery_cycle_fd_ >= 0) sample.battery_cycle_count = read_uint32_fd(battery_cycle_fd_);
-    if (battery_capacity_fd_ >= 0) sample.battery_capacity_percent = read_uint32_fd(battery_capacity_fd_);
+        if (battery_voltage_fd_ >= 0 && !sample.battery_voltage_uv) {
+            sample.battery_voltage_uv = read_uint64_fd(battery_voltage_fd_);
+        }
+        if (battery_current_fd_ >= 0 && !sample.battery_current_ua) {
+            sample.battery_current_ua = read_int64_fd(battery_current_fd_);
+        }
+        if (battery_energy_now_fd_ >= 0) sample.battery_energy_now_uwh = read_uint64_fd(battery_energy_now_fd_);
+        if (!cached_battery_static_initialized_ || sample_counter_ % 30 == 1) {
+            if (battery_energy_full_fd_ >= 0) cached_energy_full_ = read_uint64_fd(battery_energy_full_fd_);
+            if (battery_energy_full_design_fd_ >= 0) cached_energy_full_design_ = read_uint64_fd(battery_energy_full_design_fd_);
+            if (battery_cycle_fd_ >= 0) cached_cycle_count_ = read_uint32_fd(battery_cycle_fd_);
+            cached_battery_static_initialized_ = true;
+        }
+        sample.battery_energy_full_uwh = cached_energy_full_;
+        sample.battery_energy_full_design_uwh = cached_energy_full_design_;
+        sample.battery_cycle_count = cached_cycle_count_;
+        if (battery_capacity_fd_ >= 0) sample.battery_capacity_percent = read_uint32_fd(battery_capacity_fd_);
 
-    if (ac_online_fd_ >= 0) {
-        auto ac_val = read_uint32_fd(ac_online_fd_);
-        sample.is_ac_online = (ac_val.value_or(0) == 1);
-    }
+        if (ac_online_fd_ >= 0) {
+            auto ac_val = read_uint32_fd(ac_online_fd_);
+            sample.is_ac_online = (ac_val.value_or(0) == 1);
+        }
 
-    if (usbc_online_fd_ >= 0) {
-        auto u_on = read_uint32_fd(usbc_online_fd_);
-        sample.usbc_pd_online = (u_on.value_or(0) == 1);
-        if (usbc_voltage_fd_ >= 0) sample.usbc_pd_voltage_uv = read_uint64_fd(usbc_voltage_fd_);
-        if (usbc_current_fd_ >= 0) sample.usbc_pd_current_ua = read_uint64_fd(usbc_current_fd_);
+        if (usbc_online_fd_ >= 0) {
+            auto u_on = read_uint32_fd(usbc_online_fd_);
+            sample.usbc_pd_online = (u_on.value_or(0) == 1);
+            if (usbc_voltage_fd_ >= 0) sample.usbc_pd_voltage_uv = read_uint64_fd(usbc_voltage_fd_);
+            if (usbc_current_fd_ >= 0) sample.usbc_pd_current_ua = read_uint64_fd(usbc_current_fd_);
+        }
     }
 
     // 2. RAPL & CPU Telemetry
-    if (rapl_pkg_fd_ >= 0) sample.rapl_package_uj = read_uint64_fd(rapl_pkg_fd_);
-    if (rapl_core_fd_ >= 0) sample.rapl_core_uj = read_uint64_fd(rapl_core_fd_);
-    if (rapl_dram_fd_ >= 0) sample.rapl_dram_uj = read_uint64_fd(rapl_dram_fd_);
-    if (cpu_temp_fd_ >= 0) sample.cpu_temp_mdeg = read_int32_fd(cpu_temp_fd_);
+    {
+        WATTCURB_PROFILE_SCOPE("hw.cpu_metrics");
+        if (rapl_pkg_fd_ >= 0) sample.rapl_package_uj = read_uint64_fd(rapl_pkg_fd_);
+        if (rapl_core_fd_ >= 0) sample.rapl_core_uj = read_uint64_fd(rapl_core_fd_);
+        if (rapl_dram_fd_ >= 0) sample.rapl_dram_uj = read_uint64_fd(rapl_dram_fd_);
+        if (cpu_temp_fd_ >= 0) sample.cpu_temp_mdeg = read_int32_fd(cpu_temp_fd_);
 
-    if (cpu_governor_fd_ >= 0) {
-        read_string_buf(cpu_governor_fd_, sample.cpu_governor.data(), sample.cpu_governor.size());
-    }
+        if (cpu_governor_fd_ >= 0) {
+            read_string_buf(cpu_governor_fd_, sample.cpu_governor.data(), sample.cpu_governor.size());
+        }
 
-    // CPU Frequencies
-    if (!cpu_freq_fds_.empty()) {
-        uint64_t sum_khz = 0;
-        uint32_t min_khz = UINT32_MAX;
-        uint32_t max_khz = 0;
-        uint32_t count = 0;
+        // CPU Frequencies
+        if (!cpu_freq_fds_.empty()) {
+            uint64_t sum_khz = 0;
+            uint32_t min_khz = UINT32_MAX;
+            uint32_t max_khz = 0;
+            uint32_t count = 0;
 
-        for (int fd : cpu_freq_fds_) {
-            auto khz = read_uint32_fd(fd);
-            if (khz.has_value() && *khz > 0) {
-                sum_khz += *khz;
-                min_khz = std::min(min_khz, *khz);
-                max_khz = std::max(max_khz, *khz);
-                ++count;
+            for (int fd : cpu_freq_fds_) {
+                auto khz = read_uint32_fd(fd);
+                if (khz.has_value() && *khz > 0) {
+                    sum_khz += *khz;
+                    min_khz = std::min(min_khz, *khz);
+                    max_khz = std::max(max_khz, *khz);
+                    ++count;
+                }
+            }
+            if (count > 0) {
+                sample.cpu_cores_online = count;
+                sample.cpu_freq_min_khz = min_khz;
+                sample.cpu_freq_max_khz = max_khz;
+                sample.cpu_freq_avg_khz = static_cast<uint32_t>(sum_khz / count);
             }
         }
-        if (count > 0) {
-            sample.cpu_cores_online = count;
-            sample.cpu_freq_min_khz = min_khz;
-            sample.cpu_freq_max_khz = max_khz;
-            sample.cpu_freq_avg_khz = static_cast<uint32_t>(sum_khz / count);
-        }
-    }
 
-    // CPU C-States
-    for (const auto& states : cpu_cstate_fds_) {
-        for (size_t s = 0; s < 4; ++s) {
-            if (states[s] >= 0) {
-                auto us = read_uint64_fd(states[s]);
-                if (us.has_value()) {
-                    sample.cstate_time_us[s] += *us;
+        // CPU C-States
+        for (const auto& states : cpu_cstate_fds_) {
+            for (size_t s = 0; s < 4; ++s) {
+                if (states[s] >= 0) {
+                    auto us = read_uint64_fd(states[s]);
+                    if (us.has_value()) {
+                        sample.cstate_time_us[s] += *us;
+                    }
                 }
             }
         }
     }
 
     // 3. GPU Telemetry
-    if (gpu_power_fd_ >= 0) sample.gpu_power_uw = read_uint64_fd(gpu_power_fd_);
-    if (gpu_temp_fd_ >= 0) sample.gpu_temp_mdeg = read_int32_fd(gpu_temp_fd_);
-    if (gpu_freq_fd_ >= 0) sample.gpu_freq_hz = read_uint64_fd(gpu_freq_fd_);
-    if (gpu_in0_fd_ >= 0) sample.gpu_vddgfx_mv = read_uint32_fd(gpu_in0_fd_);
-    if (gpu_in1_fd_ >= 0) sample.gpu_vddsoc_mv = read_uint32_fd(gpu_in1_fd_);
-    if (gpu_busy_fd_ >= 0) sample.gpu_busy_percent = read_uint32_fd(gpu_busy_fd_);
-    if (gpu_vram_used_fd_ >= 0) sample.gpu_vram_used_bytes = read_uint64_fd(gpu_vram_used_fd_);
-    if (gpu_vram_total_fd_ >= 0) sample.gpu_vram_total_bytes = read_uint64_fd(gpu_vram_total_fd_);
-    if (gpu_link_speed_fd_ >= 0) {
-        read_string_buf(gpu_link_speed_fd_, sample.gpu_pcie_link_speed.data(), sample.gpu_pcie_link_speed.size());
+    {
+        WATTCURB_PROFILE_SCOPE("hw.gpu_metrics");
+        if (gpu_power_fd_ >= 0) sample.gpu_power_uw = read_uint64_fd(gpu_power_fd_);
+        if (gpu_temp_fd_ >= 0) sample.gpu_temp_mdeg = read_int32_fd(gpu_temp_fd_);
+        if (gpu_freq_fd_ >= 0) sample.gpu_freq_hz = read_uint64_fd(gpu_freq_fd_);
+        if (gpu_in0_fd_ >= 0) sample.gpu_vddgfx_mv = read_uint32_fd(gpu_in0_fd_);
+        if (gpu_in1_fd_ >= 0) sample.gpu_vddsoc_mv = read_uint32_fd(gpu_in1_fd_);
+        if (gpu_busy_fd_ >= 0) sample.gpu_busy_percent = read_uint32_fd(gpu_busy_fd_);
+        if (gpu_vram_used_fd_ >= 0) sample.gpu_vram_used_bytes = read_uint64_fd(gpu_vram_used_fd_);
+        if (gpu_vram_total_fd_ >= 0) sample.gpu_vram_total_bytes = read_uint64_fd(gpu_vram_total_fd_);
+        if (gpu_link_speed_fd_ >= 0) {
+            read_string_buf(gpu_link_speed_fd_, sample.gpu_pcie_link_speed.data(), sample.gpu_pcie_link_speed.size());
+        }
+        if (gpu_link_width_fd_ >= 0) sample.gpu_pcie_link_width = read_uint32_fd(gpu_link_width_fd_);
     }
-    if (gpu_link_width_fd_ >= 0) sample.gpu_pcie_link_width = read_uint32_fd(gpu_link_width_fd_);
 
     // 4. Storage Telemetry
-    if (nvme_status_fd_ >= 0) {
-        std::array<char, 32> stat_buf{};
-        if (read_string_buf(nvme_status_fd_, stat_buf.data(), stat_buf.size())) {
-            sample.nvme_active = (std::strncmp(stat_buf.data(), "active", 6) == 0);
+    {
+        WATTCURB_PROFILE_SCOPE("hw.storage_metrics");
+        if (nvme_status_fd_ >= 0) {
+            std::array<char, 32> stat_buf{};
+            if (read_string_buf(nvme_status_fd_, stat_buf.data(), stat_buf.size())) {
+                sample.nvme_active = (std::strncmp(stat_buf.data(), "active", 6) == 0);
+            }
         }
-    }
-    if (nvme_temp1_fd_ >= 0) sample.nvme_temp_composite_mdeg = read_int32_fd(nvme_temp1_fd_);
-    if (nvme_temp2_fd_ >= 0) sample.nvme_temp_sensor1_mdeg = read_int32_fd(nvme_temp2_fd_);
 
-    if (block_stat_fd_ >= 0) {
-        std::array<char, 256> buf{};
-        ssize_t n = ::pread(block_stat_fd_, buf.data(), buf.size() - 1, 0);
-        if (n > 0) {
-            buf[static_cast<size_t>(n)] = '\0';
-            const char* p = buf.data();
-            const char* end = buf.data() + n;
+        // Sub-sample NVMe SMART temperatures to prevent PCIe link wakeups and D0 latency
+        if (sample.nvme_active && (sample_counter_ % 5 == 1 || !cached_nvme_temp1_.has_value())) {
+            if (nvme_temp1_fd_ >= 0) cached_nvme_temp1_ = read_int32_fd(nvme_temp1_fd_);
+            if (nvme_temp2_fd_ >= 0) cached_nvme_temp2_ = read_int32_fd(nvme_temp2_fd_);
+        }
+        sample.nvme_temp_composite_mdeg = cached_nvme_temp1_;
+        sample.nvme_temp_sensor1_mdeg = cached_nvme_temp2_;
 
-            // Parse tokens 0 to 9
-            uint64_t val = 0;
-            for (int token_idx = 0; token_idx <= 9 && p < end; ++token_idx) {
-                while (p < end && (*p == ' ' || *p == '\t')) ++p;
-                if (p >= end) break;
-                auto [next_p, ec] = std::from_chars(p, end, val);
-                if (ec == std::errc()) {
-                    if (token_idx == 2) sample.disk_read_sectors = val;
-                    else if (token_idx == 6) sample.disk_write_sectors = val;
-                    else if (token_idx == 9) sample.disk_io_ticks_ms = val;
-                    p = next_p;
-                } else {
-                    break;
+        if (block_stat_fd_ >= 0) {
+            std::array<char, 256> buf{};
+            ssize_t n = ::pread(block_stat_fd_, buf.data(), buf.size() - 1, 0);
+            if (n > 0) {
+                buf[static_cast<size_t>(n)] = '\0';
+                const char* p = buf.data();
+                const char* end = buf.data() + n;
+
+                // Parse tokens 0 to 9
+                uint64_t val = 0;
+                for (int token_idx = 0; token_idx <= 9 && p < end; ++token_idx) {
+                    while (p < end && (*p == ' ' || *p == '\t')) ++p;
+                    if (p >= end) break;
+                    auto [next_p, ec] = std::from_chars(p, end, val);
+                    if (ec == std::errc()) {
+                        if (token_idx == 2) sample.disk_read_sectors = val;
+                        else if (token_idx == 6) sample.disk_write_sectors = val;
+                        else if (token_idx == 9) sample.disk_io_ticks_ms = val;
+                        p = next_p;
+                    } else {
+                        break;
+                    }
                 }
             }
         }
     }
 
     // 5. Chassis & Mechanical Thermal
-    if (fan_rpm_fd_ >= 0) sample.fan_rpm = read_uint32_fd(fan_rpm_fd_);
-    if (fan_pwm_fd_ >= 0) sample.fan_pwm = read_uint32_fd(fan_pwm_fd_);
-    if (chassis_temp_fd_ >= 0) sample.chassis_temp_mdeg = read_int32_fd(chassis_temp_fd_);
+    {
+        WATTCURB_PROFILE_SCOPE("hw.fan_chassis");
+        if (fan_rpm_fd_ >= 0) sample.fan_rpm = read_uint32_fd(fan_rpm_fd_);
+        if (fan_pwm_fd_ >= 0) sample.fan_pwm = read_uint32_fd(fan_pwm_fd_);
+        if (chassis_temp_fd_ >= 0) sample.chassis_temp_mdeg = read_int32_fd(chassis_temp_fd_);
 
-    if (kbdlight_fd_ >= 0) {
-        std::array<char, 64> kbd_buf{};
-        if (read_string_buf(kbdlight_fd_, kbd_buf.data(), kbd_buf.size())) {
-            const char* s_pos = std::strstr(kbd_buf.data(), "status:\t");
-            if (s_pos) {
-                uint32_t lvl = 0;
-                s_pos += 8;
-                if (std::from_chars(s_pos, kbd_buf.data() + kbd_buf.size(), lvl).ec == std::errc()) {
-                    sample.kbdlight_level = lvl;
+        // Sub-sample slow ACPI EC kbdlight (16ms per read) and bluetooth status
+        if (kbdlight_fd_ >= 0) {
+            if (!cached_kbdlight_initialized_ || sample_counter_ % 30 == 1) {
+                std::array<char, 64> kbd_buf{};
+                if (read_string_buf(kbdlight_fd_, kbd_buf.data(), kbd_buf.size())) {
+                    const char* s_pos = std::strstr(kbd_buf.data(), "status:\t");
+                    if (s_pos) {
+                        uint32_t lvl = 0;
+                        s_pos += 8;
+                        if (std::from_chars(s_pos, kbd_buf.data() + kbd_buf.size(), lvl).ec == std::errc()) {
+                            cached_kbdlight_level_ = lvl;
+                        }
+                    }
+                }
+                cached_kbdlight_initialized_ = true;
+            }
+            sample.kbdlight_level = cached_kbdlight_level_;
+        }
+
+        if (bluetooth_fd_ >= 0) {
+            if (sample_counter_ % 30 == 1) {
+                std::array<char, 64> bt_buf{};
+                if (read_string_buf(bluetooth_fd_, bt_buf.data(), bt_buf.size())) {
+                    cached_bluetooth_enabled_ = (std::strstr(bt_buf.data(), "enabled") != nullptr);
                 }
             }
+            sample.bluetooth_enabled = cached_bluetooth_enabled_;
         }
     }
 
-    if (bluetooth_fd_ >= 0) {
-        std::array<char, 64> bt_buf{};
-        if (read_string_buf(bluetooth_fd_, bt_buf.data(), bt_buf.size())) {
-            sample.bluetooth_enabled = (std::strstr(bt_buf.data(), "enabled") != nullptr);
-        }
-    }
+    // 6. Display & Wireless
+    {
+        WATTCURB_PROFILE_SCOPE("hw.display_wireless");
+        if (backlight_cur_fd_ >= 0) sample.backlight_brightness = read_uint32_fd(backlight_cur_fd_);
+        if (backlight_max_fd_ >= 0) sample.backlight_max_brightness = read_uint32_fd(backlight_max_fd_);
 
-    // 6. Display Subsystem
-    if (backlight_cur_fd_ >= 0) sample.backlight_brightness = read_uint32_fd(backlight_cur_fd_);
-    if (backlight_max_fd_ >= 0) sample.backlight_max_brightness = read_uint32_fd(backlight_max_fd_);
-
-    // 7. Wireless & ASPM
-    if (wifi_status_fd_ >= 0) {
-        std::array<char, 32> w_buf{};
-        if (read_string_buf(wifi_status_fd_, w_buf.data(), w_buf.size())) {
-            sample.wifi_active = (std::strncmp(w_buf.data(), "active", 6) == 0);
+        if (wifi_status_fd_ >= 0) {
+            std::array<char, 32> w_buf{};
+            if (read_string_buf(wifi_status_fd_, w_buf.data(), w_buf.size())) {
+                sample.wifi_active = (std::strncmp(w_buf.data(), "active", 6) == 0);
+            }
         }
-    }
-    if (wifi_temp_fd_ >= 0) sample.wifi_temp_mdeg = read_int32_fd(wifi_temp_fd_);
-    if (aspm_policy_fd_ >= 0) {
-        read_string_buf(aspm_policy_fd_, sample.aspm_policy.data(), sample.aspm_policy.size());
+        if (wifi_temp_fd_ >= 0) sample.wifi_temp_mdeg = read_int32_fd(wifi_temp_fd_);
+        if (aspm_policy_fd_ >= 0) {
+            read_string_buf(aspm_policy_fd_, sample.aspm_policy.data(), sample.aspm_policy.size());
+        }
     }
 
     return sample;

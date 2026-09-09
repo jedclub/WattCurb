@@ -4,6 +4,7 @@
 #include "proc/process_analyzer.hpp"
 #include "policy/attribution_engine.hpp"
 #include "report/report_generator.hpp"
+#include "core/scoped_profiler.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -38,6 +39,7 @@ void print_help(const char* prog) {
               << "  -c, --count <num>      Number of sampling intervals to aggregate (default: 1)\n"
               << "  -n, --top <count>      Number of top processes to display (default: 15)\n"
               << "  -j, --json             Output analysis in structured JSON format\n"
+              << "  --dev-profile          Display fine-grained subsystem execution cost breakdown (REF-REQ-014)\n"
               << "  -h, --help             Display this help message and exit\n";
 }
 
@@ -69,6 +71,7 @@ int main(int argc, char* argv[]) {
     bool daemon_mode = false;
     bool status_query = false;
     bool live_mode = false;
+    bool dev_profile = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string_view arg = argv[i];
@@ -81,6 +84,8 @@ int main(int argc, char* argv[]) {
             status_query = true;
         } else if (arg == "-l" || arg == "--live") {
             live_mode = true;
+        } else if (arg == "--dev-profile") {
+            dev_profile = true;
         } else if ((arg == "-i" || arg == "--interval") && i + 1 < argc) {
             interval_sec = std::max(0.5, std::strtod(argv[++i], nullptr));
         } else if ((arg == "-w" || arg == "--duration") && i + 1 < argc) {
@@ -192,6 +197,10 @@ int main(int argc, char* argv[]) {
         wattcurb::report::ReportGenerator::render_json(report, std::cout);
     } else {
         wattcurb::report::ReportGenerator::render_terminal(report, std::cout);
+    }
+
+    if (dev_profile) {
+        wattcurb::core::ScopedProfilerRegistry::instance().print_summary(std::cout);
     }
 
     return 0;
