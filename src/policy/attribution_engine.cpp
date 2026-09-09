@@ -194,6 +194,7 @@ AnalysisReportData AttributionEngine::compute_attribution(
         uint64_t delta_gpu_ns;
         uint64_t delta_wakeups;
         uint64_t delta_io_bytes;
+        uint64_t delta_io_syscalls;
         uint64_t vram_kib;
     };
 
@@ -213,8 +214,8 @@ AnalysisReportData AttributionEngine::compute_attribution(
         uint64_t ticks2 = p2.utime_ticks + p2.stime_ticks;
         uint64_t d_cpu = (ticks2 >= ticks1) ? (ticks2 - ticks1) : 0;
 
-        uint64_t gpu_ns1 = p1.drm_engine_gfx_ns + p1.drm_engine_compute_ns;
-        uint64_t gpu_ns2 = p2.drm_engine_gfx_ns + p2.drm_engine_compute_ns;
+        uint64_t gpu_ns1 = p1.drm_engine_gfx_ns + p1.drm_engine_compute_ns + p1.drm_engine_dec_ns + p1.drm_engine_enc_ns;
+        uint64_t gpu_ns2 = p2.drm_engine_gfx_ns + p2.drm_engine_compute_ns + p2.drm_engine_dec_ns + p2.drm_engine_enc_ns;
         uint64_t d_gpu = (gpu_ns2 >= gpu_ns1) ? (gpu_ns2 - gpu_ns1) : 0;
 
         uint64_t wake1 = p1.voluntary_ctxt_switches + p1.nonvoluntary_ctxt_switches;
@@ -224,6 +225,8 @@ AnalysisReportData AttributionEngine::compute_attribution(
         uint64_t io1 = p1.read_bytes + p1.write_bytes;
         uint64_t io2 = p2.read_bytes + p2.write_bytes;
         uint64_t d_io = (io2 >= io1) ? (io2 - io1) : 0;
+
+        uint64_t d_syscalls = (p2.io_syscalls >= p1.io_syscalls) ? (p2.io_syscalls - p1.io_syscalls) : 0;
 
         total_delta_cpu += d_cpu;
         total_delta_gpu_ns += d_gpu;
@@ -237,19 +240,22 @@ AnalysisReportData AttributionEngine::compute_attribution(
             .delta_gpu_ns = d_gpu,
             .delta_wakeups = d_wake,
             .delta_io_bytes = d_io,
+            .delta_io_syscalls = d_syscalls,
             .vram_kib = p2.drm_vram_kib
         });
     }
 
     report.total_system_wakeups_per_sec = static_cast<uint64_t>(static_cast<double>(total_system_wakeups) / delta_sec);
 
-    // Attribution calculations
+    // 1. Initial pass: CPU, GPU, Storage, and Wakeup power
     double dyn_cpu_power = report.hardware.cpu_package_watts * 0.75;
     double static_cpu_power = report.hardware.cpu_package_watts * 0.25;
     double static_per_proc = deltas.empty() ? 0.0 : (static_cpu_power / static_cast<double>(deltas.size()));
 
     std::vector<ProcessAttributedPower> attributed;
     attributed.reserve(deltas.size());
+
+    double total_thermal_watts = 0.0;
 
     for (const auto& d : deltas) {
         ProcessAttributedPower pap;
@@ -259,7 +265,7 @@ AnalysisReportData AttributionEngine::compute_attribution(
         pap.vram_kib = d.vram_kib;
         pap.wakeups_per_sec = static_cast<uint64_t>(static_cast<double>(d.delta_wakeups) / delta_sec);
 
-        // 1. CPU Watts
+        // CPU Watts
         if (total_delta_cpu > 0 && d.delta_cpu_ticks > 0) {
             double share = static_cast<double>(d.delta_cpu_ticks) / static_cast<double>(total_delta_cpu);
             pap.cpu_watts = static_per_proc + (dyn_cpu_power * share);
@@ -267,7 +273,7 @@ AnalysisReportData AttributionEngine::compute_attribution(
             pap.cpu_watts = static_per_proc;
         }
 
-        // 2. GPU Watts
+        // GPU Watts
         if (total_delta_gpu_ns > 0 && d.delta_gpu_ns > 0) {
             double g_share = static_cast<double>(d.delta_gpu_ns) / static_cast<double>(total_delta_gpu_ns);
             pap.gpu_watts = report.hardware.gpu_watts * g_share;
@@ -275,29 +281,180 @@ AnalysisReportData AttributionEngine::compute_attribution(
             pap.gpu_watts = 0.0;
         }
 
-        // 3. I/O Watts (Estimated disk spin/flash active power)
-        double io_mb_per_sec = (static_cast<double>(d.delta_io_bytes) / 1'048'576.0) / delta_sec;
-        pap.io_watts = std::min(2.0, io_mb_per_sec * 0.02);
+        // Storage / NVMe Watts & throughput
+        pap.disk_io_mb_per_sec = (static_cast<double>(d.delta_io_bytes) / 1'048'576.0) / delta_sec;
+        double iops = static_cast<double>(d.delta_io_syscalls) / delta_sec;
+        pap.io_watts = (pap.disk_io_mb_per_sec * 0.015) + (iops > 50.0 ? 0.05 : 0.0);
 
-        // 4. Wakeup Tax (C-State Disruption Penalty)
-        // High frequency context switches prevent CPU package from staying in C6/C8
+        // Wakeup Tax (C-State Disruption Penalty)
         if (pap.wakeups_per_sec > 15) {
             pap.wakeup_tax_watts = std::min(1.5, static_cast<double>(pap.wakeups_per_sec) * 0.0012);
         }
 
-        // Total
-        pap.total_attributed_watts = pap.cpu_watts + pap.gpu_watts + pap.io_watts + pap.wakeup_tax_watts;
+        total_thermal_watts += (pap.cpu_watts + pap.gpu_watts);
+        attributed.push_back(pap);
+    }
+
+    // 2. Second pass: Thermal Fan Attribution & Hardware Mechanism Labeling
+    for (size_t idx = 0; idx < attributed.size(); ++idx) {
+        auto& pap = attributed[idx];
+        const auto& d = deltas[idx];
+
+        // Mechanical Fan Power Attribution (REF-REQ-011 Sec 2.3)
+        if (report.hardware.fan_estimated_watts > 0.0 && total_thermal_watts > 0.0) {
+            double thermal_share = (pap.cpu_watts + pap.gpu_watts) / total_thermal_watts;
+            pap.fan_attributed_watts = report.hardware.fan_estimated_watts * thermal_share;
+        }
+
+        pap.total_attributed_watts = pap.cpu_watts + pap.gpu_watts + pap.io_watts +
+                                     pap.wakeup_tax_watts + pap.fan_attributed_watts;
 
         // WattCurb Drain Index (WDI)
         pap.wdi_score = (pap.cpu_watts * 8.0) + (pap.gpu_watts * 12.0) +
-                        (static_cast<double>(pap.wakeups_per_sec) * 0.05) + (pap.io_watts * 5.0);
+                        (static_cast<double>(pap.wakeups_per_sec) * 0.05) +
+                        (pap.io_watts * 8.0) + (pap.fan_attributed_watts * 10.0);
 
-        // Flag runaway candidates (e.g. background power hog or high wakeup spammer)
         if (pap.wdi_score > 6.0 || pap.wakeups_per_sec > 500) {
             pap.is_runaway_candidate = true;
         }
 
-        attributed.push_back(pap);
+        // Identify Primary Physical Hardware Domain & Mechanism (REF-REQ-011)
+        if (pap.gpu_watts >= 0.5 && pap.gpu_watts >= pap.cpu_watts && pap.gpu_watts >= pap.wakeup_tax_watts) {
+            pap.primary_hw_domain = "GPU Silicon";
+            int pct = (total_delta_gpu_ns > 0) ? static_cast<int>((static_cast<double>(d.delta_gpu_ns) * 100.0) / static_cast<double>(total_delta_gpu_ns)) : 100;
+            pap.hardware_mechanism = "AMDGPU GFX Engine (" + std::to_string(pap.vram_kib / 1024) + "MB VRAM, " +
+                                     std::to_string(pct) + "% GPU)";
+        } else if (pap.wakeup_tax_watts >= 0.3 && pap.wakeup_tax_watts >= pap.cpu_watts) {
+            pap.primary_hw_domain = "CPU C-State Wakeup";
+            pap.hardware_mechanism = "C3 Sleep Breaker (" + std::to_string(pap.wakeups_per_sec) + " wakeups/s)";
+        } else if (pap.cpu_watts >= 0.4) {
+            pap.primary_hw_domain = "CPU Compute";
+            int pct = (total_delta_cpu > 0) ? static_cast<int>((static_cast<double>(d.delta_cpu_ticks) * 100.0) / static_cast<double>(total_delta_cpu)) : 100;
+            pap.hardware_mechanism = "Core Execution (" + std::to_string(d.delta_cpu_ticks) + " ticks, " +
+                                     std::to_string(pct) + "% CPU)";
+        } else if (pap.io_watts >= 0.05 || pap.disk_io_mb_per_sec >= 0.5) {
+            pap.primary_hw_domain = "NVMe Storage";
+            pap.hardware_mechanism = "NVMe Active (" + std::to_string(pap.disk_io_mb_per_sec).substr(0, 4) + " MB/s)";
+        } else {
+            pap.primary_hw_domain = "Platform/Idle";
+            pap.hardware_mechanism = "Background Poll (" + std::to_string(pap.wakeups_per_sec) + " w/s)";
+        }
+    }
+
+    // 3. Build Domain Culprits Registry (REF-REQ-011 Sec 3.2)
+    // Domain A: GPU Silicon
+    if (report.hardware.gpu_watts > 0.05) {
+        DomainCulprit gpu_culprit;
+        gpu_culprit.domain_name = "GPU Silicon (AMDGPU / DRM)";
+        gpu_culprit.domain_total_watts = report.hardware.gpu_watts;
+
+        std::vector<ProcessAttributedPower> gpu_procs;
+        for (const auto& p : attributed) {
+            if (p.gpu_watts > 0.01) gpu_procs.push_back(p);
+        }
+        std::sort(gpu_procs.begin(), gpu_procs.end(), [](const auto& a, const auto& b) {
+            return a.gpu_watts > b.gpu_watts;
+        });
+        for (size_t i = 0; i < std::min<size_t>(5, gpu_procs.size()); ++i) {
+            double sh = (gpu_procs[i].gpu_watts / report.hardware.gpu_watts) * 100.0;
+            gpu_culprit.top_culprits.push_back(ProcessDomainShare{
+                .pid = gpu_procs[i].pid,
+                .comm = gpu_procs[i].comm,
+                .watts = gpu_procs[i].gpu_watts,
+                .share_percent = sh,
+                .detail = gpu_procs[i].hardware_mechanism
+            });
+        }
+        if (!gpu_culprit.top_culprits.empty()) {
+            report.domain_culprits.push_back(std::move(gpu_culprit));
+        }
+    }
+
+    // Domain B: CPU C-State Sleep Breakers (Wakeup Tax)
+    {
+        DomainCulprit wake_culprit;
+        wake_culprit.domain_name = "CPU C-State Sleep Breakers (Preventing C3 Deep Sleep)";
+        double total_wake_tax = 0.0;
+        for (const auto& p : attributed) total_wake_tax += p.wakeup_tax_watts;
+        wake_culprit.domain_total_watts = total_wake_tax;
+
+        std::vector<ProcessAttributedPower> wake_procs;
+        for (const auto& p : attributed) {
+            if (p.wakeups_per_sec > 25) wake_procs.push_back(p);
+        }
+        std::sort(wake_procs.begin(), wake_procs.end(), [](const auto& a, const auto& b) {
+            return a.wakeups_per_sec > b.wakeups_per_sec;
+        });
+        for (size_t i = 0; i < std::min<size_t>(5, wake_procs.size()); ++i) {
+            double sh = (report.total_system_wakeups_per_sec > 0) ?
+                (static_cast<double>(wake_procs[i].wakeups_per_sec) * 100.0 / static_cast<double>(report.total_system_wakeups_per_sec)) : 0.0;
+            wake_culprit.top_culprits.push_back(ProcessDomainShare{
+                .pid = wake_procs[i].pid,
+                .comm = wake_procs[i].comm,
+                .watts = wake_procs[i].wakeup_tax_watts,
+                .share_percent = sh,
+                .detail = std::to_string(wake_procs[i].wakeups_per_sec) + " wakeups/s (" +
+                          std::to_string(wake_procs[i].wakeup_tax_watts).substr(0, 4) + "W Tax)"
+            });
+        }
+        if (!wake_culprit.top_culprits.empty()) {
+            report.domain_culprits.push_back(std::move(wake_culprit));
+        }
+    }
+
+    // Domain C: Cooling Fan Mechanical Power (Thermal Drivers)
+    if (report.hardware.fan_estimated_watts > 0.1) {
+        DomainCulprit fan_culprit;
+        fan_culprit.domain_name = "Cooling Fan Mechanical Drain (" + std::to_string(report.hardware.fan_rpm) + " RPM ThinkPad EC)";
+        fan_culprit.domain_total_watts = report.hardware.fan_estimated_watts;
+
+        std::vector<ProcessAttributedPower> fan_procs;
+        for (const auto& p : attributed) {
+            if (p.fan_attributed_watts > 0.01) fan_procs.push_back(p);
+        }
+        std::sort(fan_procs.begin(), fan_procs.end(), [](const auto& a, const auto& b) {
+            return a.fan_attributed_watts > b.fan_attributed_watts;
+        });
+        for (size_t i = 0; i < std::min<size_t>(5, fan_procs.size()); ++i) {
+            double sh = (fan_procs[i].fan_attributed_watts / report.hardware.fan_estimated_watts) * 100.0;
+            fan_culprit.top_culprits.push_back(ProcessDomainShare{
+                .pid = fan_procs[i].pid,
+                .comm = fan_procs[i].comm,
+                .watts = fan_procs[i].fan_attributed_watts,
+                .share_percent = sh,
+                .detail = "Thermally induced by " + std::to_string(fan_procs[i].cpu_watts + fan_procs[i].gpu_watts).substr(0, 4) + "W silicon heat"
+            });
+        }
+        if (!fan_culprit.top_culprits.empty()) {
+            report.domain_culprits.push_back(std::move(fan_culprit));
+        }
+    }
+
+    // Domain D: Storage / NVMe APST Disrupters
+    if (report.hardware.storage_estimated_watts > 0.05) {
+        DomainCulprit io_culprit;
+        io_culprit.domain_name = "Storage / NVMe Subsystem (APST Disrupters)";
+        io_culprit.domain_total_watts = report.hardware.storage_estimated_watts;
+
+        std::vector<ProcessAttributedPower> io_procs;
+        for (const auto& p : attributed) {
+            if (p.io_watts > 0.005 || p.disk_io_mb_per_sec > 0.01) io_procs.push_back(p);
+        }
+        std::sort(io_procs.begin(), io_procs.end(), [](const auto& a, const auto& b) {
+            return a.io_watts > b.io_watts;
+        });
+        for (size_t i = 0; i < std::min<size_t>(5, io_procs.size()); ++i) {
+            io_culprit.top_culprits.push_back(ProcessDomainShare{
+                .pid = io_procs[i].pid,
+                .comm = io_procs[i].comm,
+                .watts = io_procs[i].io_watts,
+                .share_percent = 0.0,
+                .detail = "I/O: " + std::to_string(io_procs[i].disk_io_mb_per_sec).substr(0, 4) + " MB/s"
+            });
+        }
+        if (!io_culprit.top_culprits.empty()) {
+            report.domain_culprits.push_back(std::move(io_culprit));
+        }
     }
 
     // Sort descending by WDI score

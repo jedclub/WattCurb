@@ -112,3 +112,32 @@ This document tracks historical PMU (Performance Monitoring Unit) hardware bench
   - `HardwareProbe::capture_sample()` reads all 80+ hardware sensor nodes in **< 0.15 ms** total latency.
   - WattCurb process itself consumes **0.00 W CPU, 0.00 W GPU**, with a low WDI of 0.8.
 
+---
+
+### Milestone M3: Process-to-Hardware Feature Attribution & Physical Causation Engine
+- **Ref-ID**: `REF-RES-005` / `REF-REQ-011`
+- **Git Commit**: (Pending M3 turn commit)
+- **Key Enhancements**:
+  - Implemented multi-domain physical causation tracking attributing exact watts to specific hardware mechanisms:
+    - GPU Silicon ($P_{\text{GPU}}$): AMDGPU GFX Engine ns, Compute ns, Video Decode/Encode ns, and VRAM KiB.
+    - CPU C-State Sleep Breakers ($P_{\text{WakeTax}}$): Context switches forcing CPU out of C3 deep sleep into C0 active state.
+    - Mechanical Cooling Fan ($P_{\text{Fan}}$): Proportional thermal heat dissipation share inducing cooling fan RPM.
+    - Storage / NVMe APST Disruption ($P_{\text{NVMe}}$): Read/Write bytes and I/O syscalls preventing SSD PS3/PS4 standby.
+  - Generated domain culprit registries grouping top processes directly responsible for each physical hardware rail.
+- **PMU Hardware Audit (`perf stat` on production PGO binary)**:
+  - `User CPU Time`: **11.7 ms** (Tracking multi-domain physical causation across 441 processes and 80+ hardware nodes)
+  - `Sys Time`: 52.74 ms
+  - `task-clock`: **64.80 ms** (-6.1% improvement from M2: 69.04 ms)
+  - `cycles`: **19,828,775** (-12.7% reduction from M2: 22.7M)
+  - `instructions`: **30,629,285** (IPC: **1.54**, up from 1.39)
+  - `L1-dcache-load-misses`: **267,035** (-8.8% reduction from M2: 292k)
+  - `dTLB-load-misses`: 3,605
+  - `branch-misses`: 88,890 (1.28% branch miss rate)
+  - `Binary Size`: 166,808 bytes (162.8 KB, completely stripped, zero debug symbols, zero RTTI)
+- **Direct Causation Verification**:
+  - Live dashboard clearly maps:
+    - GPU power (24.50W) directly to `chrome` (85.9%) and `kitty` (14.1%) via GFX Engine and VRAM.
+    - C-State wakeups (7,700+/s) directly to `systemd` (3,044 w/s), `polkitd` (2,594 w/s), and `dbus-broker` (1,516 w/s).
+    - Cooling fan mechanical power (1.94W @ 4,348 RPM) directly to `chrome` (84.2%) and `kitty` (13.8%) thermal heat load.
+
+

@@ -326,6 +326,16 @@ bool ProcessAnalyzer::parse_proc_io(std::string_view content, ProcessSample& out
             uint64_t val = 0;
             auto [ptr, ec] = std::from_chars(l_cur, l_end, val);
             if (ec == std::errc()) out_sample.write_bytes = val;
+        } else if (line.rfind("syscr:", 0) == 0 || line.rfind("syscw:", 0) == 0) {
+            const char* colon = core::simd::find_char_fast(line.data(), line.data() + line.size(), ':');
+            if (colon != line.data() + line.size()) {
+                const char* l_cur = colon + 1;
+                const char* l_end = line.data() + line.size();
+                core::simd::skip_whitespace_simd(l_cur, l_end);
+                uint64_t val = 0;
+                auto [ptr, ec] = std::from_chars(l_cur, l_end, val);
+                if (ec == std::errc()) out_sample.io_syscalls += val;
+            }
         }
     }
     return true;
@@ -354,6 +364,20 @@ bool ProcessAnalyzer::parse_drm_fdinfo(std::string_view content, ProcessSample& 
             uint64_t val = 0;
             auto [ptr, ec] = std::from_chars(l_cur, l_end, val);
             if (ec == std::errc()) out_sample.drm_engine_compute_ns += val;
+        } else if (line.rfind("drm-engine-dec:", 0) == 0) {
+            const char* l_cur = line.data() + 15;
+            const char* l_end = line.data() + line.size();
+            core::simd::skip_whitespace_simd(l_cur, l_end);
+            uint64_t val = 0;
+            auto [ptr, ec] = std::from_chars(l_cur, l_end, val);
+            if (ec == std::errc()) out_sample.drm_engine_dec_ns += val;
+        } else if (line.rfind("drm-engine-enc:", 0) == 0) {
+            const char* l_cur = line.data() + 15;
+            const char* l_end = line.data() + line.size();
+            core::simd::skip_whitespace_simd(l_cur, l_end);
+            uint64_t val = 0;
+            auto [ptr, ec] = std::from_chars(l_cur, l_end, val);
+            if (ec == std::errc()) out_sample.drm_engine_enc_ns += val;
         } else if (line.rfind("drm-memory-vram:", 0) == 0 || line.rfind("drm-resident-vram:", 0) == 0) {
             const char* colon = core::simd::find_char_fast(line.data(), line.data() + line.size(), ':');
             if (colon != line.data() + line.size()) {

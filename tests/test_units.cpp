@@ -68,6 +68,7 @@ void test_drm_fdinfo_parsing() {
         "drm-client-id:\t28\n"
         "drm-engine-gfx:\t160000000000 ns\n"
         "drm-engine-compute:\t2000000000 ns\n"
+        "drm-engine-dec:\t500000000 ns\n"
         "drm-memory-vram:\t32768 KiB\n";
     wattcurb::ProcessSample sample;
     bool ok = wattcurb::proc::ProcessAnalyzer::parse_drm_fdinfo(mock_fdinfo, sample);
@@ -75,6 +76,7 @@ void test_drm_fdinfo_parsing() {
     (void)ok;
     assert(sample.drm_engine_gfx_ns == 160000000000ULL);
     assert(sample.drm_engine_compute_ns == 2000000000ULL);
+    assert(sample.drm_engine_dec_ns == 500000000ULL);
     assert(sample.drm_vram_kib == 32768);
     std::cout << " [PASS] test_drm_fdinfo_parsing\n";
 }
@@ -98,13 +100,13 @@ void test_attribution_engine() {
     hw2.backlight_max_brightness = 60000;
 
     std::vector<wattcurb::ProcessSample> p1 = {
-        {.pid = 101, .comm = "renderer", .utime_ticks = 100, .stime_ticks = 20, .drm_engine_gfx_ns = 1'000'000},
-        {.pid = 102, .comm = "idle_daemon", .utime_ticks = 10, .stime_ticks = 5, .drm_engine_gfx_ns = 0}
+        {.pid = 101, .comm = "renderer", .utime_ticks = 100, .stime_ticks = 20, .drm_engine_gfx_ns = 1'000'000, .drm_vram_kib = 65536},
+        {.pid = 102, .comm = "idle_daemon", .utime_ticks = 10, .stime_ticks = 5, .drm_engine_gfx_ns = 0, .drm_vram_kib = 0}
     };
 
     std::vector<wattcurb::ProcessSample> p2 = {
-        {.pid = 101, .comm = "renderer", .utime_ticks = 300, .stime_ticks = 60, .drm_engine_gfx_ns = 101'000'000},
-        {.pid = 102, .comm = "idle_daemon", .utime_ticks = 11, .stime_ticks = 5, .drm_engine_gfx_ns = 0}
+        {.pid = 101, .comm = "renderer", .utime_ticks = 300, .stime_ticks = 60, .drm_engine_gfx_ns = 101'000'000, .drm_vram_kib = 65536},
+        {.pid = 102, .comm = "idle_daemon", .utime_ticks = 11, .stime_ticks = 5, .drm_engine_gfx_ns = 0, .drm_vram_kib = 0}
     };
 
     wattcurb::policy::AttributionEngine engine;
@@ -113,7 +115,9 @@ void test_attribution_engine() {
     assert(report.top_processes.size() == 2);
     assert(report.top_processes[0].pid == 101);
     assert(report.top_processes[0].gpu_watts > 0.0);
+    assert(report.top_processes[0].primary_hw_domain == "GPU Silicon");
     assert(report.top_processes[0].wdi_score > report.top_processes[1].wdi_score);
+    assert(!report.domain_culprits.empty());
     std::cout << " [PASS] test_attribution_engine\n";
 }
 

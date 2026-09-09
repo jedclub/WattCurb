@@ -41,9 +41,9 @@ void ReportGenerator::render_terminal(const AnalysisReportData& r, std::ostream&
                         r.hardware.fan_estimated_watts + r.hardware.storage_estimated_watts + r.hardware.uncore_and_platform_watts);
 
     out << "\n" << BOLD << CYAN;
-    out << "========================================================================================\n";
-    out << "                 WattCurb: Full-Domain Hardware Power & Telemetry Dashboard             \n";
-    out << "========================================================================================\n";
+    out << "========================================================================================================================\n";
+    out << "                       WattCurb: Full-Domain Hardware Power & Process Causation Dashboard                               \n";
+    out << "========================================================================================================================\n";
     out << RESET;
 
     out << DIM << " Observation Window : " << RESET << BOLD << r.sample_duration.count() << " ms" << RESET;
@@ -53,17 +53,17 @@ void ReportGenerator::render_terminal(const AnalysisReportData& r, std::ostream&
 
     // 1. Hardware Power Breakdown Section
     out << "\n" << BOLD << "[1] Physical Hardware Power Breakdown" << RESET << "\n";
-    out << "----------------------------------------------------------------------------------------\n";
-    out << std::left << std::setw(24) << " Hardware Domain"
+    out << "------------------------------------------------------------------------------------------------------------------------\n";
+    out << std::left << std::setw(26) << " Hardware Domain"
         << std::setw(12) << "Power (W)"
         << std::setw(10) << "Share (%)"
         << std::setw(20) << "Distribution"
         << "Live Hardware Telemetry\n";
-    out << "----------------------------------------------------------------------------------------\n";
+    out << "------------------------------------------------------------------------------------------------------------------------\n";
 
     auto print_hw_row = [&](const std::string& name, double watts, const std::string& telem) {
         double pct = (total_sys > 0.0) ? (watts / total_sys * 100.0) : 0.0;
-        out << " " << std::left << std::setw(23) << name
+        out << " " << std::left << std::setw(25) << name
             << std::right << std::fixed << std::setprecision(2) << std::setw(8) << watts << " W  "
             << std::setw(7) << std::setprecision(1) << pct << "%  "
             << std::left << std::setw(19) << format_bar(pct, 14)
@@ -115,7 +115,7 @@ void ReportGenerator::render_terminal(const AnalysisReportData& r, std::ostream&
     print_hw_row("Uncore & Platform Rail", r.hardware.uncore_and_platform_watts, "SoC, DRAM, Chipset & VRM loss");
 
     // Telemetry Summary Strip
-    out << "----------------------------------------------------------------------------------------\n";
+    out << "------------------------------------------------------------------------------------------------------------------------\n";
     out << DIM << " [Sleep C-States] " << RESET
         << "C0 Active: " << BOLD << std::fixed << std::setprecision(1) << r.hardware.cstate_c0_active_percent << "%" << RESET << " | "
         << "C1: " << r.hardware.cstate_c1_percent << "% | "
@@ -128,63 +128,77 @@ void ReportGenerator::render_terminal(const AnalysisReportData& r, std::ostream&
         << "Bat Health: " << BOLD << r.hardware.battery_health_percent << "%" << RESET << " (Cycles: " << r.hardware.battery_cycle_count << ")\n";
 
     // 2. Software (Process) Attribution Section
-    out << "\n" << BOLD << "[2] Software-Level Power Attribution (Top Consumers)" << RESET << "\n";
-    out << "----------------------------------------------------------------------------------------\n";
-    out << std::left << std::setw(8) << " PID"
-        << std::setw(18) << "Process Name"
-        << std::right << std::setw(9) << "CPU (W)"
-        << std::setw(9) << "GPU (W)"
-        << std::setw(10) << "Wakeup/s"
-        << std::setw(10) << "Tax (W)"
+    out << "\n" << BOLD << "[2] Software-to-Hardware Power Attribution (Per-Process Hardware Usage)" << RESET << "\n";
+    out << "------------------------------------------------------------------------------------------------------------------------\n";
+    out << std::left << std::setw(7) << " PID"
+        << std::setw(17) << "Process Name"
+        << std::right << std::setw(8) << "CPU(W)"
+        << std::setw(8) << "GPU(W)"
+        << std::setw(8) << "NVMe(W)"
+        << std::setw(10) << "WakeTax(W)"
+        << std::setw(8) << "Fan(W)"
         << std::setw(10) << "Total(W)"
-        << std::setw(8) << " WDI"
-        << "  Classification\n";
-    out << "----------------------------------------------------------------------------------------\n";
+        << std::setw(7) << "WDI"
+        << "  Primary Hardware Mechanism\n";
+    out << "------------------------------------------------------------------------------------------------------------------------\n";
 
     for (const auto& p : r.top_processes) {
-        std::string comm_trunc = p.comm.size() > 16 ? p.comm.substr(0, 15) + "…" : p.comm;
+        std::string comm_trunc = p.comm.size() > 15 ? p.comm.substr(0, 14) + "…" : p.comm;
 
-        std::string class_str;
-        if (p.is_runaway_candidate) {
-            class_str = std::string(BOLD) + RED + "[RUNAWAY DRAIN]" + RESET;
-        } else if (p.total_attributed_watts > 0.5) {
-            class_str = std::string(YELLOW) + "Active Workload" + RESET;
-        } else {
-            class_str = std::string(DIM) + "Normal / Low" + RESET;
-        }
-
-        out << " " << std::left << std::setw(7) << p.pid
-            << std::setw(18) << comm_trunc
+        out << " " << std::left << std::setw(6) << p.pid
+            << std::setw(17) << comm_trunc
             << std::right << std::fixed << std::setprecision(2)
-            << std::setw(8) << p.cpu_watts << " "
-            << std::setw(8) << p.gpu_watts << " "
-            << std::setw(9) << p.wakeups_per_sec << " "
+            << std::setw(7) << p.cpu_watts << " "
+            << std::setw(7) << p.gpu_watts << " "
+            << std::setw(7) << p.io_watts << " "
             << std::setw(9) << p.wakeup_tax_watts << " "
+            << std::setw(7) << p.fan_attributed_watts << " "
             << BOLD << std::setw(9) << p.total_attributed_watts << RESET << " "
-            << std::setw(7) << std::setprecision(1) << p.wdi_score << "  "
-            << class_str << "\n";
+            << std::setw(6) << std::setprecision(1) << p.wdi_score << "  "
+            << "[" << BOLD << p.primary_hw_domain << RESET << "] " << DIM << p.hardware_mechanism << RESET << "\n";
     }
 
-    out << "----------------------------------------------------------------------------------------\n";
-    out << DIM << " * WDI: WattCurb Drain Index (Composite drain score ranking runaway battery impact)\n";
-    out << " * Tax (W): Wakeup Tax (Sleep disruption penalty preventing package deep C-State entry)\n" << RESET;
+    out << "------------------------------------------------------------------------------------------------------------------------\n";
+    out << DIM << " * WakeTax (W): Penalty for context switches forcing CPU out of C3 deep sleep into C0 active state.\n";
+    out << " * Fan (W): Proportional share of mechanical cooling fan power thermally induced by CPU/GPU silicon heat load.\n" << RESET;
 
-    // 3. Optimization Recommendations
+    // 3. Hardware Domain Direct Attribution (Culprits) Section (REF-REQ-011)
+    if (!r.domain_culprits.empty()) {
+        out << "\n" << BOLD << "[3] Hardware Domain Culprits (Direct Cause & Effect Attribution)" << RESET << "\n";
+        out << "------------------------------------------------------------------------------------------------------------------------\n";
+
+        for (const auto& d : r.domain_culprits) {
+            out << " " << BOLD << YELLOW << "▶ " << d.domain_name << RESET
+                << " — Total: " << BOLD << std::fixed << std::setprecision(2) << d.domain_total_watts << " W" << RESET << "\n";
+
+            for (const auto& c : d.top_culprits) {
+                out << "   -> PID " << std::left << std::setw(7) << c.pid
+                    << std::setw(18) << (c.comm.size() > 16 ? c.comm.substr(0, 15) + "…" : c.comm)
+                    << std::right << std::fixed << std::setprecision(2)
+                    << std::setw(7) << c.watts << " W "
+                    << "(" << std::setw(5) << std::setprecision(1) << c.share_percent << "%) "
+                    << DIM << "— " << c.detail << RESET << "\n";
+            }
+            out << "\n";
+        }
+    }
+
+    // 4. Optimization Recommendations
     bool found_runaway = false;
     for (const auto& p : r.top_processes) {
         if (p.is_runaway_candidate) {
             if (!found_runaway) {
-                out << "\n" << BOLD << YELLOW << "[!] WattCurb Automated Mitigation Suggestions:" << RESET << "\n";
+                out << BOLD << YELLOW << "[!] WattCurb Automated Mitigation Suggestions:" << RESET << "\n";
                 found_runaway = true;
             }
             out << " -> PID " << BOLD << p.pid << " (" << p.comm << ")" << RESET
                 << " is consuming " << std::fixed << std::setprecision(2) << p.total_attributed_watts << " W"
-                << " with " << p.wakeups_per_sec << " wakeups/sec."
+                << " (" << p.primary_hw_domain << ": " << p.hardware_mechanism << ")."
                 << " Recommended: [Stage 1: SCHED_IDLE] or [Stage 4: cgroup.freeze]\n";
         }
     }
     if (!found_runaway) {
-        out << "\n" << GREEN << "[OK] System running optimally with no rogue background power abusers detected." << RESET << "\n";
+        out << GREEN << "[OK] System running optimally with no rogue background power abusers detected." << RESET << "\n";
     }
     out << "\n";
 }
@@ -235,6 +249,25 @@ void ReportGenerator::render_json(const AnalysisReportData& r, std::ostream& out
     out << "    \"wifi_status\": \"" << r.hardware.wifi_status << "\",\n";
     out << "    \"wifi_temp_c\": " << r.hardware.wifi_temp_c << "\n";
     out << "  },\n";
+    out << "  \"domain_culprits\": [\n";
+
+    for (size_t i = 0; i < r.domain_culprits.size(); ++i) {
+        const auto& d = r.domain_culprits[i];
+        out << "    {\n";
+        out << "      \"domain\": \"" << d.domain_name << "\",\n";
+        out << "      \"total_watts\": " << d.domain_total_watts << ",\n";
+        out << "      \"top_culprits\": [\n";
+        for (size_t j = 0; j < d.top_culprits.size(); ++j) {
+            const auto& c = d.top_culprits[j];
+            out << "        {\"pid\": " << c.pid << ", \"comm\": \"" << c.comm << "\", \"watts\": "
+                << c.watts << ", \"share_percent\": " << c.share_percent << ", \"detail\": \"" << c.detail << "\"}"
+                << (j + 1 < d.top_culprits.size() ? "," : "") << "\n";
+        }
+        out << "      ]\n";
+        out << "    }" << (i + 1 < r.domain_culprits.size() ? "," : "") << "\n";
+    }
+
+    out << "  ],\n";
     out << "  \"top_processes\": [\n";
 
     for (size_t i = 0; i < r.top_processes.size(); ++i) {
@@ -245,11 +278,16 @@ void ReportGenerator::render_json(const AnalysisReportData& r, std::ostream& out
         out << "      \"uid\": " << p.uid << ",\n";
         out << "      \"cpu_watts\": " << p.cpu_watts << ",\n";
         out << "      \"gpu_watts\": " << p.gpu_watts << ",\n";
+        out << "      \"io_watts\": " << p.io_watts << ",\n";
         out << "      \"wakeup_tax_watts\": " << p.wakeup_tax_watts << ",\n";
+        out << "      \"fan_attributed_watts\": " << p.fan_attributed_watts << ",\n";
         out << "      \"total_attributed_watts\": " << p.total_attributed_watts << ",\n";
         out << "      \"wdi_score\": " << p.wdi_score << ",\n";
         out << "      \"wakeups_per_sec\": " << p.wakeups_per_sec << ",\n";
         out << "      \"vram_kib\": " << p.vram_kib << ",\n";
+        out << "      \"disk_io_mb_per_sec\": " << p.disk_io_mb_per_sec << ",\n";
+        out << "      \"primary_hw_domain\": \"" << p.primary_hw_domain << "\",\n";
+        out << "      \"hardware_mechanism\": \"" << p.hardware_mechanism << "\",\n";
         out << "      \"is_runaway\": " << (p.is_runaway_candidate ? "true" : "false") << "\n";
         out << "    }" << (i + 1 < r.top_processes.size() ? "," : "") << "\n";
     }

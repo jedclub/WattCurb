@@ -79,7 +79,7 @@ struct HardwareSample {
     std::array<char, 32> aspm_policy{};
 };
 
-// Implements REF-REQ-004 & REF-ARCH-002
+// Implements REF-REQ-004, REF-REQ-011 & REF-ARCH-002
 struct ProcessSample {
     int32_t pid{0};
     int32_t ppid{0};
@@ -91,8 +91,11 @@ struct ProcessSample {
     uint64_t nonvoluntary_ctxt_switches{0};
     uint64_t read_bytes{0};
     uint64_t write_bytes{0};
+    uint64_t io_syscalls{0};
     uint64_t drm_engine_gfx_ns{0};
     uint64_t drm_engine_compute_ns{0};
+    uint64_t drm_engine_dec_ns{0};
+    uint64_t drm_engine_enc_ns{0};
     uint64_t drm_vram_kib{0};
 };
 
@@ -159,7 +162,7 @@ struct HardwarePowerBreakdown {
     std::string aspm_policy;
 };
 
-// Implements REF-REQ-004 & REF-RES-003
+// Implements REF-REQ-004, REF-REQ-011 & REF-RES-003
 struct ProcessAttributedPower {
     int32_t pid{0};
     std::string comm;
@@ -168,18 +171,38 @@ struct ProcessAttributedPower {
     double gpu_watts{0.0};
     double io_watts{0.0};
     double wakeup_tax_watts{0.0};
+    double fan_attributed_watts{0.0};
     double total_attributed_watts{0.0};
     double wdi_score{0.0}; // WattCurb Drain Index
     uint64_t wakeups_per_sec{0};
     uint64_t vram_kib{0};
+    double disk_io_mb_per_sec{0.0};
     bool is_runaway_candidate{false};
+    std::string primary_hw_domain;  // e.g. "GPU Silicon", "CPU C-State Wakeup", "CPU Compute", "NVMe Storage"
+    std::string hardware_mechanism; // e.g. "AMDGPU GFX Engine (455MB VRAM, 98% GPU)"
 };
 
-// Implements REF-REQ-005 & REF-ARCH-002
+// Implements REF-REQ-011 (Hardware Domain Direct Attribution)
+struct ProcessDomainShare {
+    int32_t pid{0};
+    std::string comm;
+    double watts{0.0};
+    double share_percent{0.0};
+    std::string detail;
+};
+
+struct DomainCulprit {
+    std::string domain_name;
+    double domain_total_watts{0.0};
+    std::vector<ProcessDomainShare> top_culprits;
+};
+
+// Implements REF-REQ-005, REF-REQ-011 & REF-ARCH-002
 struct AnalysisReportData {
     std::chrono::milliseconds sample_duration{0};
     HardwarePowerBreakdown hardware;
     std::vector<ProcessAttributedPower> top_processes;
+    std::vector<DomainCulprit> domain_culprits;
     size_t total_monitored_processes{0};
     uint64_t total_system_wakeups_per_sec{0};
 };
