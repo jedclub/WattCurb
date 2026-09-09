@@ -193,5 +193,23 @@ Production binaries must achieve the absolute minimum binary size and execution 
 4. **PGO Instrumentation Purity**:
    - The final production artifact (Stage 3 PGO) must be compiled exclusively with `-fprofile-use` (and never retain `-fprofile-generate` instrumentation counters or runtime hooks).
 
+---
 
+## 12. Compile-Time SIMD Optimization & Dynamic CPUID Feature Specialization
 
+To extract maximum instruction-level parallelism (ILP) and peak throughput from the host processor while minimizing active CPU cycles:
+
+1. **Compile-Time Microarchitecture Tuning & Maximum SIMD Vectorization**:
+   - Production builds must aggressively exploit the host CPU's widest SIMD instruction sets (AVX2 / FMA / BMI1 / BMI2 on x86-64-v3+, and AVX-512 where available).
+   - Data structures and inner hot loops (e.g. procfs parsing, buffer delimiter scanning, energy attribution sum reductions, and WDI ranking) must be laid out to guarantee auto-vectorization:
+     - Enforce alignment: `alignas(32)` or `alignas(64)` on buffers and data structures to avoid unaligned split penalties.
+     - Employ SIMD intrinsics (e.g. `_mm256_cmpeq_epi8`, `_mm256_movemask_epi8` for 32-byte-per-cycle whitespace/newline scanning) or compiler vectorization pragmas (`#pragma GCC ivdep`).
+     - Utilize hardware bit manipulation instructions (`_lzcnt_u64`, `_tzcnt_u64`, `_pext_u64`, `popcnt`) for zero-overhead bitmask search.
+2. **Startup CPUID Hardware Feature Detection & Zero-Overhead Dispatch**:
+   - At process initialization, the daemon must interrogate CPUID / `__builtin_cpu_supports` to evaluate the exact instruction set capabilities of the host processor.
+   - Dispatch to CPU-specialized routines must be achieved with **zero per-iteration branch overhead**:
+     - GNU Indirect Functions (`__attribute__((ifunc(...)))`) resolved once by the dynamic linker at load time, OR
+     - Immutable function pointers / `target_clones` multiversioning resolved during bootstrap before entering the monitoring event loop.
+   - For native target deployments, `-march=native` combined with compile-time feature validation ensures the compiler emits processor-tailored opcodes directly into the hot path without generic fallback penalties.
+3. **Hardware-Specific Memory & Instruction Prefetching**:
+   - In tight monitoring and parsing loops, leverage CPU cache prefetching primitives (`__builtin_prefetch(ptr, 0, 1)`) to pull subsequent procfs chunks into L1 Data Cache ahead of consumption, eliminating pipeline stalls on memory bus round-trips.

@@ -1,4 +1,5 @@
 #include "core/singleton_lock.hpp"
+#include "core/cpu_features.hpp"
 #include "hw/hardware_probe.hpp"
 #include "proc/process_analyzer.hpp"
 #include "policy/attribution_engine.hpp"
@@ -167,10 +168,49 @@ void test_persistent_hw_probe() {
     std::cout << " [PASS] test_persistent_hw_probe\n";
 }
 
+void test_cpu_features() {
+    const auto& feats = wattcurb::core::CpuFeatures::instance();
+    std::cout << " [INFO] CPU Features detected: AVX2=" << feats.has_avx2 
+              << " BMI1=" << feats.has_bmi1 
+              << " BMI2=" << feats.has_bmi2 
+              << " POPCNT=" << feats.has_popcnt 
+              << " AVX512F=" << feats.has_avx512f << "\n";
+#if defined(__x86_64__)
+    // On modern x86-64 testing hosts, POPCNT is standard
+    assert(feats.has_popcnt && "x86-64 CPU must support POPCNT");
+#endif
+    std::cout << " [PASS] test_cpu_features\n";
+}
+
+void test_simd_scanner() {
+    std::string test_data = "12345678901234567890123456789012abcdefghijklmnopqrstuvwxyz0123456:target_delim";
+    const char* start = test_data.data();
+    const char* end = start + test_data.size();
+
+    // Test finding colon
+    const char* found = wattcurb::core::simd::find_char_fast(start, end, ':');
+    assert(found != end && "SIMD scanner must locate delimiter ':'");
+    assert(*found == ':' && "Character pointed must be ':'");
+    assert((found - start) == static_cast<std::ptrdiff_t>(test_data.find(':')) && "Offset of colon must match");
+
+    // Test character not present
+    const char* not_found = wattcurb::core::simd::find_char_fast(start, end, 'Z');
+    assert(not_found == end && "SIMD scanner must return end when char is absent");
+
+    // Test short string (< 32 bytes)
+    std::string short_str = "short:test";
+    const char* s_found = wattcurb::core::simd::find_char_fast(short_str.data(), short_str.data() + short_str.size(), ':');
+    assert((s_found - short_str.data()) == 5 && "Short string search must succeed");
+
+    std::cout << " [PASS] test_simd_scanner\n";
+}
+
 } // namespace test
 
 int main() {
     std::cout << "=== WattCurb Unit Test Suite & Oracle Gate Verifier ===\n";
+    test::test_cpu_features();
+    test::test_simd_scanner();
     test::test_proc_stat_parsing();
     test::test_proc_status_parsing();
     test::test_proc_io_parsing();
