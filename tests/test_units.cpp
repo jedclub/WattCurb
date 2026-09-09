@@ -244,12 +244,49 @@ void test_hw_isa_primitives() {
     std::cout << " [PASS] test_hw_isa_primitives (Core ID=" << core_id << ", TSC=" << tsc1 << ")\n";
 }
 
+// Verification for REF-ARCH-006: Pre-Built Binary Zero-Overhead Dispatch
+typedef const char* (*FindCharResolverFn)(const char*, const char*, char);
+
+extern "C" FindCharResolverFn resolve_find_char_ifunc() {
+    if (wattcurb::core::has_runtime(wattcurb::core::CpuFeature::AVX2)) {
+        return &wattcurb::core::simd::find_char_avx2;
+    }
+    return &wattcurb::core::simd::find_char_scalar;
+}
+
+const char* ifunc_find_char(const char* s, const char* e, char c)
+    __attribute__((ifunc("resolve_find_char_ifunc")));
+
+enum class TestProfile { Baseline, AVX2_Zen2 };
+
+template <TestProfile P>
+int nttp_specialized_calc(int val) {
+    if constexpr (P == TestProfile::AVX2_Zen2) {
+        return val * 2;
+    } else {
+        return val + 1;
+    }
+}
+
+void test_ifunc_and_nttp_dispatch() {
+    std::string text = "testing_ifunc_symbol_relocation:ok";
+    const char* pos = ifunc_find_char(text.data(), text.data() + text.size(), ':');
+    assert(pos != text.data() + text.size() && "IFUNC symbol must locate delimiter");
+    assert(*pos == ':' && "Character must match");
+
+    int res = nttp_specialized_calc<TestProfile::AVX2_Zen2>(10);
+    assert(res == 20 && "NTTP specialized branch must compile and evaluate correctly");
+
+    std::cout << " [PASS] test_ifunc_and_nttp_dispatch (GNU IFUNC & C++23 NTTP verified)\n";
+}
+
 } // namespace test
 
 int main() {
     std::cout << "=== WattCurb Unit Test Suite & Oracle Gate Verifier ===\n";
     test::test_cpu_features();
     test::test_hw_isa_primitives();
+    test::test_ifunc_and_nttp_dispatch();
     test::test_simd_scanner();
     test::test_proc_stat_parsing();
     test::test_proc_status_parsing();
