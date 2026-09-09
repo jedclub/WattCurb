@@ -202,6 +202,18 @@ AnalysisReportData AttributionEngine::compute_attribution(
         uint64_t delta_io_bytes;
         uint64_t delta_io_syscalls;
         uint64_t vram_kib;
+
+        // Deep Process Physical Telemetry (REF-REQ-013)
+        int32_t cpu_core;
+        uint32_t num_threads;
+        uint64_t delta_minflt;
+        uint64_t delta_majflt;
+        uint64_t pss_kib;
+        uint64_t rss_kib;
+        uint64_t timerslack_ns;
+        uint32_t open_sockets;
+        bool cross_ccx_migration;
+        int32_t prev_core;
     };
 
     std::vector<IntermediateProc> deltas;
@@ -234,6 +246,14 @@ AnalysisReportData AttributionEngine::compute_attribution(
 
         uint64_t d_syscalls = (p2.io_syscalls >= p1.io_syscalls) ? (p2.io_syscalls - p1.io_syscalls) : 0;
 
+        // Page Faults (REF-REQ-013)
+        uint64_t d_minflt = (p2.minflt >= p1.minflt) ? (p2.minflt - p1.minflt) : 0;
+        uint64_t d_majflt = (p2.majflt >= p1.majflt) ? (p2.majflt - p1.majflt) : 0;
+
+        // AMD Zen 2 CCX Migration: Cores 0-3 (threads 0-7) vs Cores 4-7 (threads 8-15)
+        bool cross_core = (p1.cpu_core >= 0 && p2.cpu_core >= 0 && p1.cpu_core != p2.cpu_core);
+        bool cross_ccx = cross_core && ((p1.cpu_core / 8) != (p2.cpu_core / 8));
+
         total_delta_cpu += d_cpu;
         total_delta_gpu_ns += d_gpu;
         total_system_wakeups += d_wake;
@@ -247,7 +267,17 @@ AnalysisReportData AttributionEngine::compute_attribution(
             .delta_wakeups = d_wake,
             .delta_io_bytes = d_io,
             .delta_io_syscalls = d_syscalls,
-            .vram_kib = p2.drm_vram_kib
+            .vram_kib = p2.drm_vram_kib,
+            .cpu_core = p2.cpu_core,
+            .num_threads = p2.num_threads,
+            .delta_minflt = d_minflt,
+            .delta_majflt = d_majflt,
+            .pss_kib = p2.pss_kib > 0 ? p2.pss_kib : p1.pss_kib,
+            .rss_kib = p2.rss_kib > 0 ? p2.rss_kib : p1.rss_kib,
+            .timerslack_ns = p2.timerslack_ns,
+            .open_sockets = std::max(p1.open_sockets, p2.open_sockets),
+            .cross_ccx_migration = cross_ccx,
+            .prev_core = p1.cpu_core
         });
     }
 
@@ -271,6 +301,16 @@ AnalysisReportData AttributionEngine::compute_attribution(
         pap.vram_kib = d.vram_kib;
         pap.wakeups_per_sec = static_cast<uint64_t>(static_cast<double>(d.delta_wakeups) / delta_sec);
 
+        // Physical Telemetry fields (REF-REQ-013)
+        pap.cpu_core = d.cpu_core;
+        pap.num_threads = d.num_threads;
+        pap.cross_ccx_migration = d.cross_ccx_migration;
+        pap.timerslack_ns = d.timerslack_ns;
+        pap.pss_kib = d.pss_kib;
+        pap.open_sockets = d.open_sockets;
+        pap.minflt_per_sec = static_cast<uint64_t>(static_cast<double>(d.delta_minflt) / delta_sec);
+        pap.majflt_per_sec = static_cast<uint64_t>(static_cast<double>(d.delta_majflt) / delta_sec);
+
         // CPU Watts
         if (total_delta_cpu > 0 && d.delta_cpu_ticks > 0) {
             double share = static_cast<double>(d.delta_cpu_ticks) / static_cast<double>(total_delta_cpu);
@@ -287,14 +327,35 @@ AnalysisReportData AttributionEngine::compute_attribution(
             pap.gpu_watts = 0.0;
         }
 
-        // Storage / NVMe Watts & throughput
+        // Storage / NVMe Watts & Major Fault penalty (REF-REQ-013)
         pap.disk_io_mb_per_sec = (static_cast<double>(d.delta_io_bytes) / 1'048'576.0) / delta_sec;
         double iops = static_cast<double>(d.delta_io_syscalls) / delta_sec;
         pap.io_watts = (pap.disk_io_mb_per_sec * 0.015) + (iops > 50.0 ? 0.05 : 0.0);
+        if (pap.majflt_per_sec > 0) {
+            pap.io_watts += std::min(0.35, static_cast<double>(pap.majflt_per_sec) * 0.03);
+        }
 
-        // Wakeup Tax (C-State Disruption Penalty)
+        // Wakeup Tax (C-State Disruption Penalty & Timer Slack penalty)
         if (pap.wakeups_per_sec > 15) {
             pap.wakeup_tax_watts = std::min(1.5, static_cast<double>(pap.wakeups_per_sec) * 0.0012);
+            if (pap.timerslack_ns < 50000) {
+                double penalty = 1.0 + static_cast<double>(50000 - pap.timerslack_ns) / 50000.0;
+                pap.wakeup_tax_watts = std::min(2.5, pap.wakeup_tax_watts * penalty);
+            }
+        }
+
+        // WiFi Radio CAM Mode Attribution (REF-REQ-013)
+        if (pap.open_sockets > 0 && pap.wakeups_per_sec > 10) {
+            pap.wifi_attributed_watts = std::min(0.65, 0.08 + static_cast<double>(pap.open_sockets) * 0.02 +
+                                                           static_cast<double>(pap.wakeups_per_sec) * 0.0002);
+        }
+
+        // Cross-CCX Migration & DRAM Memory Attribution (REF-REQ-013)
+        if (pap.cross_ccx_migration) {
+            pap.dram_attributed_watts += 0.15; // Infinity Fabric cache coherency transfer cost
+        }
+        if (pap.pss_kib > 100 * 1024) {
+            pap.dram_attributed_watts += (static_cast<double>(pap.pss_kib) / (1024.0 * 1024.0)) * 0.05;
         }
 
         total_thermal_watts += (pap.cpu_watts + pap.gpu_watts);
@@ -313,19 +374,37 @@ AnalysisReportData AttributionEngine::compute_attribution(
         }
 
         pap.total_attributed_watts = pap.cpu_watts + pap.gpu_watts + pap.io_watts +
-                                     pap.wakeup_tax_watts + pap.fan_attributed_watts;
+                                     pap.wakeup_tax_watts + pap.fan_attributed_watts +
+                                     pap.wifi_attributed_watts + pap.dram_attributed_watts;
 
-        // WattCurb Drain Index (WDI)
+        // WattCurb Drain Index (WDI) - Enhanced with Deep Metrics (REF-REQ-013)
         pap.wdi_score = (pap.cpu_watts * 8.0) + (pap.gpu_watts * 12.0) +
                         (static_cast<double>(pap.wakeups_per_sec) * 0.05) +
-                        (pap.io_watts * 8.0) + (pap.fan_attributed_watts * 10.0);
+                        (pap.io_watts * 8.0) + (pap.fan_attributed_watts * 10.0) +
+                        (pap.wifi_attributed_watts * 10.0) + (pap.dram_attributed_watts * 8.0) +
+                        (pap.cross_ccx_migration ? 6.0 : 0.0) +
+                        (pap.timerslack_ns < 50000 ? 5.0 : 0.0) +
+                        (pap.majflt_per_sec > 0 ? 4.0 : 0.0);
 
         if (pap.wdi_score > 6.0 || pap.wakeups_per_sec > 500) {
             pap.is_runaway_candidate = true;
         }
 
-        // Identify Primary Physical Hardware Domain & Mechanism (REF-REQ-011)
-        if (pap.gpu_watts >= 0.5 && pap.gpu_watts >= pap.cpu_watts && pap.gpu_watts >= pap.wakeup_tax_watts) {
+        // Identify Primary Physical Hardware Domain & Mechanism (REF-REQ-011 & REF-REQ-013)
+        if (pap.cross_ccx_migration && pap.dram_attributed_watts >= 0.15) {
+            pap.primary_hw_domain = "AMD Zen CCX Migration";
+            pap.hardware_mechanism = "Cross-CCX L3 Thrash (Core " + std::to_string(d.prev_core) +
+                                     "->" + std::to_string(pap.cpu_core) + ", IF Power)";
+        } else if (pap.timerslack_ns < 50000 && pap.wakeup_tax_watts >= 0.3) {
+            pap.primary_hw_domain = "Kernel Timer Slack";
+            pap.hardware_mechanism = "Aggressive Timer Slack (" + std::to_string(pap.timerslack_ns) + "ns, Breaks NO_HZ)";
+        } else if (pap.wifi_attributed_watts >= 0.2) {
+            pap.primary_hw_domain = "WiFi Radio CAM";
+            pap.hardware_mechanism = "Active Network Sockets (" + std::to_string(pap.open_sockets) + " skt, CAM Mode)";
+        } else if (pap.majflt_per_sec > 0 && pap.io_watts >= 0.05) {
+            pap.primary_hw_domain = "NVMe Storage / MajFlt";
+            pap.hardware_mechanism = "Major Page Faults (" + std::to_string(pap.majflt_per_sec) + " flt/s, NVMe Active)";
+        } else if (pap.gpu_watts >= 0.5 && pap.gpu_watts >= pap.cpu_watts && pap.gpu_watts >= pap.wakeup_tax_watts) {
             pap.primary_hw_domain = "GPU Silicon";
             int pct = (total_delta_gpu_ns > 0) ? static_cast<int>((static_cast<double>(d.delta_gpu_ns) * 100.0) / static_cast<double>(total_delta_gpu_ns)) : 100;
             pap.hardware_mechanism = "AMDGPU GFX Engine (" + std::to_string(pap.vram_kib / 1024) + "MB VRAM, " +
@@ -346,6 +425,7 @@ AnalysisReportData AttributionEngine::compute_attribution(
             pap.hardware_mechanism = "Background Poll (" + std::to_string(pap.wakeups_per_sec) + " w/s)";
         }
     }
+
 
     // 3. Build Domain Culprits Registry (REF-REQ-011 Sec 3.2)
     // Domain A: GPU Silicon
@@ -463,6 +543,66 @@ AnalysisReportData AttributionEngine::compute_attribution(
         }
     }
 
+    // Domain E: Wireless Transceiver (WiFi 802.11 CAM Breakers - REF-REQ-013)
+    {
+        DomainCulprit wifi_culprit;
+        wifi_culprit.domain_name = "WiFi Wireless Transceiver (Active Sockets in CAM Mode)";
+        double total_wifi_watts = 0.0;
+        std::vector<ProcessAttributedPower> wifi_procs;
+        for (const auto& p : attributed) {
+            if (p.wifi_attributed_watts > 0.01 || p.open_sockets > 0) {
+                wifi_procs.push_back(p);
+                total_wifi_watts += p.wifi_attributed_watts;
+            }
+        }
+        wifi_culprit.domain_total_watts = total_wifi_watts;
+        std::sort(wifi_procs.begin(), wifi_procs.end(), [](const auto& a, const auto& b) {
+            return a.wifi_attributed_watts > b.wifi_attributed_watts;
+        });
+        for (size_t i = 0; i < std::min<size_t>(5, wifi_procs.size()); ++i) {
+            double sh = (total_wifi_watts > 0.0) ? (wifi_procs[i].wifi_attributed_watts / total_wifi_watts) * 100.0 : 0.0;
+            wifi_culprit.top_culprits.push_back(ProcessDomainShare{
+                .pid = wifi_procs[i].pid,
+                .comm = wifi_procs[i].comm,
+                .watts = wifi_procs[i].wifi_attributed_watts,
+                .share_percent = sh,
+                .detail = std::to_string(wifi_procs[i].open_sockets) + " active sockets (" +
+                          std::to_string(wifi_procs[i].wakeups_per_sec) + " w/s)"
+            });
+        }
+        if (!wifi_culprit.top_culprits.empty()) {
+            report.domain_culprits.push_back(std::move(wifi_culprit));
+        }
+    }
+
+    // Domain F: AMD Zen CCX Migration (Cross-CCX Cache & Interconnect Thrashing - REF-REQ-013)
+    {
+        DomainCulprit ccx_culprit;
+        ccx_culprit.domain_name = "AMD Zen CCX Core Migrations (Infinity Fabric & L3 Thrashing)";
+        double total_ccx_watts = 0.0;
+        std::vector<ProcessAttributedPower> ccx_procs;
+        for (const auto& p : attributed) {
+            if (p.cross_ccx_migration) {
+                ccx_procs.push_back(p);
+                total_ccx_watts += 0.18;
+            }
+        }
+        ccx_culprit.domain_total_watts = total_ccx_watts;
+        for (size_t i = 0; i < std::min<size_t>(5, ccx_procs.size()); ++i) {
+            ccx_culprit.top_culprits.push_back(ProcessDomainShare{
+                .pid = ccx_procs[i].pid,
+                .comm = ccx_procs[i].comm,
+                .watts = 0.18,
+                .share_percent = 0.0,
+                .detail = "Cross-CCX migration to Core " + std::to_string(ccx_procs[i].cpu_core) +
+                          " (" + std::to_string(ccx_procs[i].num_threads) + " threads)"
+            });
+        }
+        if (!ccx_culprit.top_culprits.empty()) {
+            report.domain_culprits.push_back(std::move(ccx_culprit));
+        }
+    }
+
     // Sort descending by WDI score
     std::sort(attributed.begin(), attributed.end(), [](const auto& a, const auto& b) {
         return a.wdi_score > b.wdi_score;
@@ -513,6 +653,12 @@ AnalysisReportData AttributionEngine::compute_windowed_attribution(
             acc.ppid = cur.ppid;
             acc.comm = cur.comm;
             acc.uid = cur.uid;
+            acc.cpu_core = cur.cpu_core;
+            acc.num_threads = cur.num_threads;
+            acc.timerslack_ns = std::min(acc.timerslack_ns, cur.timerslack_ns);
+            acc.pss_kib = std::max(acc.pss_kib, cur.pss_kib);
+            acc.rss_kib = std::max(acc.rss_kib, cur.rss_kib);
+            acc.open_sockets = std::max(acc.open_sockets, cur.open_sockets);
             acc.drm_vram_kib = std::max(acc.drm_vram_kib, cur.drm_vram_kib);
 
             auto it = prev_map.find(cur.pid);
@@ -527,6 +673,8 @@ AnalysisReportData AttributionEngine::compute_windowed_attribution(
                 if (cur.read_bytes >= prev->read_bytes) acc.read_bytes += (cur.read_bytes - prev->read_bytes);
                 if (cur.write_bytes >= prev->write_bytes) acc.write_bytes += (cur.write_bytes - prev->write_bytes);
                 if (cur.io_syscalls >= prev->io_syscalls) acc.io_syscalls += (cur.io_syscalls - prev->io_syscalls);
+                if (cur.minflt >= prev->minflt) acc.minflt += (cur.minflt - prev->minflt);
+                if (cur.majflt >= prev->majflt) acc.majflt += (cur.majflt - prev->majflt);
                 if (cur.drm_engine_gfx_ns >= prev->drm_engine_gfx_ns)
                     acc.drm_engine_gfx_ns += (cur.drm_engine_gfx_ns - prev->drm_engine_gfx_ns);
                 if (cur.drm_engine_compute_ns >= prev->drm_engine_compute_ns)
@@ -543,6 +691,8 @@ AnalysisReportData AttributionEngine::compute_windowed_attribution(
                 acc.read_bytes += cur.read_bytes;
                 acc.write_bytes += cur.write_bytes;
                 acc.io_syscalls += cur.io_syscalls;
+                acc.minflt += cur.minflt;
+                acc.majflt += cur.majflt;
                 acc.drm_engine_gfx_ns += cur.drm_engine_gfx_ns;
                 acc.drm_engine_compute_ns += cur.drm_engine_compute_ns;
                 acc.drm_engine_dec_ns += cur.drm_engine_dec_ns;
@@ -550,6 +700,7 @@ AnalysisReportData AttributionEngine::compute_windowed_attribution(
             }
         }
     }
+
 
     // 2. Hardware telemetry averaging
     HardwareSample hw_start = hw_samples.front();
@@ -567,28 +718,28 @@ AnalysisReportData AttributionEngine::compute_windowed_attribution(
     double sum_nvme_temp = 0.0; size_t count_nvme_temp = 0;
 
     for (const auto& h : hw_samples) {
-        if (h.battery_power_uw.has_value()) { sum_battery_power += *h.battery_power_uw; count_bat++; }
-        if (h.gpu_power_uw.has_value()) { sum_gpu_power += *h.gpu_power_uw; count_gpu++; }
-        if (h.fan_rpm.has_value()) { sum_fan_rpm += *h.fan_rpm; count_fan++; }
-        if (h.cpu_temp_mdeg.has_value()) { sum_cpu_temp += *h.cpu_temp_mdeg; count_cpu_temp++; }
-        if (h.cpu_freq_avg_khz > 0) { sum_cpu_freq += h.cpu_freq_avg_khz; count_cpu_freq++; }
-        if (h.gpu_busy_percent.has_value()) { sum_gpu_busy += *h.gpu_busy_percent; count_gpu_busy++; }
-        if (h.gpu_freq_hz.has_value()) { sum_gpu_freq += *h.gpu_freq_hz; count_gpu_freq++; }
-        if (h.gpu_temp_mdeg.has_value()) { sum_gpu_temp += *h.gpu_temp_mdeg; count_gpu_temp++; }
-        if (h.gpu_vram_used_bytes.has_value()) { sum_gpu_vram += *h.gpu_vram_used_bytes; count_gpu_vram++; }
-        if (h.nvme_temp_composite_mdeg.has_value()) { sum_nvme_temp += *h.nvme_temp_composite_mdeg; count_nvme_temp++; }
+        if (h.battery_power_uw.has_value()) { sum_battery_power += static_cast<double>(*h.battery_power_uw); count_bat++; }
+        if (h.gpu_power_uw.has_value()) { sum_gpu_power += static_cast<double>(*h.gpu_power_uw); count_gpu++; }
+        if (h.fan_rpm.has_value()) { sum_fan_rpm += static_cast<double>(*h.fan_rpm); count_fan++; }
+        if (h.cpu_temp_mdeg.has_value()) { sum_cpu_temp += static_cast<double>(*h.cpu_temp_mdeg); count_cpu_temp++; }
+        if (h.cpu_freq_avg_khz > 0) { sum_cpu_freq += static_cast<double>(h.cpu_freq_avg_khz); count_cpu_freq++; }
+        if (h.gpu_busy_percent.has_value()) { sum_gpu_busy += static_cast<double>(*h.gpu_busy_percent); count_gpu_busy++; }
+        if (h.gpu_freq_hz.has_value()) { sum_gpu_freq += static_cast<double>(*h.gpu_freq_hz); count_gpu_freq++; }
+        if (h.gpu_temp_mdeg.has_value()) { sum_gpu_temp += static_cast<double>(*h.gpu_temp_mdeg); count_gpu_temp++; }
+        if (h.gpu_vram_used_bytes.has_value()) { sum_gpu_vram += static_cast<double>(*h.gpu_vram_used_bytes); count_gpu_vram++; }
+        if (h.nvme_temp_composite_mdeg.has_value()) { sum_nvme_temp += static_cast<double>(*h.nvme_temp_composite_mdeg); count_nvme_temp++; }
     }
 
-    if (count_bat > 0) hw_end.battery_power_uw = static_cast<uint64_t>(sum_battery_power / count_bat);
-    if (count_gpu > 0) hw_end.gpu_power_uw = static_cast<uint64_t>(sum_gpu_power / count_gpu);
-    if (count_fan > 0) hw_end.fan_rpm = static_cast<uint32_t>(sum_fan_rpm / count_fan);
-    if (count_cpu_temp > 0) hw_end.cpu_temp_mdeg = static_cast<int32_t>(sum_cpu_temp / count_cpu_temp);
-    if (count_cpu_freq > 0) hw_end.cpu_freq_avg_khz = static_cast<uint32_t>(sum_cpu_freq / count_cpu_freq);
-    if (count_gpu_busy > 0) hw_end.gpu_busy_percent = static_cast<uint32_t>(sum_gpu_busy / count_gpu_busy);
-    if (count_gpu_freq > 0) hw_end.gpu_freq_hz = static_cast<uint64_t>(sum_gpu_freq / count_gpu_freq);
-    if (count_gpu_temp > 0) hw_end.gpu_temp_mdeg = static_cast<int32_t>(sum_gpu_temp / count_gpu_temp);
-    if (count_gpu_vram > 0) hw_end.gpu_vram_used_bytes = static_cast<uint64_t>(sum_gpu_vram / count_gpu_vram);
-    if (count_nvme_temp > 0) hw_end.nvme_temp_composite_mdeg = static_cast<int32_t>(sum_nvme_temp / count_nvme_temp);
+    if (count_bat > 0) hw_end.battery_power_uw = static_cast<uint64_t>(sum_battery_power / static_cast<double>(count_bat));
+    if (count_gpu > 0) hw_end.gpu_power_uw = static_cast<uint64_t>(sum_gpu_power / static_cast<double>(count_gpu));
+    if (count_fan > 0) hw_end.fan_rpm = static_cast<uint32_t>(sum_fan_rpm / static_cast<double>(count_fan));
+    if (count_cpu_temp > 0) hw_end.cpu_temp_mdeg = static_cast<int32_t>(sum_cpu_temp / static_cast<double>(count_cpu_temp));
+    if (count_cpu_freq > 0) hw_end.cpu_freq_avg_khz = static_cast<uint32_t>(sum_cpu_freq / static_cast<double>(count_cpu_freq));
+    if (count_gpu_busy > 0) hw_end.gpu_busy_percent = static_cast<uint32_t>(sum_gpu_busy / static_cast<double>(count_gpu_busy));
+    if (count_gpu_freq > 0) hw_end.gpu_freq_hz = static_cast<uint64_t>(sum_gpu_freq / static_cast<double>(count_gpu_freq));
+    if (count_gpu_temp > 0) hw_end.gpu_temp_mdeg = static_cast<int32_t>(sum_gpu_temp / static_cast<double>(count_gpu_temp));
+    if (count_gpu_vram > 0) hw_end.gpu_vram_used_bytes = static_cast<uint64_t>(sum_gpu_vram / static_cast<double>(count_gpu_vram));
+    if (count_nvme_temp > 0) hw_end.nvme_temp_composite_mdeg = static_cast<int32_t>(sum_nvme_temp / static_cast<double>(count_nvme_temp));
 
     // 3. Construct synthetic zero-base proc1 and accumulated delta proc2
     std::vector<ProcessSample> proc_zero;
@@ -602,10 +753,17 @@ AnalysisReportData AttributionEngine::compute_windowed_attribution(
         z.ppid = acc.ppid;
         z.comm = acc.comm;
         z.uid = acc.uid;
+        z.cpu_core = acc.cpu_core;
+        z.num_threads = acc.num_threads;
+        z.timerslack_ns = acc.timerslack_ns;
+        z.pss_kib = acc.pss_kib;
+        z.rss_kib = acc.rss_kib;
+        z.open_sockets = acc.open_sockets;
         proc_zero.push_back(z);
 
         proc_delta.push_back(acc);
     }
+
 
     auto report = compute_attribution(hw_start, hw_end, proc_zero, proc_delta, top_n);
     report.sample_count = num_intervals;

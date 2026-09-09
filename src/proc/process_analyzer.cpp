@@ -37,6 +37,34 @@ static const ProcessSample* find_prev_sample(const std::vector<ProcessSample>& p
     return nullptr;
 }
 
+inline void skip_token_fast(const char*& cur, const char* end) noexcept {
+    while (cur < end && *cur != ' ') ++cur;
+    while (cur < end && *cur == ' ') ++cur;
+}
+
+inline uint64_t parse_u64_fast(const char*& cur, const char* end) noexcept {
+    uint64_t val = 0;
+    while (cur < end && *cur >= '0' && *cur <= '9') {
+        val = val * 10 + static_cast<uint64_t>(*cur - '0');
+        ++cur;
+    }
+    return val;
+}
+
+inline int32_t parse_i32_fast(const char*& cur, const char* end) noexcept {
+    bool neg = false;
+    if (cur < end && *cur == '-') {
+        neg = true;
+        ++cur;
+    }
+    int32_t val = 0;
+    while (cur < end && *cur >= '0' && *cur <= '9') {
+        val = val * 10 + (*cur - '0');
+        ++cur;
+    }
+    return neg ? -val : val;
+}
+
 } // namespace
 
 ProcessAnalyzer::ProcessAnalyzer(std::filesystem::path procfs_root)
@@ -91,9 +119,16 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
                 sample.nonvoluntary_ctxt_switches = prev->nonvoluntary_ctxt_switches;
                 sample.read_bytes = prev->read_bytes;
                 sample.write_bytes = prev->write_bytes;
+                sample.io_syscalls = prev->io_syscalls;
                 sample.drm_engine_gfx_ns = prev->drm_engine_gfx_ns;
                 sample.drm_engine_compute_ns = prev->drm_engine_compute_ns;
+                sample.drm_engine_dec_ns = prev->drm_engine_dec_ns;
+                sample.drm_engine_enc_ns = prev->drm_engine_enc_ns;
                 sample.drm_vram_kib = prev->drm_vram_kib;
+                sample.timerslack_ns = prev->timerslack_ns;
+                sample.pss_kib = prev->pss_kib;
+                sample.rss_kib = prev->rss_kib;
+                sample.open_sockets = prev->open_sockets;
                 samples.push_back(std::move(sample));
                 continue;
             }
@@ -111,10 +146,22 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
             parse_proc_io(std::string_view(read_buf, bytes), sample);
         }
 
-        // 4. DRM fds: only inspect for user graphical processes (uid >= 1000)
-        if (sample.uid >= 1000) {
-            inspect_pid_drm_fds(pid, sample);
+        // 4. Read /proc/[pid]/statm (DRAM PSS & RSS - REF-REQ-013)
+        std::snprintf(path_buf, sizeof(path_buf), "%s/%d/statm", procfs_root_.c_str(), pid);
+        if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
+            parse_proc_statm(std::string_view(read_buf, bytes), sample);
         }
+
+        // 5. Read /proc/[pid]/timerslack_ns (Kernel Timer Coalescing - REF-REQ-013)
+        std::snprintf(path_buf, sizeof(path_buf), "%s/%d/timerslack_ns", procfs_root_.c_str(), pid);
+        if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
+            uint64_t slack = 50000;
+            auto [ptr, ec_slack] = std::from_chars(read_buf, read_buf + bytes, slack);
+            if (ec_slack == std::errc()) sample.timerslack_ns = slack;
+        }
+
+        // 6. Inspect /proc/[pid]/fd (DRM & Sockets - REF-REQ-013)
+        inspect_pid_fds(pid, sample);
 
         samples.push_back(std::move(sample));
     }
@@ -155,10 +202,15 @@ bool ProcessAnalyzer::read_pid_details(int32_t pid, ProcessSample& sample) const
         parse_proc_io(std::string_view(read_buf, bytes), sample);
     }
 
+    std::snprintf(path_buf, sizeof(path_buf), "%s/%d/statm", procfs_root_.c_str(), pid);
+    if (read_file_to_stack_buf(path_buf, read_buf, sizeof(read_buf), bytes)) {
+        parse_proc_statm(std::string_view(read_buf, bytes), sample);
+    }
+
     return true;
 }
 
-void ProcessAnalyzer::inspect_pid_drm_fds(int32_t pid, ProcessSample& sample) const {
+void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample) const {
     char fd_dir_path[128];
     char fdinfo_dir_path[128];
     std::snprintf(fd_dir_path, sizeof(fd_dir_path), "%s/%d/fd", procfs_root_.c_str(), pid);
@@ -175,7 +227,9 @@ void ProcessAnalyzer::inspect_pid_drm_fds(int32_t pid, ProcessSample& sample) co
         if (ec) continue;
 
         auto target_str = target.string();
-        if (target_str.find("/dev/dri/") != std::string::npos) {
+        if (target_str.rfind("socket:[", 0) == 0) {
+            ++sample.open_sockets;
+        } else if (target_str.find("/dev/dri/") != std::string::npos) {
             auto fd_name = fd_entry.path().filename().string();
             char info_path[160];
             std::snprintf(info_path, sizeof(info_path), "%s/%s", fdinfo_dir_path, fd_name.c_str());
@@ -188,6 +242,34 @@ void ProcessAnalyzer::inspect_pid_drm_fds(int32_t pid, ProcessSample& sample) co
     }
 }
 
+bool ProcessAnalyzer::parse_proc_statm(std::string_view content, ProcessSample& out_sample) {
+    // Format: size resident shared text lib data dirty (in pages)
+    const char* cur = content.data();
+    const char* end = cur + content.size();
+
+    // Skip size
+    core::simd::skip_whitespace_simd(cur, end);
+    core::simd::find_whitespace_simd(cur, end);
+
+    // Read resident
+    core::simd::skip_whitespace_simd(cur, end);
+    uint64_t res_pages = 0;
+    auto [r_ptr, r_ec] = std::from_chars(cur, end, res_pages);
+    if (r_ec != std::errc()) return false;
+    cur = r_ptr;
+
+    // Read shared
+    core::simd::skip_whitespace_simd(cur, end);
+    uint64_t sh_pages = 0;
+    auto [s_ptr, s_ec] = std::from_chars(cur, end, sh_pages);
+    if (s_ec != std::errc()) return false;
+
+    out_sample.rss_kib = res_pages * 4;
+    out_sample.pss_kib = (res_pages >= sh_pages ? (res_pages - sh_pages) + (sh_pages / 2) : res_pages) * 4;
+    return true;
+}
+
+
 bool ProcessAnalyzer::parse_proc_stat(std::string_view content, ProcessSample& out_sample) {
     // Format: pid (comm) state ppid ...
     auto open_paren = content.find('(');
@@ -197,76 +279,76 @@ bool ProcessAnalyzer::parse_proc_stat(std::string_view content, ProcessSample& o
     }
 
     // Parse PID
-    int32_t pid = 0;
-    auto [p_ptr, p_ec] = std::from_chars(content.data(), content.data() + open_paren, pid);
-    if (p_ec == std::errc()) {
-        out_sample.pid = pid;
-    }
+    const char* p_cur = content.data();
+    out_sample.pid = parse_i32_fast(p_cur, content.data() + open_paren);
 
     // Parse comm
     out_sample.comm = std::string(content.substr(open_paren + 1, close_paren - open_paren - 1));
 
     // Parse fields after ')'
-    auto remaining = content.substr(close_paren + 1);
-    const char* cur = remaining.data();
-    const char* end = remaining.data() + remaining.size();
+    const char* cur = content.data() + close_paren + 1;
+    const char* end = content.data() + content.size();
 
-    // Field 3: state
-    core::simd::skip_whitespace_simd(cur, end);
-    if (cur < end) ++cur; // skip single state char
+    // Skip whitespace after ')'
+    while (cur < end && *cur == ' ') ++cur;
+
+    // Field 3: state (single char)
+    if (cur < end) ++cur;
+    while (cur < end && *cur == ' ') ++cur;
 
     // Field 4: ppid
-    core::simd::skip_whitespace_simd(cur, end);
-    if (cur < end) {
-        int32_t ppid = 0;
-        auto [pp_ptr, pp_ec] = std::from_chars(cur, end, ppid);
-        if (pp_ec == std::errc()) {
-            out_sample.ppid = ppid;
-            cur = pp_ptr;
-        }
+    out_sample.ppid = parse_i32_fast(cur, end);
+    while (cur < end && *cur == ' ') ++cur;
+
+    // Tokens 5..9: Skip 5 tokens to reach Token 10 (minflt)
+    for (int i = 5; i <= 9 && cur < end; ++i) {
+        skip_token_fast(cur, end);
     }
 
-    // Skip fields 5 through 13 to reach field 14 (utime)
-    // Field 5: pgrp
-    // Field 6: session
-    // Field 7: tty_nr
-    // Field 8: tpgid
-    // Field 9: flags
-    // Field 10: minflt
-    // Field 11: cminflt
-    // Field 12: majflt
-    // Field 13: cmajflt
-    int token_count = 4; // We already passed tokens 1, 2, 3, 4
-    while (cur < end && token_count < 13) {
-        core::simd::skip_whitespace_simd(cur, end);
-        if (cur >= end) break;
-        core::simd::find_whitespace_simd(cur, end);
-        ++token_count;
+    // Token 10: minflt
+    out_sample.minflt = parse_u64_fast(cur, end);
+    while (cur < end && *cur == ' ') ++cur;
+
+    // Token 11: cminflt (skip 1 token)
+    skip_token_fast(cur, end);
+
+    // Token 12: majflt
+    out_sample.majflt = parse_u64_fast(cur, end);
+    while (cur < end && *cur == ' ') ++cur;
+
+    // Token 13: cmajflt (skip 1 token)
+    skip_token_fast(cur, end);
+
+    // Token 14: utime
+    out_sample.utime_ticks = parse_u64_fast(cur, end);
+    while (cur < end && *cur == ' ') ++cur;
+
+    // Token 15: stime
+    out_sample.stime_ticks = parse_u64_fast(cur, end);
+    while (cur < end && *cur == ' ') ++cur;
+
+    // Tokens 16..19: Skip 4 tokens to reach Token 20 (num_threads)
+    for (int i = 16; i <= 19 && cur < end; ++i) {
+        skip_token_fast(cur, end);
     }
 
-    // Now at field 14: utime
-    core::simd::skip_whitespace_simd(cur, end);
-    if (cur < end) {
-        uint64_t utime = 0;
-        auto [u_ptr, u_ec] = std::from_chars(cur, end, utime);
-        if (u_ec == std::errc()) {
-            out_sample.utime_ticks = utime;
-            cur = u_ptr;
-        }
+    // Token 20: num_threads
+    out_sample.num_threads = static_cast<uint32_t>(parse_u64_fast(cur, end));
+    while (cur < end && *cur == ' ') ++cur;
+
+    // Tokens 21..38: Skip 18 tokens to reach Token 39 (processor)
+    for (int i = 21; i <= 38 && cur < end; ++i) {
+        skip_token_fast(cur, end);
     }
 
-    // Now at field 15: stime
-    core::simd::skip_whitespace_simd(cur, end);
+    // Token 39: processor (Core ID)
     if (cur < end) {
-        uint64_t stime = 0;
-        auto [s_ptr, s_ec] = std::from_chars(cur, end, stime);
-        if (s_ec == std::errc()) {
-            out_sample.stime_ticks = stime;
-        }
+        out_sample.cpu_core = parse_i32_fast(cur, end);
     }
 
     return true;
 }
+
 
 bool ProcessAnalyzer::parse_proc_status(std::string_view content, ProcessSample& out_sample) {
     const char* cur = content.data();

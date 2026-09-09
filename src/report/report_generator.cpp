@@ -145,36 +145,46 @@ void ReportGenerator::render_terminal(const AnalysisReportData& r, std::ostream&
     out << "\n" << BOLD << "[2] Software-to-Hardware Power Attribution (Per-Process Hardware Usage)" << RESET << "\n";
     out << "------------------------------------------------------------------------------------------------------------------------\n";
     out << std::left << std::setw(7) << " PID"
-        << std::setw(17) << "Process Name"
-        << std::right << std::setw(8) << "CPU(W)"
-        << std::setw(8) << "GPU(W)"
-        << std::setw(8) << "NVMe(W)"
-        << std::setw(10) << "WakeTax(W)"
-        << std::setw(8) << "Fan(W)"
-        << std::setw(10) << "Total(W)"
-        << std::setw(7) << "WDI"
+        << std::setw(16) << "Process Name"
+        << std::right << std::setw(7) << "CPU(W)"
+        << std::setw(7) << "GPU(W)"
+        << std::setw(7) << "NVMe(W)"
+        << std::setw(9) << "WakeTax(W)"
+        << std::setw(7) << "Fan(W)"
+        << std::setw(9) << "Total(W)"
+        << std::setw(6) << "WDI"
+        << std::setw(7) << "Core"
+        << std::setw(8) << "PSS(MB)"
+        << std::setw(5) << "Skt"
         << "  Primary Hardware Mechanism\n";
     out << "------------------------------------------------------------------------------------------------------------------------\n";
 
     for (const auto& p : r.top_processes) {
-        std::string comm_trunc = p.comm.size() > 15 ? p.comm.substr(0, 14) + "…" : p.comm;
+        std::string comm_trunc = p.comm.size() > 14 ? p.comm.substr(0, 13) + "…" : p.comm;
+        std::string core_str = p.cpu_core >= 0 ? ("C" + std::to_string(p.cpu_core) + (p.cross_ccx_migration ? "!" : "")) : "-";
+        std::string pss_str = p.pss_kib > 0 ? (std::to_string(p.pss_kib / 1024) + "M") : "-";
+        std::string skt_str = p.open_sockets > 0 ? std::to_string(p.open_sockets) : "-";
 
         out << " " << std::left << std::setw(6) << p.pid
-            << std::setw(17) << comm_trunc
+            << std::setw(16) << comm_trunc
             << std::right << std::fixed << std::setprecision(2)
-            << std::setw(7) << p.cpu_watts << " "
-            << std::setw(7) << p.gpu_watts << " "
-            << std::setw(7) << p.io_watts << " "
-            << std::setw(9) << p.wakeup_tax_watts << " "
-            << std::setw(7) << p.fan_attributed_watts << " "
-            << BOLD << std::setw(9) << p.total_attributed_watts << RESET << " "
-            << std::setw(6) << std::setprecision(1) << p.wdi_score << "  "
+            << std::setw(6) << p.cpu_watts << " "
+            << std::setw(6) << p.gpu_watts << " "
+            << std::setw(6) << p.io_watts << " "
+            << std::setw(8) << p.wakeup_tax_watts << " "
+            << std::setw(6) << p.fan_attributed_watts << " "
+            << BOLD << std::setw(8) << p.total_attributed_watts << RESET << " "
+            << std::setw(5) << std::setprecision(1) << p.wdi_score << " "
+            << std::setw(6) << core_str << " "
+            << std::setw(7) << pss_str << " "
+            << std::setw(4) << skt_str << "  "
             << "[" << BOLD << p.primary_hw_domain << RESET << "] " << DIM << p.hardware_mechanism << RESET << "\n";
     }
 
     out << "------------------------------------------------------------------------------------------------------------------------\n";
-    out << DIM << " * WakeTax (W): Penalty for context switches forcing CPU out of C3 deep sleep into C0 active state.\n";
-    out << " * Fan (W): Proportional share of mechanical cooling fan power thermally induced by CPU/GPU silicon heat load.\n" << RESET;
+    out << DIM << " * Core: Last CPU core (! indicates cross-CCX cache thrashing). PSS: Proportional DRAM memory footprint.\n";
+    out << " * Skt: Active network sockets. WakeTax: Context switches & timer slack penalty. Fan: Thermally induced cooling power.\n" << RESET;
+
 
     // 3. Hardware Domain Direct Attribution (Culprits) Section (REF-REQ-011)
     if (!r.domain_culprits.empty()) {
@@ -303,6 +313,16 @@ void ReportGenerator::render_json(const AnalysisReportData& r, std::ostream& out
         out << "      \"wakeups_per_sec\": " << p.wakeups_per_sec << ",\n";
         out << "      \"vram_kib\": " << p.vram_kib << ",\n";
         out << "      \"disk_io_mb_per_sec\": " << p.disk_io_mb_per_sec << ",\n";
+        out << "      \"cpu_core\": " << p.cpu_core << ",\n";
+        out << "      \"num_threads\": " << p.num_threads << ",\n";
+        out << "      \"cross_ccx_migration\": " << (p.cross_ccx_migration ? "true" : "false") << ",\n";
+        out << "      \"timerslack_ns\": " << p.timerslack_ns << ",\n";
+        out << "      \"pss_kib\": " << p.pss_kib << ",\n";
+        out << "      \"minflt_per_sec\": " << p.minflt_per_sec << ",\n";
+        out << "      \"majflt_per_sec\": " << p.majflt_per_sec << ",\n";
+        out << "      \"open_sockets\": " << p.open_sockets << ",\n";
+        out << "      \"wifi_watts\": " << p.wifi_attributed_watts << ",\n";
+        out << "      \"dram_watts\": " << p.dram_attributed_watts << ",\n";
         out << "      \"primary_hw_domain\": \"" << p.primary_hw_domain << "\",\n";
         out << "      \"hardware_mechanism\": \"" << p.hardware_mechanism << "\",\n";
         out << "      \"is_runaway\": " << (p.is_runaway_candidate ? "true" : "false") << "\n";

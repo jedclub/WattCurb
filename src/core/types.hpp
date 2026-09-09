@@ -97,7 +97,18 @@ struct ProcessSample {
     uint64_t drm_engine_dec_ns{0};
     uint64_t drm_engine_enc_ns{0};
     uint64_t drm_vram_kib{0};
+
+    // Deep Process Physical Telemetry (REF-REQ-013)
+    int32_t cpu_core{-1};
+    uint32_t num_threads{1};
+    uint64_t minflt{0};
+    uint64_t majflt{0};
+    uint64_t pss_kib{0};
+    uint64_t rss_kib{0};
+    uint64_t timerslack_ns{50000};
+    uint32_t open_sockets{0};
 };
+
 
 // Implements REF-REQ-001, REF-REQ-010 & REF-RES-002
 struct HardwarePowerBreakdown {
@@ -178,9 +189,23 @@ struct ProcessAttributedPower {
     uint64_t vram_kib{0};
     double disk_io_mb_per_sec{0.0};
     bool is_runaway_candidate{false};
+
+    // Deep Process Physical Telemetry (REF-REQ-013)
+    int32_t cpu_core{-1};
+    uint32_t num_threads{1};
+    bool cross_ccx_migration{false};
+    uint64_t timerslack_ns{50000};
+    uint64_t pss_kib{0};
+    uint64_t minflt_per_sec{0};
+    uint64_t majflt_per_sec{0};
+    uint32_t open_sockets{0};
+    double wifi_attributed_watts{0.0};
+    double dram_attributed_watts{0.0};
+
     std::string primary_hw_domain;  // e.g. "GPU Silicon", "CPU C-State Wakeup", "CPU Compute", "NVMe Storage"
     std::string hardware_mechanism; // e.g. "AMDGPU GFX Engine (455MB VRAM, 98% GPU)"
 };
+
 
 // Implements REF-REQ-011 (Hardware Domain Direct Attribution)
 struct ProcessDomainShare {

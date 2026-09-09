@@ -26,6 +26,8 @@ All documents follow the Ref-ID naming standard:
 | [`REF-REQ-010`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-007-extreme-hardware-telemetry.md) | Full-Domain Physical Hardware Power & Telemetry Probe Specification | Approved | [`REF-ARCH-002`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-002-profiler-implementation.md), [`REF-ARCH-004`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-004-resident-daemon-event-loop.md) |
 | [`REF-REQ-011`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-008-process-hardware-feature-tracking.md) | Process-to-Hardware Feature Attribution & Physical Causation Tracking Engine | Approved | [`REF-ARCH-002`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-002-profiler-implementation.md), [`REF-RES-003`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-003-hardware-to-process-attribution.md) |
 | [`REF-REQ-012`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-009-continuous-window-evaluation.md) | Multi-Sample Continuous Window Evaluation & Steady-State Telemetry | Approved | [`REF-ARCH-002`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-002-profiler-implementation.md), [`REF-ARCH-004`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-004-resident-daemon-event-loop.md) |
+| [`REF-REQ-013`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-010-deep-process-power-tracking.md) | Deep Process Physical Telemetry (CCX, Timer Slack, PSS DRAM, WiFi CAM) | Approved | [`REF-ARCH-002`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-002-profiler-implementation.md), [`REF-ARCH-005`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-005-zero-cost-cpuid-simd.md) |
+
 
 
 ---

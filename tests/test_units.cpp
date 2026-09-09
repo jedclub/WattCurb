@@ -14,17 +14,33 @@
 namespace test {
 
 void test_proc_stat_parsing() {
-    std::string mock_stat = "10523 (Web Content) S 1000 1000 1000 0 -1 4194304 1200 0 0 0 450 150 0 0 20 0 1 0 12345 100 200";
+    std::string mock_stat = "10523 (Web Content) S 1000 1000 1000 0 -1 4194304 1200 0 5 0 450 150 0 0 20 0 8 0 12345 100 200 0 0 0 0 0 0 0 0 0 0 0 0 0 17 6 0 0 0";
     wattcurb::ProcessSample sample;
     bool ok = wattcurb::proc::ProcessAnalyzer::parse_proc_stat(mock_stat, sample);
     assert(ok && "parse_proc_stat should succeed");
     (void)ok;
     assert(sample.pid == 10523);
     assert(sample.comm == "Web Content");
+    assert(sample.minflt == 1200);
+    assert(sample.majflt == 5);
     assert(sample.utime_ticks == 450);
     assert(sample.stime_ticks == 150);
-    std::cout << " [PASS] test_proc_stat_parsing\n";
+    assert(sample.num_threads == 8);
+    assert(sample.cpu_core == 6);
+    std::cout << " [PASS] test_proc_stat_parsing (with deep fields: minflt, majflt, threads, core)\n";
 }
+
+void test_proc_statm_parsing() {
+    std::string mock_statm = "50000 10000 2500 100 0 500 0\n";
+    wattcurb::ProcessSample sample;
+    bool ok = wattcurb::proc::ProcessAnalyzer::parse_proc_statm(mock_statm, sample);
+    assert(ok && "parse_proc_statm should succeed");
+    (void)ok;
+    assert(sample.rss_kib == 40000);
+    assert(sample.pss_kib == (10000 - 2500 + 1250) * 4);
+    std::cout << " [PASS] test_proc_statm_parsing\n";
+}
+
 
 void test_proc_status_parsing() {
     std::string mock_status = 
@@ -156,7 +172,7 @@ void test_windowed_attribution_engine() {
 
 void test_oracle_gate_performance_benchmark() {
     std::cout << " [ORACLE GATE] Running micro-benchmark on zero-allocation parser...\n";
-    std::string sample_line = "54321 (bench_proc) R 1 1 1 0 0 0 0 0 0 0 1000 500 0 0 20 0 1 0 999 100 200";
+    std::string sample_line = "54321 (bench_proc) R 1 1 1 0 0 0 0 0 0 0 1000 500 0 0 20 0 1 0 999 100 200 0 0 0 0 0 0 0 0 0 0 0 0 0 17 6 0 0 0";
 
     auto start = std::chrono::high_resolution_clock::now();
     wattcurb::ProcessSample sample;
@@ -338,6 +354,7 @@ int main() {
     test::test_ifunc_and_nttp_dispatch();
     test::test_simd_scanner();
     test::test_proc_stat_parsing();
+    test::test_proc_statm_parsing();
     test::test_proc_status_parsing();
     test::test_proc_io_parsing();
     test::test_drm_fdinfo_parsing();
