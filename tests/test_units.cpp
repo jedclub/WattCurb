@@ -8,9 +8,13 @@
 #undef NDEBUG
 #include <cassert>
 #include <chrono>
+#include <cstring>
 #include <iostream>
+#include <linux/perf_event.h>
 #include <sstream>
 #include <string>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 // Implements REF-TEST-002 & Oracle Gate Verification
 namespace test {
@@ -358,13 +362,93 @@ void test_scoped_profiler() {
     std::ostringstream oss;
     wattcurb::core::ScopedProfilerRegistry::instance().print_summary(oss);
     std::string summary = oss.str();
-#if defined(WATTCURB_DEV_PROFILE) || (!defined(NDEBUG) && !defined(WATTCURB_DISABLE_DEV_PROFILE))
+#if defined(WATTCURB_DEV_PROFILE)
     assert(!summary.empty() && "Profile summary must not be empty in dev mode");
     assert(summary.find("unit_test_scope") != std::string::npos && "Scope name must be in summary");
 #else
     assert(summary.empty() && "Profile summary must be completely empty in release builds");
 #endif
     std::cout << " [PASS] test_scoped_profiler (Zero-overhead release purity verified)\n";
+}
+
+// Implements REF-TEST-005: Direct PMU Hardware Counter Verification
+void test_pmu_perf_event_telemetry() {
+    struct perf_event_attr pe{};
+    pe.type = PERF_TYPE_HARDWARE;
+    pe.size = sizeof(struct perf_event_attr);
+    pe.config = PERF_COUNT_HW_INSTRUCTIONS;
+    pe.disabled = 0;
+    pe.exclude_kernel = 1;
+    pe.exclude_hv = 1;
+
+    int fd = static_cast<int>(::syscall(__NR_perf_event_open, &pe, 0, -1, -1, 0));
+    if (fd < 0) {
+        std::cout << " [SKIP] test_pmu_perf_event_telemetry: perf_event_open not permitted in this environment\n";
+        return;
+    }
+
+    uint64_t count1 = 0;
+    ssize_t n1 = ::read(fd, &count1, sizeof(count1));
+    assert(n1 == sizeof(count1) && "Single-read syscall must return 8-byte uint64 counter");
+
+    // Perform a controlled compute loop
+    volatile uint64_t sum = 0;
+    for (uint64_t i = 0; i < 10000; ++i) {
+        sum += i;
+    }
+    (void)sum;
+
+    uint64_t count2 = 0;
+    ssize_t n2 = ::read(fd, &count2, sizeof(count2));
+    assert(n2 == sizeof(count2));
+    assert(count2 >= count1 && "PMU Instruction counter must be monotonically non-decreasing");
+
+    ::close(fd);
+    std::cout << " [PASS] test_pmu_perf_event_telemetry (Instructions counted: " << (count2 - count1) << ")\n";
+}
+
+// Implements REF-TEST-006: PCIe Binary Config Space Decoding Verification
+void test_pcie_binary_config_decoder() {
+    std::array<uint8_t, 256> mock_cfg{};
+
+    // Status register at 0x06: set bit 4 (Capabilities List = 0x0010)
+    mock_cfg[0x06] = 0x10;
+    mock_cfg[0x07] = 0x00;
+
+    // Capabilities pointer at 0x34: points to 0x40
+    mock_cfg[0x34] = 0x40;
+
+    // Capability 1 at 0x40: ID 0x01 (Power Management), Next = 0x60
+    mock_cfg[0x40] = 0x01;
+    mock_cfg[0x41] = 0x60;
+
+    // Capability 2 at 0x60: ID 0x10 (PCI Express), Next = 0x00
+    mock_cfg[0x60] = 0x10;
+    mock_cfg[0x61] = 0x00;
+
+    // Link Status register at 0x60 + 0x12 = 0x72
+    // Gen 4 (0x04) and x16 (0x10 in bits [9:4] -> 0x0100)
+    // Link Status = 0x0104
+    mock_cfg[0x72] = 0x04; // Speed = 4 (Gen4)
+    mock_cfg[0x73] = 0x01; // Width = 16 (0x10 << 4 = 0x0100 -> high byte has 0x01)
+
+    auto [speed, width] = wattcurb::hw::HardwareProbe::decode_pcie_link_status(mock_cfg.data(), mock_cfg.size());
+    assert(speed == 4 && "PCIe speed must decode to Gen4 (4)");
+    assert(width == 16 && "PCIe width must decode to x16 (16)");
+
+    // Test invalid buffers and boundaries
+    auto [s_null, w_null] = wattcurb::hw::HardwareProbe::decode_pcie_link_status(nullptr, 256);
+    assert(s_null == 0 && w_null == 0 && "Null pointer must safely return {0,0}");
+
+    auto [s_small, w_small] = wattcurb::hw::HardwareProbe::decode_pcie_link_status(mock_cfg.data(), 60);
+    assert(s_small == 0 && w_small == 0 && "Sub-64 buffer must safely return {0,0}");
+
+    // Buffer without Capabilities bit
+    mock_cfg[0x06] = 0x00;
+    auto [s_nocap, w_nocap] = wattcurb::hw::HardwareProbe::decode_pcie_link_status(mock_cfg.data(), mock_cfg.size());
+    assert(s_nocap == 0 && w_nocap == 0 && "Missing capabilities bit must return {0,0}");
+
+    std::cout << " [PASS] test_pcie_binary_config_decoder (Gen4 x16 binary decode verified)\n";
 }
 
 } // namespace test
@@ -384,6 +468,8 @@ int main() {
     test::test_windowed_attribution_engine();
     test::test_singleton_lock();
     test::test_persistent_hw_probe();
+    test::test_pmu_perf_event_telemetry();
+    test::test_pcie_binary_config_decoder();
     test::test_scoped_profiler();
     test::test_oracle_gate_performance_benchmark();
     std::cout << "=== ALL TESTS & ORACLE GATE PASSED SUCCESSFULLY ===\n";

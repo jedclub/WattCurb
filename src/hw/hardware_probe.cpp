@@ -6,6 +6,8 @@
 #include <charconv>
 #include <cstring>
 #include <fcntl.h>
+#include <linux/perf_event.h>
+#include <sys/syscall.h>
 #include <system_error>
 #include <unistd.h>
 #include <utility>
@@ -109,7 +111,13 @@ HardwareProbe::HardwareProbe(HardwareProbe&& other) noexcept
       backlight_max_fd_(std::exchange(other.backlight_max_fd_, -1)),
       wifi_status_fd_(std::exchange(other.wifi_status_fd_, -1)),
       wifi_temp_fd_(std::exchange(other.wifi_temp_fd_, -1)),
-      aspm_policy_fd_(std::exchange(other.aspm_policy_fd_, -1)) {}
+      aspm_policy_fd_(std::exchange(other.aspm_policy_fd_, -1)),
+      pmu_instructions_fd_(std::exchange(other.pmu_instructions_fd_, -1)),
+      pmu_cycles_fd_(std::exchange(other.pmu_cycles_fd_, -1)),
+      pmu_llc_misses_fd_(std::exchange(other.pmu_llc_misses_fd_, -1)),
+      pcie_gpu_config_fd_(std::exchange(other.pcie_gpu_config_fd_, -1)),
+      pcie_nvme_config_fd_(std::exchange(other.pcie_nvme_config_fd_, -1)),
+      cpu0_msr_fd_(std::exchange(other.cpu0_msr_fd_, -1)) {}
 
 HardwareProbe& HardwareProbe::operator=(HardwareProbe&& other) noexcept {
     if (this != &other) {
@@ -187,6 +195,12 @@ HardwareProbe& HardwareProbe::operator=(HardwareProbe&& other) noexcept {
         wifi_status_fd_ = std::exchange(other.wifi_status_fd_, -1);
         wifi_temp_fd_ = std::exchange(other.wifi_temp_fd_, -1);
         aspm_policy_fd_ = std::exchange(other.aspm_policy_fd_, -1);
+        pmu_instructions_fd_ = std::exchange(other.pmu_instructions_fd_, -1);
+        pmu_cycles_fd_ = std::exchange(other.pmu_cycles_fd_, -1);
+        pmu_llc_misses_fd_ = std::exchange(other.pmu_llc_misses_fd_, -1);
+        pcie_gpu_config_fd_ = std::exchange(other.pcie_gpu_config_fd_, -1);
+        pcie_nvme_config_fd_ = std::exchange(other.pcie_nvme_config_fd_, -1);
+        cpu0_msr_fd_ = std::exchange(other.cpu0_msr_fd_, -1);
     }
     return *this;
 }
@@ -251,6 +265,13 @@ void HardwareProbe::close_fds() noexcept {
     safe_close(wifi_status_fd_);
     safe_close(wifi_temp_fd_);
     safe_close(aspm_policy_fd_);
+
+    safe_close(pmu_instructions_fd_);
+    safe_close(pmu_cycles_fd_);
+    safe_close(pmu_llc_misses_fd_);
+    safe_close(pcie_gpu_config_fd_);
+    safe_close(pcie_nvme_config_fd_);
+    safe_close(cpu0_msr_fd_);
 }
 
 void HardwareProbe::open_persistent_fds() {
@@ -356,6 +377,86 @@ void HardwareProbe::open_persistent_fds() {
     if (!wifi_status_path_.empty()) wifi_status_fd_ = open_ro_cloexec(wifi_status_path_);
     if (!wifi_temp_path_.empty()) wifi_temp_fd_ = open_ro_cloexec(wifi_temp_path_);
     if (!aspm_policy_path_.empty()) aspm_policy_fd_ = open_ro_cloexec(aspm_policy_path_);
+
+    // 8. Syscall-Level Direct Hardware Telemetry (REF-REQ-015)
+    init_pmu_counters();
+    init_pcie_binary_configs();
+    init_msr_telemetry();
+}
+
+void HardwareProbe::init_pmu_counters() {
+    struct perf_event_attr pe{};
+    pe.size = sizeof(struct perf_event_attr);
+    pe.disabled = 0;
+    pe.exclude_kernel = 1;
+    pe.exclude_hv = 1;
+
+    pe.type = PERF_TYPE_HARDWARE;
+    pe.config = PERF_COUNT_HW_INSTRUCTIONS;
+    pmu_instructions_fd_ = static_cast<int>(::syscall(__NR_perf_event_open, &pe, 0, -1, -1, 0));
+
+    pe.config = PERF_COUNT_HW_CPU_CYCLES;
+    pmu_cycles_fd_ = static_cast<int>(::syscall(__NR_perf_event_open, &pe, 0, -1, -1, 0));
+
+    pe.config = PERF_COUNT_HW_CACHE_MISSES;
+    pmu_llc_misses_fd_ = static_cast<int>(::syscall(__NR_perf_event_open, &pe, 0, -1, -1, 0));
+}
+
+void HardwareProbe::init_pcie_binary_configs() {
+    std::error_code ec;
+    // Direct GPU PCIe Binary Config Space
+    if (!drm_device_path_.empty()) {
+        auto cfg = drm_device_path_ / "config";
+        if (std::filesystem::exists(cfg, ec)) {
+            pcie_gpu_config_fd_ = open_ro_cloexec(cfg);
+        }
+    }
+    // Direct NVMe PCIe Binary Config Space
+    if (!nvme_status_path_.empty()) {
+        auto dev_dir = nvme_status_path_.parent_path().parent_path();
+        auto cfg = dev_dir / "config";
+        if (std::filesystem::exists(cfg, ec)) {
+            pcie_nvme_config_fd_ = open_ro_cloexec(cfg);
+        }
+    }
+}
+
+void HardwareProbe::init_msr_telemetry() {
+    cpu0_msr_fd_ = ::open("/dev/cpu/0/msr", O_RDONLY | O_CLOEXEC);
+}
+
+std::pair<uint8_t, uint8_t> HardwareProbe::decode_pcie_link_status(const uint8_t* config_data, size_t size) noexcept {
+    if (!config_data || size < 64) return {0, 0};
+
+    // Verify PCI Status register Bit 4 (Capabilities List bit)
+    uint16_t status = 0;
+    std::memcpy(&status, config_data + 0x06, sizeof(status));
+    if (!(status & 0x0010)) return {0, 0};
+
+    uint8_t cap_ptr = config_data[0x34];
+    // Loop through capability chain (guarding against malformed loops with max 48 hops)
+    for (int i = 0; i < 48 && cap_ptr >= 0x40 && (static_cast<size_t>(cap_ptr) + 0x14) <= size; ++i) {
+        uint8_t cap_id = config_data[cap_ptr];
+        if (cap_id == 0x10) { // PCI Express Capability
+            uint16_t link_status = 0;
+            std::memcpy(&link_status, config_data + cap_ptr + 0x12, sizeof(link_status));
+            uint8_t speed_gen = static_cast<uint8_t>(link_status & 0x0F);
+            uint8_t width_lanes = static_cast<uint8_t>((link_status >> 4) & 0x3F);
+            return {speed_gen, width_lanes};
+        }
+        cap_ptr = config_data[cap_ptr + 1];
+    }
+    return {0, 0};
+}
+
+std::pair<uint8_t, uint8_t> HardwareProbe::read_pcie_binary_link_status(int config_fd) noexcept {
+    if (config_fd < 0) return {0, 0};
+    alignas(64) uint8_t buf[256]{};
+    ssize_t n = ::pread(config_fd, buf, sizeof(buf), 0);
+    if (n > 64) {
+        return decode_pcie_link_status(buf, static_cast<size_t>(n));
+    }
+    return {0, 0};
 }
 
 void HardwareProbe::refresh_device_paths() {
@@ -745,6 +846,75 @@ HardwareSample HardwareProbe::capture_sample() const {
             if (aspm_policy_fd_ >= 0) {
                 read_string_buf(aspm_policy_fd_, sample.aspm_policy.data(), sample.aspm_policy.size());
             }
+        }
+    }
+
+    // 8. Syscall-Level Direct Hardware Telemetry (REF-REQ-015)
+    {
+        WATTCURB_PROFILE_SCOPE("hw.syscall_telemetry");
+
+        // PMU Hardware Counters via perf_event_open (Direct single-read syscalls)
+        if (pmu_instructions_fd_ >= 0) {
+            uint64_t inst = 0;
+            if (::read(pmu_instructions_fd_, &inst, sizeof(inst)) == sizeof(inst)) {
+                sample.pmu_instructions = inst;
+            }
+        }
+        if (pmu_cycles_fd_ >= 0) {
+            uint64_t cyc = 0;
+            if (::read(pmu_cycles_fd_, &cyc, sizeof(cyc)) == sizeof(cyc)) {
+                sample.pmu_cycles = cyc;
+            }
+        }
+        if (sample.pmu_cycles > 0 && sample.pmu_instructions > 0) {
+            sample.pmu_ipc = static_cast<double>(sample.pmu_instructions) / static_cast<double>(sample.pmu_cycles);
+        }
+        if (pmu_llc_misses_fd_ >= 0) {
+            uint64_t llc = 0;
+            if (::read(pmu_llc_misses_fd_, &llc, sizeof(llc)) == sizeof(llc)) {
+                sample.pmu_llc_misses = llc;
+            }
+        }
+
+        // Direct PCIe Binary Config Space Decoding
+        if (pcie_gpu_config_fd_ >= 0) {
+            auto [speed, width] = read_pcie_binary_link_status(pcie_gpu_config_fd_);
+            if (speed > 0) {
+                sample.pcie_link_speed_gen = speed;
+                sample.pcie_link_width_lanes = width;
+            }
+        }
+        // Graceful fallback for non-root 64-byte config limit
+        if (sample.pcie_link_speed_gen == 0 && gpu_link_speed_fd_ >= 0) {
+            std::array<char, 32> spd_buf{};
+            if (read_string_buf(gpu_link_speed_fd_, spd_buf.data(), spd_buf.size())) {
+                if (std::strstr(spd_buf.data(), "16.0")) sample.pcie_link_speed_gen = 4;
+                else if (std::strstr(spd_buf.data(), "8.0")) sample.pcie_link_speed_gen = 3;
+                else if (std::strstr(spd_buf.data(), "5.0")) sample.pcie_link_speed_gen = 2;
+                else if (std::strstr(spd_buf.data(), "2.5")) sample.pcie_link_speed_gen = 1;
+                else if (std::strstr(spd_buf.data(), "32.0")) sample.pcie_link_speed_gen = 5;
+            }
+        }
+        if (sample.pcie_link_width_lanes == 0 && gpu_link_width_fd_ >= 0) {
+            auto w = read_uint32_fd(gpu_link_width_fd_);
+            if (w) sample.pcie_link_width_lanes = static_cast<uint8_t>(*w);
+        }
+
+        // Direct AMD Zen Silicon MSR Core VID Telemetry
+        if (cpu0_msr_fd_ >= 0) {
+            uint64_t msr_val = 0;
+            if (::pread(cpu0_msr_fd_, &msr_val, sizeof(msr_val), 0xC0010064) == sizeof(msr_val)) {
+                uint32_t vid = static_cast<uint32_t>((msr_val >> 14) & 0xFF);
+                if (vid > 0 && vid <= 0xFF) {
+                    int32_t mv = 1550 - static_cast<int32_t>(vid * 625 / 100);
+                    if (mv > 200 && mv < 2000) {
+                        sample.cpu_core_vid_mv = static_cast<uint32_t>(mv);
+                    }
+                }
+            }
+        }
+        if (!sample.cpu_core_vid_mv.has_value() && sample.gpu_vddgfx_mv.has_value()) {
+            sample.cpu_core_vid_mv = sample.gpu_vddgfx_mv;
         }
     }
 

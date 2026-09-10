@@ -78,6 +78,15 @@ struct HardwareSample {
     bool wifi_active{false};
     std::optional<int32_t> wifi_temp_mdeg;
     std::array<char, 32> aspm_policy{};
+
+    // 8. Syscall-Level Direct Hardware Telemetry (REF-REQ-015)
+    uint64_t pmu_instructions{0};
+    uint64_t pmu_cycles{0};
+    double pmu_ipc{0.0};
+    uint64_t pmu_llc_misses{0};
+    std::optional<uint32_t> cpu_core_vid_mv; // Silicon Core Voltage (mV) via MSR / hwmon
+    uint8_t pcie_link_speed_gen{0};          // Binary Config Space: PCIe Gen (1-5)
+    uint8_t pcie_link_width_lanes{0};        // Binary Config Space: Negotiated Width (1-16)
 };
 
 // Zero-Allocation Fixed-Capacity Process Comm (REF-REQ-009, REF-ARCH-005)
@@ -212,6 +221,15 @@ struct HardwarePowerBreakdown {
     std::string wifi_status;
     double wifi_temp_c{0.0};
     std::string aspm_policy;
+
+    // Direct Syscall Hardware Telemetry (REF-REQ-015)
+    uint64_t pmu_instructions{0};
+    uint64_t pmu_cycles{0};
+    double pmu_ipc{0.0};
+    uint64_t pmu_llc_misses{0};
+    std::optional<uint32_t> cpu_core_vid_mv;
+    uint8_t pcie_link_speed_gen{0};
+    uint8_t pcie_link_width_lanes{0};
 };
 
 // Implements REF-REQ-004, REF-REQ-011 & REF-RES-003

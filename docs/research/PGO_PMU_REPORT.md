@@ -1,6 +1,6 @@
 # [REF-RES-004] WattCurb PGO & PMU Hardware Performance Audit Report
 
-- **Date**: 2026-09-09 16:39:16 UTC
+- **Date**: 2026-09-10 14:27:10 UTC
 - **Architecture**: x86_64 / 
 - **Compiler**: GCC 16 with C++23, Link-Time Optimization (-flto), and Native Tuning (-march=native)
 - **Profile-Guided Optimization**: Active (-fprofile-use -fprofile-correction)
@@ -15,37 +15,42 @@ The test suite was audited using hardware PMU counters via Linux `perf`:
 === WattCurb Unit Test Suite & Oracle Gate Verifier ===
  [INFO] CPU Features detected: AVX2=1 BMI1=1 BMI2=1 POPCNT=1 AVX512F=0
  [PASS] test_cpu_features
- [PASS] test_hw_isa_primitives (Core ID=2, TSC=15594582571707)
+ [PASS] test_hw_isa_primitives (Core ID=0, TSC=2125904746307)
  [PASS] test_ifunc_and_nttp_dispatch (GNU IFUNC & C++23 NTTP verified)
  [PASS] test_simd_scanner
- [PASS] test_proc_stat_parsing
+ [PASS] test_proc_stat_parsing (with deep fields: minflt, majflt, threads, core)
+ [PASS] test_proc_statm_parsing
  [PASS] test_proc_status_parsing
  [PASS] test_proc_io_parsing
  [PASS] test_drm_fdinfo_parsing
  [PASS] test_attribution_engine
+ [PASS] test_windowed_attribution_engine
  [PASS] test_singleton_lock
  [INFO] Hardware Probe Sample Captured:
-   - CPU Temp: 69.750000 C
-   - CPU Cores Online: 16, Avg Freq: 2066 MHz
-   - C-State POLL=2115593534us, C1=128011627764us, C2=615167047961us, C3=1813926781564us
-   - GPU Power: 9.000000 W
-   - GPU Busy: 4%
-   - Fan RPM: 4314
+   - CPU Temp: 70.750000 C
+   - CPU Cores Online: 16, Avg Freq: 2109 MHz
+   - C-State POLL=2141400919us, C1=128646015297us, C2=621734017919us, C3=1900893622519us
+   - GPU Power: 4.000000 W
+   - GPU Busy: 0%
+   - Fan RPM: 3481
    - Battery Discharging: false, AC Online: true
    - Battery Health: 94.191696%
-   - NVMe Status: active, Read sectors: 212646942
+   - NVMe Status: active, Read sectors: 231170561
  [PASS] test_persistent_hw_probe
+ [PASS] test_pmu_perf_event_telemetry (Instructions counted: 0)
+ [PASS] test_pcie_binary_config_decoder (Gen4 x16 binary decode verified)
+ [PASS] test_scoped_profiler (Zero-overhead release purity verified)
  [ORACLE GATE] Running micro-benchmark on zero-allocation parser...
- [ORACLE GATE] 100k stat parses completed in 15026 us (0.15026 us/op)
+ [ORACLE GATE] 100k stat parses completed in 10250 us (0.1025 us/op)
  [ORACLE GATE PASS] Performance within extreme efficiency threshold (< 0.5 us/op)
 === ALL TESTS & ORACLE GATE PASSED SUCCESSFULLY ===
-62716379;;cycles:u;19573960;77.00;;
-103229184;;instructions:u;21736868;86.00;;
-25893;;cache-misses:u;21222829;84.00;;
-19936;;L1-dcache-load-misses:u;21803762;86.00;;
-1667;;dTLB-load-misses:u;21926432;86.00;;
-25268067;;branches:u;22573379;89.00;;
-20732;;branch-misses:u;22471136;89.00;;
+41973415;;cycles:u;14522873;83.00;;
+161102180;;instructions:u;15293753;88.00;;
+27912;;cache-misses:u;15292791;88.00;;
+18975;;L1-dcache-load-misses:u;14736243;85.00;;
+1284;;dTLB-load-misses:u;13743980;79.00;;
+52654695;;branches:u;15315453;88.00;;
+113165;;branch-misses:u;14878041;86.00;;
 ```
 
 ---

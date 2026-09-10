@@ -161,6 +161,15 @@ HardwarePowerBreakdown AttributionEngine::compute_hardware_power(
         hw.uncore_and_platform_watts = 1.2;
     }
 
+    // 9. Direct Syscall Hardware Telemetry (REF-REQ-015)
+    hw.pmu_instructions = hw2.pmu_instructions;
+    hw.pmu_cycles = hw2.pmu_cycles;
+    hw.pmu_ipc = hw2.pmu_ipc;
+    hw.pmu_llc_misses = hw2.pmu_llc_misses;
+    hw.cpu_core_vid_mv = hw2.cpu_core_vid_mv;
+    hw.pcie_link_speed_gen = hw2.pcie_link_speed_gen;
+    hw.pcie_link_width_lanes = hw2.pcie_link_width_lanes;
+
     return hw;
 }
 

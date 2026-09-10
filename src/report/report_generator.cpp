@@ -140,6 +140,19 @@ void ReportGenerator::render_terminal(const AnalysisReportData& r, std::ostream&
         << "BT: " << (r.hardware.bluetooth_enabled ? "On" : "Off") << " | "
         << "KbdLight: Lvl " << r.hardware.kbdlight_level << " | "
         << "Bat Health: " << BOLD << r.hardware.battery_health_percent << "%" << RESET << " (Cycles: " << r.hardware.battery_cycle_count << ")\n";
+    out << DIM << " [Direct Syscall] " << RESET
+        << "PMU Instr: " << BOLD << r.hardware.pmu_instructions << RESET
+        << " | Cycles: " << r.hardware.pmu_cycles
+        << " | IPC: " << BOLD << GREEN << std::fixed << std::setprecision(2) << r.hardware.pmu_ipc << RESET
+        << " | LLC Miss: " << r.hardware.pmu_llc_misses;
+    if (r.hardware.cpu_core_vid_mv.has_value()) {
+        out << " | VID: " << BOLD << *r.hardware.cpu_core_vid_mv << "mV" << RESET;
+    }
+    if (r.hardware.pcie_link_speed_gen > 0) {
+        out << " | PCIe: " << BOLD << "Gen" << static_cast<int>(r.hardware.pcie_link_speed_gen)
+            << " x" << static_cast<int>(r.hardware.pcie_link_width_lanes) << RESET;
+    }
+    out << "\n";
 
     // 2. Software (Process) Attribution Section
     out << "\n" << BOLD << "[2] Software-to-Hardware Power Attribution (Per-Process Hardware Usage)" << RESET << "\n";
@@ -274,7 +287,14 @@ void ReportGenerator::render_json(const AnalysisReportData& r, std::ostream& out
     out << "    \"kbdlight_level\": " << r.hardware.kbdlight_level << ",\n";
     out << "    \"bluetooth_enabled\": " << (r.hardware.bluetooth_enabled ? "true" : "false") << ",\n";
     out << "    \"wifi_status\": \"" << r.hardware.wifi_status << "\",\n";
-    out << "    \"wifi_temp_c\": " << r.hardware.wifi_temp_c << "\n";
+    out << "    \"wifi_temp_c\": " << r.hardware.wifi_temp_c << ",\n";
+    out << "    \"pmu_instructions\": " << r.hardware.pmu_instructions << ",\n";
+    out << "    \"pmu_cycles\": " << r.hardware.pmu_cycles << ",\n";
+    out << "    \"pmu_ipc\": " << r.hardware.pmu_ipc << ",\n";
+    out << "    \"pmu_llc_misses\": " << r.hardware.pmu_llc_misses << ",\n";
+    out << "    \"cpu_core_vid_mv\": " << (r.hardware.cpu_core_vid_mv ? std::to_string(*r.hardware.cpu_core_vid_mv) : "null") << ",\n";
+    out << "    \"pcie_link_speed_gen\": " << static_cast<int>(r.hardware.pcie_link_speed_gen) << ",\n";
+    out << "    \"pcie_link_width_lanes\": " << static_cast<int>(r.hardware.pcie_link_width_lanes) << "\n";
     out << "  },\n";
     out << "  \"domain_culprits\": [\n";
 

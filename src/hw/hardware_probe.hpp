@@ -36,6 +36,13 @@ public:
     static std::string read_string_fd(int fd);
     static bool read_string_buf(int fd, char* buf, size_t max_len);
 
+    // Direct PCIe Capability 0x10 binary decoder (REF-REQ-015, REF-TEST-006)
+    static std::pair<uint8_t, uint8_t> decode_pcie_link_status(const uint8_t* config_data, size_t size) noexcept;
+    static std::pair<uint8_t, uint8_t> read_pcie_binary_link_status(int config_fd) noexcept;
+
+    // Direct PMU counter query (REF-REQ-015, REF-TEST-005)
+    [[nodiscard]] bool has_pmu_counters() const noexcept { return pmu_instructions_fd_ >= 0; }
+
 private:
     std::filesystem::path sysfs_root_;
 
@@ -141,6 +148,14 @@ private:
     int wifi_temp_fd_{-1};
     int aspm_policy_fd_{-1};
 
+    // 8. Syscall-Level Direct Hardware Telemetry (REF-REQ-015)
+    int pmu_instructions_fd_{-1};
+    int pmu_cycles_fd_{-1};
+    int pmu_llc_misses_fd_{-1};
+    int pcie_gpu_config_fd_{-1};
+    int pcie_nvme_config_fd_{-1};
+    int cpu0_msr_fd_{-1};
+
     // Sub-sampling caches to eliminate ACPI EC & NVMe wake latency
     mutable uint64_t sample_counter_{0};
     mutable bool cached_kbdlight_initialized_{false};
@@ -153,6 +168,9 @@ private:
     mutable std::optional<uint64_t> cached_energy_full_design_{std::nullopt};
     mutable std::optional<uint32_t> cached_cycle_count_{std::nullopt};
 
+    void init_pmu_counters();
+    void init_pcie_binary_configs();
+    void init_msr_telemetry();
     void open_persistent_fds();
     void close_fds() noexcept;
 };
