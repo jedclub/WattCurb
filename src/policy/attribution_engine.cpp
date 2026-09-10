@@ -210,9 +210,11 @@ AnalysisReportData AttributionEngine::compute_attribution(
         uint64_t delta_io_syscalls;
         uint64_t vram_kib;
 
-        // Deep Process Physical Telemetry (REF-REQ-013)
+        // Deep Process Physical Telemetry (REF-REQ-013, REF-REQ-016)
         int32_t cpu_core;
         uint32_t num_threads;
+        int32_t nice;
+        int32_t priority;
         uint64_t delta_minflt;
         uint64_t delta_majflt;
         uint64_t pss_kib;
@@ -264,14 +266,11 @@ AnalysisReportData AttributionEngine::compute_attribution(
                 uint64_t d_io = (io2 >= io1) ? (io2 - io1) : 0;
 
                 uint64_t d_syscalls = (p2.io_syscalls >= p1.io_syscalls) ? (p2.io_syscalls - p1.io_syscalls) : 0;
-
-                // Page Faults (REF-REQ-013)
                 uint64_t d_minflt = (p2.minflt >= p1.minflt) ? (p2.minflt - p1.minflt) : 0;
                 uint64_t d_majflt = (p2.majflt >= p1.majflt) ? (p2.majflt - p1.majflt) : 0;
 
-                // AMD Zen 2 CCX Migration: Cores 0-3 (threads 0-7) vs Cores 4-7 (threads 8-15)
-                bool cross_core = (p1.cpu_core >= 0 && p2.cpu_core >= 0 && p1.cpu_core != p2.cpu_core);
-                bool cross_ccx = cross_core && ((p1.cpu_core / 8) != (p2.cpu_core / 8));
+                bool cross_ccx = (p1.cpu_core >= 0 && p2.cpu_core >= 0 &&
+                                  (p1.cpu_core / 8) != (p2.cpu_core / 8) && d_cpu > 0);
 
                 total_delta_cpu += d_cpu;
                 total_delta_gpu_ns += d_gpu;
@@ -289,6 +288,8 @@ AnalysisReportData AttributionEngine::compute_attribution(
                     .vram_kib = p2.drm_vram_kib,
                     .cpu_core = p2.cpu_core,
                     .num_threads = p2.num_threads,
+                    .nice = p2.nice,
+                    .priority = p2.priority,
                     .delta_minflt = d_minflt,
                     .delta_majflt = d_majflt,
                     .pss_kib = p2.pss_kib > 0 ? p2.pss_kib : p1.pss_kib,
@@ -327,9 +328,11 @@ AnalysisReportData AttributionEngine::compute_attribution(
             pap.vram_kib = d.vram_kib;
             pap.wakeups_per_sec = static_cast<uint64_t>(static_cast<double>(d.delta_wakeups) / delta_sec);
 
-            // Physical Telemetry fields (REF-REQ-013)
+            // Physical Telemetry fields (REF-REQ-013, REF-REQ-016)
             pap.cpu_core = d.cpu_core;
             pap.num_threads = d.num_threads;
+            pap.nice = d.nice;
+            pap.priority = d.priority;
             pap.cross_ccx_migration = d.cross_ccx_migration;
             pap.timerslack_ns = d.timerslack_ns;
             pap.pss_kib = d.pss_kib;
@@ -632,6 +635,38 @@ AnalysisReportData AttributionEngine::compute_attribution(
         }
     }
 
+    // Domain G: Memory & DRAM Subsystem (PSS Retention & Memory Bus Contention - REF-REQ-016)
+    {
+        DomainCulprit dram_culprit;
+        dram_culprit.domain_name = "Memory & DRAM Subsystem (PSS Retention & Page Faults)";
+        double total_dram_watts = 0.0;
+        std::vector<ProcessAttributedPower> dram_procs;
+        for (const auto& p : attributed) {
+            if (p.dram_attributed_watts > 0.01 || p.pss_kib > 50 * 1024) {
+                dram_procs.push_back(p);
+                total_dram_watts += p.dram_attributed_watts;
+            }
+        }
+        dram_culprit.domain_total_watts = total_dram_watts;
+        std::sort(dram_procs.begin(), dram_procs.end(), [](const auto& a, const auto& b) {
+            return a.dram_attributed_watts > b.dram_attributed_watts;
+        });
+        for (size_t i = 0; i < std::min<size_t>(5, dram_procs.size()); ++i) {
+            double sh = (total_dram_watts > 0.0) ? (dram_procs[i].dram_attributed_watts / total_dram_watts) * 100.0 : 0.0;
+            std::string flt_str = dram_procs[i].majflt_per_sec > 0 ? (", " + std::to_string(dram_procs[i].majflt_per_sec) + " majflt/s") : "";
+            dram_culprit.top_culprits.push_back(ProcessDomainShare{
+                .pid = dram_procs[i].pid,
+                .comm = dram_procs[i].comm,
+                .watts = dram_procs[i].dram_attributed_watts,
+                .share_percent = sh,
+                .detail = std::to_string(dram_procs[i].pss_kib / 1024) + "MB PSS DRAM" + flt_str
+            });
+        }
+        if (!dram_culprit.top_culprits.empty()) {
+            report.domain_culprits.push_back(std::move(dram_culprit));
+        }
+    }
+
     // Sort descending by WDI score
     {
         WATTCURB_PROFILE_SCOPE("policy.wdi_ranking");
@@ -688,6 +723,8 @@ AnalysisReportData AttributionEngine::compute_windowed_attribution(
             acc.uid = cur.uid;
             acc.cpu_core = cur.cpu_core;
             acc.num_threads = cur.num_threads;
+            acc.nice = cur.nice;
+            acc.priority = cur.priority;
             acc.timerslack_ns = std::min(acc.timerslack_ns, cur.timerslack_ns);
             acc.pss_kib = std::max(acc.pss_kib, cur.pss_kib);
             acc.rss_kib = std::max(acc.rss_kib, cur.rss_kib);
@@ -788,6 +825,8 @@ AnalysisReportData AttributionEngine::compute_windowed_attribution(
         z.uid = acc.uid;
         z.cpu_core = acc.cpu_core;
         z.num_threads = acc.num_threads;
+        z.nice = acc.nice;
+        z.priority = acc.priority;
         z.timerslack_ns = acc.timerslack_ns;
         z.pss_kib = acc.pss_kib;
         z.rss_kib = acc.rss_kib;

@@ -146,9 +146,11 @@ struct ProcessSample {
     uint64_t drm_engine_enc_ns{0};
     uint64_t drm_vram_kib{0};
 
-    // Deep Process Physical Telemetry (REF-REQ-013)
+    // Deep Process Physical Telemetry (REF-REQ-013, REF-REQ-016)
     int32_t cpu_core{-1};
     uint32_t num_threads{1};
+    int32_t nice{0};
+    int32_t priority{0};
     uint64_t minflt{0};
     uint64_t majflt{0};
     uint64_t pss_kib{0};
@@ -251,9 +253,11 @@ struct ProcessAttributedPower {
     double disk_io_mb_per_sec{0.0};
     bool is_runaway_candidate{false};
 
-    // Deep Process Physical Telemetry (REF-REQ-013)
+    // Deep Process Physical Telemetry (REF-REQ-013, REF-REQ-016)
     int32_t cpu_core{-1};
     uint32_t num_threads{1};
+    int32_t nice{0};
+    int32_t priority{0};
     bool cross_ccx_migration{false};
     uint64_t timerslack_ns{50000};
     uint64_t pss_kib{0};

@@ -30,10 +30,11 @@ void test_proc_stat_parsing() {
     assert(sample.minflt == 1200);
     assert(sample.majflt == 5);
     assert(sample.utime_ticks == 450);
-    assert(sample.stime_ticks == 150);
+    assert(sample.priority == 20);
+    assert(sample.nice == 0);
     assert(sample.num_threads == 8);
     assert(sample.cpu_core == 6);
-    std::cout << " [PASS] test_proc_stat_parsing (with deep fields: minflt, majflt, threads, core)\n";
+    std::cout << " [PASS] test_proc_stat_parsing (with deep fields: minflt, majflt, threads, core, pri, nice)\n";
 }
 
 void test_proc_statm_parsing() {

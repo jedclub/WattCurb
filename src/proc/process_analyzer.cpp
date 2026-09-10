@@ -128,7 +128,11 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
 
     alignas(64) char dentry_buf[16384];
     while (true) {
-        long nread = ::syscall(SYS_getdents64, proc_dfd, dentry_buf, sizeof(dentry_buf));
+        long nread = 0;
+        {
+            WATTCURB_PROFILE_SCOPE("proc.root_getdents");
+            nread = ::syscall(SYS_getdents64, proc_dfd, dentry_buf, sizeof(dentry_buf));
+        }
         if (nread <= 0) break;
 
         for (long bpos = 0; bpos < nread;) {
@@ -147,13 +151,16 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
 
         // Fast kernel thread filter (REF-RES-006):
         // Kernel threads never transition into userspace; skip openat/read/close of stat!
-        if (!kthread_pids_.empty() && std::binary_search(kthread_pids_.begin(), kthread_pids_.end(), pid)) {
-            ProcessSample ksample;
-            ksample.pid = pid;
-            ksample.ppid = 2;
-            ksample.comm = "[kthread]";
-            samples.push_back(ksample);
-            continue;
+        {
+            WATTCURB_PROFILE_SCOPE("proc.kthread_filter");
+            if (!kthread_pids_.empty() && std::binary_search(kthread_pids_.begin(), kthread_pids_.end(), pid)) {
+                ProcessSample ksample;
+                ksample.pid = pid;
+                ksample.ppid = 2;
+                ksample.comm = "[kthread]";
+                samples.push_back(ksample);
+                continue;
+            }
         }
 
         ProcessSample sample;
@@ -208,6 +215,8 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
             sample.timerslack_ns = prev->timerslack_ns;
             sample.pss_kib = prev->pss_kib;
             sample.rss_kib = prev->rss_kib;
+            sample.nice = prev->nice;
+            sample.priority = prev->priority;
             sample.open_sockets = prev->open_sockets;
             sample.pinned_drm_fd = prev->pinned_drm_fd;
             sample.has_io_perm = prev->has_io_perm;
@@ -533,10 +542,17 @@ bool ProcessAnalyzer::parse_proc_stat(std::string_view content, ProcessSample& o
     out_sample.stime_ticks = parse_u64_fast(cur, end);
     while (cur < end && *cur == ' ') ++cur;
 
-    // Tokens 16..19: Skip 4 tokens to reach Token 20 (num_threads)
-    for (int i = 16; i <= 19 && cur < end; ++i) {
-        skip_token_fast(cur, end);
-    }
+    // Tokens 16..17: Skip cutime and cstime
+    skip_token_fast(cur, end);
+    skip_token_fast(cur, end);
+
+    // Token 18: priority
+    out_sample.priority = parse_i32_fast(cur, end);
+    while (cur < end && *cur == ' ') ++cur;
+
+    // Token 19: nice
+    out_sample.nice = parse_i32_fast(cur, end);
+    while (cur < end && *cur == ' ') ++cur;
 
     // Token 20: num_threads
     out_sample.num_threads = static_cast<uint32_t>(parse_u64_fast(cur, end));
