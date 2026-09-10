@@ -155,6 +155,8 @@ struct ProcessSample {
     uint64_t rss_kib{0};
     uint64_t timerslack_ns{50000};
     uint32_t open_sockets{0};
+    int32_t pinned_drm_fd{-1}; // REF-RES-006: Cached DRM render node fd to eliminate thousands of readlinkat calls
+    bool has_io_perm{true};    // REF-RES-006: Cache EACCES failures to suppress redundant /proc/[pid]/io syscalls
 };
 
 static_assert(std::is_trivially_copyable_v<ProcessSample>, "ProcessSample must be TriviallyCopyable for SIMD acceleration");

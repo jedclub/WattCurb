@@ -161,6 +161,14 @@ private:
     mutable bool cached_kbdlight_initialized_{false};
     mutable uint32_t cached_kbdlight_level_{0};
     mutable bool cached_bluetooth_enabled_{false};
+    mutable std::optional<uint32_t> cached_fan_rpm_{std::nullopt};
+    mutable std::optional<uint32_t> cached_fan_pwm_{std::nullopt};
+    mutable std::optional<int32_t> cached_chassis_temp_{std::nullopt};
+    mutable std::optional<int32_t> cached_wifi_temp_{std::nullopt};
+    mutable std::array<char, 32> cached_aspm_policy_{};
+    mutable bool cached_aspm_policy_initialized_{false};
+    mutable std::optional<uint64_t> cached_bat_voltage_{std::nullopt};
+    mutable std::optional<uint64_t> cached_bat_energy_now_{std::nullopt};
     mutable std::optional<int32_t> cached_nvme_temp1_{std::nullopt};
     mutable std::optional<int32_t> cached_nvme_temp2_{std::nullopt};
     mutable bool cached_battery_static_initialized_{false};

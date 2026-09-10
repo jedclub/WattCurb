@@ -24,9 +24,11 @@ public:
 
 private:
     std::filesystem::path procfs_root_;
+    mutable std::vector<int32_t> kthread_pids_; // REF-RES-006: Cached kernel threads (ppid == 2)
+    mutable uint64_t pass_counter_{0};
 
     bool read_pid_details(int32_t pid, ProcessSample& sample) const;
-    void inspect_pid_fds(int32_t pid, ProcessSample& sample) const;
+    void inspect_pid_fds(int32_t pid, ProcessSample& sample, const ProcessSample* prev_sample = nullptr) const;
 };
 
 

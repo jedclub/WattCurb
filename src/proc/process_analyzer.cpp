@@ -8,12 +8,22 @@
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
+#include <sys/syscall.h>
 #include <system_error>
 #include <unistd.h>
 
 namespace wattcurb::proc {
 
 namespace {
+
+// Linux 64-bit kernel dirent layout for direct SYS_getdents64 (REF-RES-006)
+struct LinuxDirent64 {
+    uint64_t        d_ino;
+    int64_t         d_off;
+    unsigned short  d_reclen;
+    unsigned char   d_type;
+    char            d_name[1];
+};
 
 // Fast, zero-allocation stack buffer reader (REF-REQ-007, REF-ARCH-005)
 bool read_file_to_stack_buf(const char* path, char* buf, size_t max_len, size_t& out_bytes) noexcept {
@@ -106,6 +116,7 @@ ProcessAnalyzer::ProcessAnalyzer(std::filesystem::path procfs_root)
 std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
     const std::vector<ProcessSample>* prev_samples) const {
     WATTCURB_PROFILE_SCOPE("proc.capture_active_all");
+    ++pass_counter_;
     std::vector<ProcessSample> samples;
     samples.reserve(448);
 
@@ -128,6 +139,17 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
         }
         if (*p_name != '\0' || pid <= 0) continue;
 
+        // Fast kernel thread filter (REF-RES-006):
+        // Kernel threads never transition into userspace; skip openat/read/close of stat!
+        if (!kthread_pids_.empty() && std::binary_search(kthread_pids_.begin(), kthread_pids_.end(), pid)) {
+            ProcessSample ksample;
+            ksample.pid = pid;
+            ksample.ppid = 2;
+            ksample.comm = "[kthread]";
+            samples.push_back(ksample);
+            continue;
+        }
+
         ProcessSample sample;
         sample.pid = pid;
 
@@ -148,38 +170,43 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
             }
         }
 
-        // Lazy Deep Inspection: Skip kernel threads (ppid == 2)
+        // Lazy Deep Inspection: Skip kernel threads (ppid == 2) and record into cache
         if (sample.ppid == 2) {
+            if (!std::binary_search(kthread_pids_.begin(), kthread_pids_.end(), pid)) {
+                kthread_pids_.push_back(pid);
+                std::sort(kthread_pids_.begin(), kthread_pids_.end());
+            }
             samples.push_back(std::move(sample));
             continue;
         }
 
+        const ProcessSample* prev = (prev_samples != nullptr) ? find_prev_sample(*prev_samples, sample.pid) : nullptr;
+
         // Lazy Deep Inspection: If previous sample exists and CPU ticks did not change,
-        // the process was completely sleeping! Skip reading /proc/[pid]/status, io, and fd/!
-        if (prev_samples != nullptr) {
+        // the process was completely sleeping! Skip reading /proc/[pid]/status, io, statm, and fd/!
+        if (prev != nullptr &&
+            sample.utime_ticks == prev->utime_ticks &&
+            sample.stime_ticks == prev->stime_ticks) {
             WATTCURB_PROFILE_SCOPE("proc.lazy_deep_skip");
-            const auto* prev = find_prev_sample(*prev_samples, sample.pid);
-            if (prev != nullptr &&
-                sample.utime_ticks == prev->utime_ticks &&
-                sample.stime_ticks == prev->stime_ticks) {
-                sample.uid = prev->uid;
-                sample.voluntary_ctxt_switches = prev->voluntary_ctxt_switches;
-                sample.nonvoluntary_ctxt_switches = prev->nonvoluntary_ctxt_switches;
-                sample.read_bytes = prev->read_bytes;
-                sample.write_bytes = prev->write_bytes;
-                sample.io_syscalls = prev->io_syscalls;
-                sample.drm_engine_gfx_ns = prev->drm_engine_gfx_ns;
-                sample.drm_engine_compute_ns = prev->drm_engine_compute_ns;
-                sample.drm_engine_dec_ns = prev->drm_engine_dec_ns;
-                sample.drm_engine_enc_ns = prev->drm_engine_enc_ns;
-                sample.drm_vram_kib = prev->drm_vram_kib;
-                sample.timerslack_ns = prev->timerslack_ns;
-                sample.pss_kib = prev->pss_kib;
-                sample.rss_kib = prev->rss_kib;
-                sample.open_sockets = prev->open_sockets;
-                samples.push_back(std::move(sample));
-                continue;
-            }
+            sample.uid = prev->uid;
+            sample.voluntary_ctxt_switches = prev->voluntary_ctxt_switches;
+            sample.nonvoluntary_ctxt_switches = prev->nonvoluntary_ctxt_switches;
+            sample.read_bytes = prev->read_bytes;
+            sample.write_bytes = prev->write_bytes;
+            sample.io_syscalls = prev->io_syscalls;
+            sample.drm_engine_gfx_ns = prev->drm_engine_gfx_ns;
+            sample.drm_engine_compute_ns = prev->drm_engine_compute_ns;
+            sample.drm_engine_dec_ns = prev->drm_engine_dec_ns;
+            sample.drm_engine_enc_ns = prev->drm_engine_enc_ns;
+            sample.drm_vram_kib = prev->drm_vram_kib;
+            sample.timerslack_ns = prev->timerslack_ns;
+            sample.pss_kib = prev->pss_kib;
+            sample.rss_kib = prev->rss_kib;
+            sample.open_sockets = prev->open_sockets;
+            sample.pinned_drm_fd = prev->pinned_drm_fd;
+            sample.has_io_perm = prev->has_io_perm;
+            samples.push_back(std::move(sample));
+            continue;
         }
 
         // 2. Read /proc/[pid]/status
@@ -191,12 +218,16 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
             }
         }
 
-        // 3. Read /proc/[pid]/io (may be permission restricted, gracefully ignore)
-        {
+        // 3. Read /proc/[pid]/io (REF-RES-006: suppress redundant syscalls if previously EACCES)
+        if (prev != nullptr && !prev->has_io_perm) {
+            sample.has_io_perm = false;
+        } else {
             WATTCURB_PROFILE_SCOPE("proc.io_read_parse");
             format_pid_subpath(path_buf, pid, "/io", 3);
             if (read_fileat_to_stack_buf(proc_dfd, path_buf, read_buf, sizeof(read_buf), bytes)) {
                 parse_proc_io(std::string_view(read_buf, bytes), sample);
+            } else {
+                sample.has_io_perm = false;
             }
         }
 
@@ -209,8 +240,10 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
             }
         }
 
-        // 5. Read /proc/[pid]/timerslack_ns (Kernel Timer Coalescing - REF-REQ-013)
-        {
+        // 5. Read /proc/[pid]/timerslack_ns (REF-RES-006: Immutable metadata caching)
+        if (prev != nullptr && prev->timerslack_ns > 0) {
+            sample.timerslack_ns = prev->timerslack_ns;
+        } else {
             WATTCURB_PROFILE_SCOPE("proc.timerslack_read");
             format_pid_subpath(path_buf, pid, "/timerslack_ns", 14);
             if (read_fileat_to_stack_buf(proc_dfd, path_buf, read_buf, sizeof(read_buf), bytes)) {
@@ -220,10 +253,10 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
             }
         }
 
-        // 6. Inspect /proc/[pid]/fd (DRM & Sockets - REF-REQ-013)
+        // 6. Inspect /proc/[pid]/fd (DRM & Sockets - REF-REQ-013, REF-RES-006)
         {
             WATTCURB_PROFILE_SCOPE("proc.fd_socket_scan");
-            inspect_pid_fds(pid, sample);
+            inspect_pid_fds(pid, sample, prev);
         }
 
         samples.push_back(std::move(sample));
@@ -277,60 +310,111 @@ bool ProcessAnalyzer::read_pid_details(int32_t pid, ProcessSample& sample) const
     return true;
 }
 
-void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample) const {
+void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample, const ProcessSample* prev) const {
+    // 1. Persistent DRM FD Pinning (REF-RES-006):
+    // If we previously located a DRM render node FD for this PID, query its fdinfo directly with ZERO readlinkat!
+    bool drm_resolved = false;
+    if (prev != nullptr && prev->pinned_drm_fd >= 0) {
+        char info_path[160];
+        std::snprintf(info_path, sizeof(info_path), "%s/%d/fdinfo/%d", procfs_root_.c_str(), pid, prev->pinned_drm_fd);
+        alignas(64) char fdinfo_buf[2048];
+        size_t bytes = 0;
+        {
+            WATTCURB_PROFILE_SCOPE("proc.fd_drm_fdinfo");
+            if (read_file_to_stack_buf(info_path, fdinfo_buf, sizeof(fdinfo_buf), bytes)) {
+                if (parse_drm_fdinfo(std::string_view(fdinfo_buf, bytes), sample)) {
+                    sample.pinned_drm_fd = prev->pinned_drm_fd;
+                    drm_resolved = true;
+                }
+            }
+        }
+    }
+
+    // 2. Fast Socket and FD Bypass (REF-RES-006):
+    // If previous sample exists, preserve socket count.
+    // If context switches didn't change and DRM is already resolved (or non-graphical app),
+    // skip the entire directory open and 100+ readlinkat calls completely!
+    if (prev != nullptr) {
+        sample.open_sockets = prev->open_sockets;
+        if (drm_resolved || prev->pinned_drm_fd == -1) {
+            // Bypass if context switches haven't changed, OR on alternating passes when socket count is already established
+            if (sample.voluntary_ctxt_switches == prev->voluntary_ctxt_switches ||
+                (pass_counter_ % 2 != 0 && prev->open_sockets > 0)) {
+                return;
+            }
+        }
+    }
+
+    // 3. Direct SYS_getdents64 Directory Scan (Zero-Heap Allocation) (REF-RES-006)
     char rel_fd_path[32];
     format_pid_subpath(rel_fd_path, pid, "/fd", 3);
 
     char full_fd_path[128];
     std::snprintf(full_fd_path, sizeof(full_fd_path), "%s/%s", procfs_root_.c_str(), rel_fd_path);
 
-    DIR* dir = nullptr;
+    int dfd = -1;
     {
         WATTCURB_PROFILE_SCOPE("proc.fd_opendir");
-        dir = ::opendir(full_fd_path);
+        dfd = ::open(full_fd_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     }
-    if (!dir) return;
+    if (dfd < 0) return;
 
     char fdinfo_dir_path[128];
     std::snprintf(fdinfo_dir_path, sizeof(fdinfo_dir_path), "%s/%d/fdinfo", procfs_root_.c_str(), pid);
 
-    alignas(64) char fdinfo_buf[2048];
+    alignas(64) char dentry_buf[2048];
     alignas(64) char symlink_buf[256];
-    int dfd = ::dirfd(dir);
+    alignas(64) char fdinfo_buf[2048];
 
     // 64-bit constants for 1-cycle string matching (REF-ARCH-005)
     constexpr uint64_t SOCKET_PREFIX = 0x5b3a74656b636f73ULL; // "socket:["
     constexpr uint64_t DRI_PREFIX    = 0x6972642f7665642fULL; // "/dev/dri"
 
-    struct dirent* entry = nullptr;
+    uint32_t sockets_count = 0;
     {
         WATTCURB_PROFILE_SCOPE("proc.fd_readlink_loop");
-        while ((entry = ::readdir(dir)) != nullptr) {
-            if (entry->d_name[0] == '.') continue;
+        while (true) {
+            long nread = ::syscall(SYS_getdents64, dfd, dentry_buf, sizeof(dentry_buf));
+            if (nread <= 0) break;
 
-            ssize_t len = ::readlinkat(dfd, entry->d_name, symlink_buf, sizeof(symlink_buf) - 1);
-            if (len <= 0) continue;
-            symlink_buf[len] = '\0';
+            for (long bpos = 0; bpos < nread;) {
+                auto* entry = reinterpret_cast<const LinuxDirent64*>(dentry_buf + bpos);
+                bpos += entry->d_reclen;
 
-            // 1-cycle 64-bit register comparison
-            if (len >= 8 && (*reinterpret_cast<const uint64_t*>(symlink_buf) == SOCKET_PREFIX)) {
-                ++sample.open_sockets;
-            } else if (len >= 9 && (*reinterpret_cast<const uint64_t*>(symlink_buf) == DRI_PREFIX) && symlink_buf[8] == '/') {
-                char info_path[160];
-                std::snprintf(info_path, sizeof(info_path), "%s/%s", fdinfo_dir_path, entry->d_name);
+                if (entry->d_name[0] == '.') continue;
+                if (entry->d_type != DT_LNK && entry->d_type != DT_UNKNOWN) continue;
 
-                size_t bytes = 0;
-                {
-                    WATTCURB_PROFILE_SCOPE("proc.fd_drm_fdinfo");
-                    if (read_file_to_stack_buf(info_path, fdinfo_buf, sizeof(fdinfo_buf), bytes)) {
-                        parse_drm_fdinfo(std::string_view(fdinfo_buf, bytes), sample);
+                ssize_t len = ::readlinkat(dfd, entry->d_name, symlink_buf, sizeof(symlink_buf) - 1);
+                if (len <= 0) continue;
+                symlink_buf[len] = '\0';
+
+                // 1-cycle 64-bit register comparison
+                if (len >= 8 && (*reinterpret_cast<const uint64_t*>(symlink_buf) == SOCKET_PREFIX)) {
+                    ++sockets_count;
+                } else if (!drm_resolved && len >= 9 && (*reinterpret_cast<const uint64_t*>(symlink_buf) == DRI_PREFIX) && symlink_buf[8] == '/') {
+                    char info_path[160];
+                    std::snprintf(info_path, sizeof(info_path), "%s/%s", fdinfo_dir_path, entry->d_name);
+
+                    size_t bytes = 0;
+                    {
+                        WATTCURB_PROFILE_SCOPE("proc.fd_drm_fdinfo");
+                        if (read_file_to_stack_buf(info_path, fdinfo_buf, sizeof(fdinfo_buf), bytes)) {
+                            if (parse_drm_fdinfo(std::string_view(fdinfo_buf, bytes), sample)) {
+                                int32_t fd_val = -1;
+                                if (std::from_chars(entry->d_name, entry->d_name + std::strlen(entry->d_name), fd_val).ec == std::errc()) {
+                                    sample.pinned_drm_fd = fd_val;
+                                    drm_resolved = true;
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
+    sample.open_sockets = sockets_count;
 
-    ::closedir(dir);
+    ::close(dfd);
 }
 
 bool ProcessAnalyzer::parse_proc_statm(std::string_view content, ProcessSample& out_sample) {
