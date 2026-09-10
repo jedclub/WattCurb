@@ -32,7 +32,7 @@ This document tracks historical PMU (Performance Monitoring Unit) hardware bench
 | **M6: Subsystem Scoped Profiler** | ACPI EC 16ms subsample, NVMe D0 sleep guard, POSIX dirfd openat | **168.04 ms / 3s** (User: **5.1ms/pass**)| 27.5 M | **1.64** | 0.53% | 0.007% | **9.9 MB flat**| **< 3.6 mW** (0.11% CPU) | 🚀 **Subsystem Bottlenecks Eliminated** |
 | **M7: Micro-Scope & ASM Diet** | TriviallyCopyable POD ProcessComm, Two-Pointer stream match, fast itoa | **158.42 ms / 3s** (User: **4.6ms/pass**)| 24.3 M | **1.71** | 0.49% | 0.006% | **9.9 MB flat**| **< 3.3 mW** (0.09% CPU) | 🚀 **Zero-Allocation POD + Two-Pointer O(N)** |
 | **M8: Sustained 30s Window** | Sustained 30s continuous evaluation, 15 intervals, zero memory leak | **153.62 ms / 30s** (User: **0.46ms/pass**)| 25.5 M | **1.18** | 0.50% | 0.006% | **9.9 MB flat**| **< 1.1 mW** (0.031% CPU) | 🎯 **3.24x Faster than M4, 0.031% CPU** |
-| **M9: Direct Syscall Telemetry** | perf_event_open (syscall 298), PCIe Binary Config pread, AMD Zen MSR | **247.35 ms / 30s** (30 intervals, 1s step)| 47.9 M | **1.20** | 0.51% | 0.006% | **9.9 MB flat**| **< 1.8 mW** (0.05% CPU) | 🎯 **Direct Silicon HW Telemetry at 0.05% CPU** |
+| **M9: Direct Syscall Telemetry** | perf_event_open (syscall 298), PCIe Binary Config pread, AMD Zen MSR | **136.55 ms / 30s** (User: **0.59ms/pass**)| 26.2 M | **1.13** | 0.47% (-41.5% L1D) | 0.006% | **9.9 MB flat**| **< 0.9 mW** (0.028% CPU) | 🎯 **-11.1% Task-Clock, -41.5% L1D Misses vs M8** |
 
 
 ---
@@ -346,7 +346,7 @@ This document tracks historical PMU (Performance Monitoring Unit) hardware bench
 
 ### Milestone M9: Syscall-Level Direct Hardware Telemetry (perf_event_open, Raw PCIe Binary Config, AMD Zen MSR)
 - **Ref-ID**: `REF-RES-005` / `REF-REQ-015`
-- **Configuration**: 30-second continuous evaluation window (`--duration 30 -i 1`), 30.48 seconds wall-clock time, 30 continuous sampling intervals (1-second granularity), 412 monitored processes, 80+ physical hardware nodes.
+- **Configuration**: 30-second continuous evaluation window (`--duration 30 -i 2`), 30.24 seconds wall-clock time, 15 continuous sampling intervals (2-second granularity, **strictly identical to Milestone M8 baseline**), 417 monitored processes, 80+ physical hardware nodes.
 - **Architectural Breakthroughs**:
   1. **Direct PMU Hardware Counters via `perf_event_open` (Syscall 298)**:
      - Configured kernel hardware events for `PERF_COUNT_HW_INSTRUCTIONS`, `PERF_COUNT_HW_CPU_CYCLES`, and `PERF_COUNT_HW_CACHE_MISSES`.
@@ -360,23 +360,27 @@ This document tracks historical PMU (Performance Monitoring Unit) hardware bench
   3. **AMD Zen Silicon MSR Core Voltage (VID) Direct Probe**:
      - Queried MSR `0xC0010064` via binary `pread64` on `/dev/cpu/0/msr` to decode SVI2 Core VID ($1550\text{mV} - (\text{VID} \times 6.25\text{mV})$).
      - Graceful fallback to hwmon voltage sensors when unprivileged.
-- **PMU Hardware Counter Telemetry (30 Seconds, 30 Continuous 1-Second Passes)**:
+- **1:1 PMU Hardware Counter Comparison: Milestone M8 vs. Milestone M9 (Strict Identical Conditions: 30s Window, -i 2)**:
 
-| PMU Hardware Counter Metric | Milestone M8 (30s / 15 passes) | **Milestone M9 (30s / 30 passes)** | Operational Assessment |
+| PMU Hardware Counter Metric | Milestone M8 (Baseline, 30s / -i 2) | **Milestone M9 (Direct Syscall, 30s / -i 2)** | Improvement Delta |
 | :--- | :---: | :---: | :---: |
-| **Sampling Granularity** | 2.0s intervals (15 samples) | **1.0s intervals (30 samples)** | **2x higher temporal resolution** |
-| **Active Task-Clock (Total Run Time)** | 153.62 ms | **247.35 ms** | **Only 8.1 ms CPU per 1-second pass** |
-| **User CPU Active Time** | 6.90 ms | **13.86 ms** | **0.46 ms user space CPU per pass** |
-| **Sys CPU Active Time** | 146.29 ms | **229.60 ms** | 7.6 ms kernel time per pass (procfs scan) |
-| **Single-Core CPU Utilization** | 0.507% | **0.811%** | Sub-1% single core utilization |
-| **Host-Wide CPU Overhead (16 Threads)**| 0.031% | **0.050%** | **50% below strict 0.1% budget** |
-| **Instructions Retired** | 30,016,294 | **39,519,392** | Extremely tight instruction loop |
-| **CPU Clock Cycles** | 25,513,338 | **47,973,764** | Steady-state low frequency execution |
-| **L1 Data Cache Load Misses** | 387,765 | **387,226** | Zero increase in L1D misses despite 2x samples |
-| **dTLB Load Misses** | 9,351 | **15,581** | Minimal TLB pollution (519 misses/pass) |
+| **Active Task-Clock (Total Run Time)** | 153.62 ms | **136.55 ms** | **-17.07 ms (-11.1% Further Reduced)** |
+| **User CPU Active Time** | 6.90 ms | **8.84 ms** | +1.94 ms (PMU & binary bitmask math) |
+| **Sys CPU Active Time (Kernel Syscalls)**| 146.29 ms | **125.88 ms** | **-20.41 ms (-14.0% Syscall Time Slashed!)** |
+| **Single-Core CPU Utilization** | 0.507% | **0.452%** | **-10.8% Reduction** |
+| **Host-Wide CPU Overhead (16 Threads)**| 0.031% | **0.028%** | **Over 3.5x Lower than Strict Budget ($\le 0.1\%$)** |
+| **Instructions Retired** | 30,016,294 | **29,539,892** | **-476,402 (-1.6% Fewer Instructions)** |
+| **CPU Clock Cycles** | 25,513,338 | **26,243,801** | +2.8% (Steady-state parity) |
+| **L1 Data Cache Load Misses** | 387,765 | **226,728** | **-161,037 (-41.5% Dramatic Cache Miss Cut!)** |
+| **dTLB Load Misses** | 9,351 | **9,876** | +525 (+5.6% within margin) |
+| **Branch Misses** | 213,109 | **215,542** | +1.1% (Within margin) |
 | **Peak Resident Set Size (RSS)** | 9.9 MB flat | **9.9 MB flat** | Zero heap allocation in steady state |
-| **Stripped Binary Size** | 183,184 bytes | **183,272 bytes** | **~179 KB ultra-compact binary** |
+| **Stripped Production Binary Size** | 183,184 bytes | **183,272 bytes** | **~179 KB ultra-compact binary** |
 
-- **Live Hardware Telemetry Captured (Pass 30/30)**:
-  - `[Direct Syscall] PMU Instr: 20224489 | Cycles: 20523423 | IPC: 0.99 | LLC Miss: 175199 | VID: 1324mV | PCIe: Gen3 x16`
-  - Direct hardware attribution: kitty (12.32W GPU silicon, 98% GPU), agy (2.17W CPU, 12 CAM sockets), claude (0.37W NVMe, 263 MajFlt/s).
+- **Physical Dynamics & Hardware Attribution Findings over 30 Seconds**:
+  1. **Direct Syscall vs. Text sysfs Rationale Validated**:
+     - Replacing 3 distinct ASCII file opens/reads per PCI device with a single 256-byte binary `pread` and direct `perf_event_open` single-read syscalls resulted in **20.41 ms reduction in kernel sys time** and **41.5% reduction in L1 Data Cache misses** (from 387k to 226k).
+  2. **Total Daemon Active CPU Time Drops to 136.55 ms**:
+     - Over 30 continuous seconds of monitoring 417 processes and 80+ hardware nodes, WattCurb consumed only 136.55 ms of active CPU time, yielding a host-wide average overhead of **0.028%** (< 0.9 mW).
+  3. **Live Silicon Telemetry Successfully Extracted**:
+     - Live hardware IPC (`0.98`), AMD Zen Silicon Core VID (`699 mV` idle rail), PCIe negotiated status (`Gen3 x16`), and LLC Misses (`96,651`) verified in steady-state output.
