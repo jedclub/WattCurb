@@ -35,6 +35,7 @@ private:
     hw::HardwareProbe hw_probe_;
     proc::ProcessAnalyzer proc_analyzer_;
     policy::AttributionEngine engine_;
+    ProcessPool proc_pool_;
     AnalysisReportData cached_report_;
 
     int epoll_fd_{-1};

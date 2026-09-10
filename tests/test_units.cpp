@@ -1,5 +1,6 @@
 #include "core/singleton_lock.hpp"
 #include "core/cpu_features.hpp"
+#include "core/custom_containers.hpp"
 #include "hw/hardware_probe.hpp"
 #include "proc/process_analyzer.hpp"
 #include "policy/attribution_engine.hpp"
@@ -452,6 +453,58 @@ void test_pcie_binary_config_decoder() {
     std::cout << " [PASS] test_pcie_binary_config_decoder (Gen4 x16 binary decode verified)\n";
 }
 
+void test_custom_containers() {
+    using namespace wattcurb::core;
+
+    // 1. Test FixedVector
+    FixedVector<int, 4> v;
+    assert(v.empty());
+    assert(v.capacity() == 4);
+    assert(v.push_back(10));
+    assert(v.push_back(20));
+    assert(v.push_back(30));
+    assert(v.push_back(40));
+    assert(!v.push_back(50)); // Capacity full
+    assert(v.size() == 4);
+    assert(v.full());
+    assert(v[0] == 10 && v[3] == 40);
+    assert(v.front() == 10 && v.back() == 40);
+
+    // Test copy and move
+    FixedVector<int, 4> v_copy = v;
+    assert(v_copy.size() == 4 && v_copy[2] == 30);
+    v_copy.pop_back();
+    assert(v_copy.size() == 3);
+
+    FixedVector<int, 4> v_move = std::move(v_copy);
+    assert(v_move.size() == 3 && v_move[1] == 20);
+
+    // 2. Test FixedString
+    FixedString<32> fs("hello");
+    assert(fs.size() == 5);
+    assert(fs == "hello");
+    assert(fs.append(" world"));
+    assert(fs == "hello world");
+    assert(fs.append_i32(-42));
+    assert(fs == "hello world-42");
+    static_assert(std::is_trivially_copyable_v<FixedString<32>>, "FixedString must be TriviallyCopyable");
+
+    // 3. Test TopKHeap (streaming top-3)
+    TopKHeap<int, 3, std::greater<int>> heap;
+    int data[] = {5, 12, 1, 88, 32, 7, 95, 23};
+    for (int x : data) {
+        heap.push(x);
+    }
+    assert(heap.size() == 3);
+    auto top3 = heap.extract_sorted();
+    assert(top3.size() == 3);
+    assert(top3[0] == 95);
+    assert(top3[1] == 88);
+    assert(top3[2] == 32);
+
+    std::cout << " [PASS] test_custom_containers (FixedVector, FixedString, TopKHeap verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -460,6 +513,7 @@ int main() {
     test::test_hw_isa_primitives();
     test::test_ifunc_and_nttp_dispatch();
     test::test_simd_scanner();
+    test::test_custom_containers();
     test::test_proc_stat_parsing();
     test::test_proc_statm_parsing();
     test::test_proc_status_parsing();

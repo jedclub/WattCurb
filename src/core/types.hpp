@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "core/custom_containers.hpp"
 
 namespace wattcurb {
 
@@ -267,10 +268,11 @@ struct ProcessAttributedPower {
     double wifi_attributed_watts{0.0};
     double dram_attributed_watts{0.0};
 
-    std::string primary_hw_domain;  // e.g. "GPU Silicon", "CPU C-State Wakeup", "CPU Compute", "NVMe Storage"
-    std::string hardware_mechanism; // e.g. "AMDGPU GFX Engine (455MB VRAM, 98% GPU)"
+    core::FixedString<32> primary_hw_domain;  // e.g. "GPU Silicon", "CPU C-State Wakeup", "CPU Compute", "NVMe Storage"
+    core::FixedString<96> hardware_mechanism; // e.g. "AMDGPU GFX Engine (455MB VRAM, 98% GPU)"
 };
 
+static_assert(std::is_trivially_copyable_v<ProcessAttributedPower>, "ProcessAttributedPower must be TriviallyCopyable for SIMD acceleration");
 
 // Implements REF-REQ-011 (Hardware Domain Direct Attribution)
 struct ProcessDomainShare {
@@ -278,21 +280,23 @@ struct ProcessDomainShare {
     ProcessComm comm{};
     double watts{0.0};
     double share_percent{0.0};
-    std::string detail;
+    core::FixedString<80> detail;
 };
 
+static_assert(std::is_trivially_copyable_v<ProcessDomainShare>, "ProcessDomainShare must be TriviallyCopyable");
+
 struct DomainCulprit {
-    std::string domain_name;
+    core::FixedString<64> domain_name;
     double domain_total_watts{0.0};
-    std::vector<ProcessDomainShare> top_culprits;
+    core::FixedVector<ProcessDomainShare, 5> top_culprits;
 };
 
 // Implements REF-REQ-005, REF-REQ-011, REF-REQ-012 & REF-ARCH-002
 struct AnalysisReportData {
     std::chrono::milliseconds sample_duration{0};
     HardwarePowerBreakdown hardware;
-    std::vector<ProcessAttributedPower> top_processes;
-    std::vector<DomainCulprit> domain_culprits;
+    core::FixedVector<ProcessAttributedPower, 32> top_processes;
+    core::FixedVector<DomainCulprit, 8> domain_culprits;
     size_t total_monitored_processes{0};
     uint64_t total_system_wakeups_per_sec{0};
     size_t sample_count{1};
@@ -300,5 +304,8 @@ struct AnalysisReportData {
     bool is_short_window{false};
 };
 
+// Zero-Allocation Cacheline-Aligned Process Snapshot & Ping-Pong Pool (REF-ARCH-006)
+using ProcessSnapshot = core::FixedVector<ProcessSample, 1024>;
+using ProcessPool = core::DoubleBufferedPool<ProcessSample, 1024>;
 
 } // namespace wattcurb

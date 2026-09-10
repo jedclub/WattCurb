@@ -2,6 +2,7 @@
 
 #include "core/types.hpp"
 #include <vector>
+#include <span>
 
 namespace wattcurb::policy {
 
@@ -13,8 +14,8 @@ public:
     [[nodiscard]] AnalysisReportData compute_attribution(
         const HardwareSample& hw1,
         const HardwareSample& hw2,
-        const std::vector<ProcessSample>& proc1,
-        const std::vector<ProcessSample>& proc2,
+        std::span<const ProcessSample> proc1,
+        std::span<const ProcessSample> proc2,
         size_t top_n = 15
     ) const;
 
@@ -22,6 +23,12 @@ public:
     [[nodiscard]] AnalysisReportData compute_windowed_attribution(
         const std::vector<HardwareSample>& hw_samples,
         const std::vector<std::vector<ProcessSample>>& proc_samples,
+        size_t top_n = 15
+    ) const;
+
+    [[nodiscard]] AnalysisReportData compute_windowed_attribution(
+        std::span<const HardwareSample> hw_samples,
+        std::span<const ProcessSnapshot> proc_samples,
         size_t top_n = 15
     ) const;
 

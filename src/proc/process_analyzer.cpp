@@ -70,16 +70,6 @@ inline void format_pid_subpath(char* out, int32_t pid, const char* subpath, size
     p[subpath_len] = '\0';
 }
 
-static const ProcessSample* find_prev_sample(const std::vector<ProcessSample>& prev, int32_t pid) noexcept {
-    auto it = std::lower_bound(prev.begin(), prev.end(), pid, [](const ProcessSample& s, int32_t p) noexcept {
-        return s.pid < p;
-    });
-    if (it != prev.end() && it->pid == pid) {
-        return &(*it);
-    }
-    return nullptr;
-}
-
 inline void skip_token_fast(const char*& cur, const char* end) noexcept {
     while (cur < end && *cur != ' ') ++cur;
     while (cur < end && *cur == ' ') ++cur;
@@ -110,21 +100,23 @@ inline int32_t parse_i32_fast(const char*& cur, const char* end) noexcept {
 
 } // namespace
 
-ProcessAnalyzer::ProcessAnalyzer(std::filesystem::path procfs_root)
-    : procfs_root_(std::move(procfs_root)) {}
-
-std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
-    const std::vector<ProcessSample>* prev_samples) const {
+template <typename OutputContainer, typename PrevContainer>
+static void do_capture_active_processes(
+    const ProcessAnalyzer& analyzer,
+    OutputContainer& samples,
+    const PrevContainer* prev_samples,
+    const std::filesystem::path& procfs_root,
+    core::FixedVector<int32_t, 256>& kthread_pids,
+    [[maybe_unused]] uint64_t pass_counter
+) {
     WATTCURB_PROFILE_SCOPE("proc.capture_active_all");
-    ++pass_counter_;
-    std::vector<ProcessSample> samples;
-    samples.reserve(448);
+    samples.clear();
 
     alignas(64) char read_buf[2048];
     char path_buf[128];
 
-    int proc_dfd = ::open(procfs_root_.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (proc_dfd < 0) return samples;
+    int proc_dfd = ::open(procfs_root.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (proc_dfd < 0) return;
 
     alignas(64) char dentry_buf[16384];
     while (true) {
@@ -139,155 +131,172 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
             auto* proc_entry = reinterpret_cast<const LinuxDirent64*>(dentry_buf + bpos);
             bpos += proc_entry->d_reclen;
 
+            if (proc_entry->d_type != DT_DIR && proc_entry->d_type != DT_UNKNOWN) continue;
             if (proc_entry->d_name[0] < '1' || proc_entry->d_name[0] > '9') continue;
 
             int32_t pid = 0;
-            const char* p_name = proc_entry->d_name;
-            while (*p_name >= '0' && *p_name <= '9') {
-                pid = pid * 10 + (*p_name - '0');
-                ++p_name;
+            const char* p_cur = proc_entry->d_name;
+            while (*p_cur >= '0' && *p_cur <= '9') {
+                pid = pid * 10 + (*p_cur - '0');
+                ++p_cur;
             }
-        if (*p_name != '\0' || pid <= 0) continue;
+            if (*p_cur != '\0') continue;
 
-        // Fast kernel thread filter (REF-RES-006):
-        // Kernel threads never transition into userspace; skip openat/read/close of stat!
-        {
-            WATTCURB_PROFILE_SCOPE("proc.kthread_filter");
-            if (!kthread_pids_.empty() && std::binary_search(kthread_pids_.begin(), kthread_pids_.end(), pid)) {
-                ProcessSample ksample;
-                ksample.pid = pid;
-                ksample.ppid = 2;
-                ksample.comm = "[kthread]";
-                samples.push_back(ksample);
+            {
+                WATTCURB_PROFILE_SCOPE("proc.kthread_filter");
+                if (std::binary_search(kthread_pids.begin(), kthread_pids.end(), pid)) {
+                    continue;
+                }
+            }
+
+            ProcessSample sample;
+            sample.pid = pid;
+
+            format_pid_subpath(path_buf, pid, "/stat", 5);
+            size_t bytes = 0;
+            {
+                WATTCURB_PROFILE_SCOPE("proc.stat_read");
+                if (!read_fileat_to_stack_buf(proc_dfd, path_buf, read_buf, sizeof(read_buf), bytes)) {
+                    continue;
+                }
+            }
+
+            {
+                WATTCURB_PROFILE_SCOPE("proc.stat_parse");
+                if (!ProcessAnalyzer::parse_proc_stat(std::string_view(read_buf, bytes), sample)) {
+                    continue;
+                }
+            }
+
+            if (sample.ppid == 2) {
+                if (!std::binary_search(kthread_pids.begin(), kthread_pids.end(), pid)) {
+                    if (kthread_pids.size() < kthread_pids.capacity()) {
+                        kthread_pids.push_back(pid);
+                        std::sort(kthread_pids.begin(), kthread_pids.end());
+                    }
+                }
+                samples.push_back(std::move(sample));
                 continue;
             }
-        }
 
-        ProcessSample sample;
-        sample.pid = pid;
+            const ProcessSample* prev = nullptr;
+            if (prev_samples != nullptr) {
+                auto it = std::lower_bound(prev_samples->begin(), prev_samples->end(), sample.pid,
+                    [](const ProcessSample& s, int32_t p) noexcept { return s.pid < p; });
+                if (it != prev_samples->end() && it->pid == sample.pid) {
+                    prev = &(*it);
+                }
+            }
 
-        // 1. Read /proc/[pid]/stat via openat (REF-REQ-009, REF-ARCH-005)
-        format_pid_subpath(path_buf, pid, "/stat", 5);
-        size_t bytes = 0;
-        {
-            WATTCURB_PROFILE_SCOPE("proc.stat_read");
-            if (!read_fileat_to_stack_buf(proc_dfd, path_buf, read_buf, sizeof(read_buf), bytes)) {
+            if (prev != nullptr &&
+                sample.utime_ticks == prev->utime_ticks &&
+                sample.stime_ticks == prev->stime_ticks) {
+                WATTCURB_PROFILE_SCOPE("proc.lazy_deep_skip");
+                sample.uid = prev->uid;
+                sample.voluntary_ctxt_switches = prev->voluntary_ctxt_switches;
+                sample.nonvoluntary_ctxt_switches = prev->nonvoluntary_ctxt_switches;
+                sample.read_bytes = prev->read_bytes;
+                sample.write_bytes = prev->write_bytes;
+                sample.io_syscalls = prev->io_syscalls;
+                sample.drm_engine_gfx_ns = prev->drm_engine_gfx_ns;
+                sample.drm_engine_compute_ns = prev->drm_engine_compute_ns;
+                sample.drm_engine_dec_ns = prev->drm_engine_dec_ns;
+                sample.drm_engine_enc_ns = prev->drm_engine_enc_ns;
+                sample.drm_vram_kib = prev->drm_vram_kib;
+                sample.timerslack_ns = prev->timerslack_ns;
+                sample.pss_kib = prev->pss_kib;
+                sample.rss_kib = prev->rss_kib;
+                sample.nice = prev->nice;
+                sample.priority = prev->priority;
+                sample.open_sockets = prev->open_sockets;
+                sample.pinned_drm_fd = prev->pinned_drm_fd;
+                sample.has_io_perm = prev->has_io_perm;
+                samples.push_back(std::move(sample));
                 continue;
             }
-        }
 
-        {
-            WATTCURB_PROFILE_SCOPE("proc.stat_parse");
-            if (!parse_proc_stat(std::string_view(read_buf, bytes), sample)) {
-                continue;
+            {
+                WATTCURB_PROFILE_SCOPE("proc.status_read_parse");
+                format_pid_subpath(path_buf, pid, "/status", 7);
+                if (read_fileat_to_stack_buf(proc_dfd, path_buf, read_buf, sizeof(read_buf), bytes)) {
+                    ProcessAnalyzer::parse_proc_status(std::string_view(read_buf, bytes), sample);
+                }
             }
-        }
 
-        // Lazy Deep Inspection: Skip kernel threads (ppid == 2) and record into cache
-        if (sample.ppid == 2) {
-            if (!std::binary_search(kthread_pids_.begin(), kthread_pids_.end(), pid)) {
-                kthread_pids_.push_back(pid);
-                std::sort(kthread_pids_.begin(), kthread_pids_.end());
-            }
-            samples.push_back(std::move(sample));
-            continue;
-        }
-
-        const ProcessSample* prev = (prev_samples != nullptr) ? find_prev_sample(*prev_samples, sample.pid) : nullptr;
-
-        // Lazy Deep Inspection: If previous sample exists and CPU ticks did not change,
-        // the process was completely sleeping! Skip reading /proc/[pid]/status, io, statm, and fd/!
-        if (prev != nullptr &&
-            sample.utime_ticks == prev->utime_ticks &&
-            sample.stime_ticks == prev->stime_ticks) {
-            WATTCURB_PROFILE_SCOPE("proc.lazy_deep_skip");
-            sample.uid = prev->uid;
-            sample.voluntary_ctxt_switches = prev->voluntary_ctxt_switches;
-            sample.nonvoluntary_ctxt_switches = prev->nonvoluntary_ctxt_switches;
-            sample.read_bytes = prev->read_bytes;
-            sample.write_bytes = prev->write_bytes;
-            sample.io_syscalls = prev->io_syscalls;
-            sample.drm_engine_gfx_ns = prev->drm_engine_gfx_ns;
-            sample.drm_engine_compute_ns = prev->drm_engine_compute_ns;
-            sample.drm_engine_dec_ns = prev->drm_engine_dec_ns;
-            sample.drm_engine_enc_ns = prev->drm_engine_enc_ns;
-            sample.drm_vram_kib = prev->drm_vram_kib;
-            sample.timerslack_ns = prev->timerslack_ns;
-            sample.pss_kib = prev->pss_kib;
-            sample.rss_kib = prev->rss_kib;
-            sample.nice = prev->nice;
-            sample.priority = prev->priority;
-            sample.open_sockets = prev->open_sockets;
-            sample.pinned_drm_fd = prev->pinned_drm_fd;
-            sample.has_io_perm = prev->has_io_perm;
-            samples.push_back(std::move(sample));
-            continue;
-        }
-
-        // 2. Read /proc/[pid]/status
-        {
-            WATTCURB_PROFILE_SCOPE("proc.status_read_parse");
-            format_pid_subpath(path_buf, pid, "/status", 7);
-            if (read_fileat_to_stack_buf(proc_dfd, path_buf, read_buf, sizeof(read_buf), bytes)) {
-                parse_proc_status(std::string_view(read_buf, bytes), sample);
-            }
-        }
-
-        // 3. Read /proc/[pid]/io (REF-RES-006: suppress redundant syscalls if previously EACCES)
-        if (prev != nullptr && !prev->has_io_perm) {
-            sample.has_io_perm = false;
-        } else {
-            WATTCURB_PROFILE_SCOPE("proc.io_read_parse");
-            format_pid_subpath(path_buf, pid, "/io", 3);
-            if (read_fileat_to_stack_buf(proc_dfd, path_buf, read_buf, sizeof(read_buf), bytes)) {
-                parse_proc_io(std::string_view(read_buf, bytes), sample);
-            } else {
+            if (prev != nullptr && !prev->has_io_perm) {
                 sample.has_io_perm = false;
+            } else {
+                WATTCURB_PROFILE_SCOPE("proc.io_read_parse");
+                format_pid_subpath(path_buf, pid, "/io", 3);
+                if (read_fileat_to_stack_buf(proc_dfd, path_buf, read_buf, sizeof(read_buf), bytes)) {
+                    ProcessAnalyzer::parse_proc_io(std::string_view(read_buf, bytes), sample);
+                } else {
+                    sample.has_io_perm = false;
+                }
             }
-        }
 
-        // 4. Read /proc/[pid]/statm (DRAM PSS & RSS - REF-REQ-013)
-        {
-            WATTCURB_PROFILE_SCOPE("proc.statm_read_parse");
-            format_pid_subpath(path_buf, pid, "/statm", 6);
-            if (read_fileat_to_stack_buf(proc_dfd, path_buf, read_buf, sizeof(read_buf), bytes)) {
-                parse_proc_statm(std::string_view(read_buf, bytes), sample);
+            {
+                WATTCURB_PROFILE_SCOPE("proc.statm_read_parse");
+                format_pid_subpath(path_buf, pid, "/statm", 6);
+                if (read_fileat_to_stack_buf(proc_dfd, path_buf, read_buf, sizeof(read_buf), bytes)) {
+                    ProcessAnalyzer::parse_proc_statm(std::string_view(read_buf, bytes), sample);
+                }
             }
-        }
 
-        // 5. Read /proc/[pid]/timerslack_ns (REF-RES-006: Immutable metadata caching)
-        if (prev != nullptr && prev->timerslack_ns > 0) {
-            sample.timerslack_ns = prev->timerslack_ns;
-        } else {
-            WATTCURB_PROFILE_SCOPE("proc.timerslack_read");
-            format_pid_subpath(path_buf, pid, "/timerslack_ns", 14);
-            if (read_fileat_to_stack_buf(proc_dfd, path_buf, read_buf, sizeof(read_buf), bytes)) {
-                uint64_t slack = 50000;
-                auto [ptr, ec_slack] = std::from_chars(read_buf, read_buf + bytes, slack);
-                if (ec_slack == std::errc()) sample.timerslack_ns = slack;
+            if (prev != nullptr && prev->timerslack_ns > 0) {
+                sample.timerslack_ns = prev->timerslack_ns;
+            } else {
+                WATTCURB_PROFILE_SCOPE("proc.timerslack_read");
+                format_pid_subpath(path_buf, pid, "/timerslack_ns", 14);
+                if (read_fileat_to_stack_buf(proc_dfd, path_buf, read_buf, sizeof(read_buf), bytes)) {
+                    uint64_t slack = 50000;
+                    auto [ptr, ec_slack] = std::from_chars(read_buf, read_buf + bytes, slack);
+                    if (ec_slack == std::errc()) sample.timerslack_ns = slack;
+                }
             }
-        }
 
-        // 6. Inspect /proc/[pid]/fd (DRM & Sockets - REF-REQ-013, REF-RES-006)
-        {
-            WATTCURB_PROFILE_SCOPE("proc.fd_socket_scan");
-            inspect_pid_fds(pid, sample, prev);
-        }
+            {
+                WATTCURB_PROFILE_SCOPE("proc.fd_socket_scan");
+                analyzer.inspect_pid_fds(pid, sample, prev);
+            }
 
-        samples.push_back(std::move(sample));
+            samples.push_back(std::move(sample));
         }
     }
     ::close(proc_dfd);
 
-    // Always return sorted by PID for O(log N) binary search lookup in next cycle
     {
         WATTCURB_PROFILE_SCOPE("proc.samples_sort");
         std::sort(samples.begin(), samples.end(), [](const ProcessSample& a, const ProcessSample& b) noexcept {
             return a.pid < b.pid;
         });
     }
+}
 
+ProcessAnalyzer::ProcessAnalyzer(std::filesystem::path procfs_root)
+    : procfs_root_(std::move(procfs_root)) {}
+
+std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
+    const std::vector<ProcessSample>* prev_samples) const {
+    ++pass_counter_;
+    std::vector<ProcessSample> samples;
+    samples.reserve(448);
+    do_capture_active_processes(*this, samples, prev_samples, procfs_root_, kthread_pids_, pass_counter_);
     return samples;
+}
+
+void ProcessAnalyzer::capture_active_processes(
+    ProcessSnapshot& out,
+    const ProcessSnapshot* prev_samples) const {
+    ++pass_counter_;
+    do_capture_active_processes(*this, out, prev_samples, procfs_root_, kthread_pids_, pass_counter_);
+}
+
+ProcessSnapshot ProcessAnalyzer::capture_snapshot(
+    const ProcessSnapshot* prev_samples) const {
+    ProcessSnapshot res;
+    capture_active_processes(res, prev_samples);
+    return res;
 }
 
 bool ProcessAnalyzer::read_pid_details(int32_t pid, ProcessSample& sample) const {

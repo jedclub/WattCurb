@@ -176,8 +176,8 @@ HardwarePowerBreakdown AttributionEngine::compute_hardware_power(
 AnalysisReportData AttributionEngine::compute_attribution(
     const HardwareSample& hw1,
     const HardwareSample& hw2,
-    const std::vector<ProcessSample>& proc1,
-    const std::vector<ProcessSample>& proc2,
+    std::span<const ProcessSample> proc1,
+    std::span<const ProcessSample> proc2,
     size_t top_n
 ) const {
     WATTCURB_PROFILE_SCOPE("policy.attribution_all");
@@ -225,8 +225,7 @@ AnalysisReportData AttributionEngine::compute_attribution(
         int32_t prev_core;
     };
 
-    std::vector<IntermediateProc> deltas;
-    deltas.reserve(proc2.size());
+    core::FixedVector<IntermediateProc, 1024> deltas;
 
     uint64_t total_delta_cpu = 0;
     uint64_t total_delta_gpu_ns = 0;
@@ -313,8 +312,7 @@ AnalysisReportData AttributionEngine::compute_attribution(
     double static_cpu_power = report.hardware.cpu_package_watts * 0.25;
     double static_per_proc = deltas.empty() ? 0.0 : (static_cpu_power / static_cast<double>(deltas.size()));
 
-    std::vector<ProcessAttributedPower> attributed;
-    attributed.reserve(deltas.size());
+    core::FixedVector<ProcessAttributedPower, 1024> attributed;
 
     double total_thermal_watts = 0.0;
 
@@ -459,20 +457,17 @@ AnalysisReportData AttributionEngine::compute_attribution(
     }
 }
 
-    // 3. Build Domain Culprits Registry (REF-REQ-011 Sec 3.2) - Zero-Copy Pointer-Based Partial Sort
-    // Eliminates 3,000+ deep copies of ProcessAttributedPower (with std::string heap allocations)
-    auto select_top_culprits = [](const std::vector<ProcessAttributedPower>& procs, auto filter_pred, auto sort_pred, size_t top_k = 5) {
-        std::vector<const ProcessAttributedPower*> ptrs;
-        ptrs.reserve(procs.size());
+    // 3. Build Domain Culprits Registry (REF-REQ-011 Sec 3.2) - Zero-Allocation TopKHeap (REF-ARCH-006)
+    // Uses stack-resident TopKHeap<const ProcessAttributedPower*, 5> to find top 5 in 1 pass O(N log K)
+    // Completely eliminates dynamic vector allocations and sort overheads!
+    auto select_top_culprits = [](const auto& procs, auto filter_pred, auto sort_pred) {
+        core::TopKHeap<const ProcessAttributedPower*, 5, decltype(sort_pred)> heap;
         for (const auto& p : procs) {
-            if (filter_pred(p)) ptrs.push_back(&p);
+            if (filter_pred(p)) {
+                heap.push(&p);
+            }
         }
-        size_t k = std::min(top_k, ptrs.size());
-        if (k > 0) {
-            std::partial_sort(ptrs.begin(), ptrs.begin() + static_cast<std::ptrdiff_t>(k), ptrs.end(), sort_pred);
-            ptrs.resize(k);
-        }
-        return ptrs;
+        return heap.extract_sorted();
     };
 
     // Domain A: GPU Silicon
@@ -492,7 +487,7 @@ AnalysisReportData AttributionEngine::compute_attribution(
                 .comm = p->comm,
                 .watts = p->gpu_watts,
                 .share_percent = sh,
-                .detail = p->hardware_mechanism
+                .detail = p->hardware_mechanism.view()
             });
         }
         if (!gpu_culprit.top_culprits.empty()) {
@@ -515,13 +510,15 @@ AnalysisReportData AttributionEngine::compute_attribution(
         for (const auto* p : top_wake) {
             double sh = (report.total_system_wakeups_per_sec > 0) ?
                 (static_cast<double>(p->wakeups_per_sec) * 100.0 / static_cast<double>(report.total_system_wakeups_per_sec)) : 0.0;
+            char det_buf[80];
+            std::snprintf(det_buf, sizeof(det_buf), "%lu wakeups/s (%.2fW Tax)",
+                          static_cast<unsigned long>(p->wakeups_per_sec), p->wakeup_tax_watts);
             wake_culprit.top_culprits.push_back(ProcessDomainShare{
                 .pid = p->pid,
                 .comm = p->comm,
                 .watts = p->wakeup_tax_watts,
                 .share_percent = sh,
-                .detail = std::to_string(p->wakeups_per_sec) + " wakeups/s (" +
-                          std::to_string(p->wakeup_tax_watts).substr(0, 4) + "W Tax)"
+                .detail = det_buf
             });
         }
         if (!wake_culprit.top_culprits.empty()) {
@@ -532,7 +529,9 @@ AnalysisReportData AttributionEngine::compute_attribution(
     // Domain C: Cooling Fan Mechanical Power (Thermal Drivers)
     if (report.hardware.fan_estimated_watts > 0.1) {
         DomainCulprit fan_culprit;
-        fan_culprit.domain_name = "Cooling Fan Mechanical Drain (" + std::to_string(report.hardware.fan_rpm) + " RPM ThinkPad EC)";
+        char fan_name[64];
+        std::snprintf(fan_name, sizeof(fan_name), "Cooling Fan Mechanical Drain (%u RPM ThinkPad EC)", report.hardware.fan_rpm);
+        fan_culprit.domain_name = fan_name;
         fan_culprit.domain_total_watts = report.hardware.fan_estimated_watts;
 
         auto top_fan = select_top_culprits(attributed,
@@ -541,12 +540,14 @@ AnalysisReportData AttributionEngine::compute_attribution(
 
         for (const auto* p : top_fan) {
             double sh = (p->fan_attributed_watts / report.hardware.fan_estimated_watts) * 100.0;
+            char det_buf[80];
+            std::snprintf(det_buf, sizeof(det_buf), "Thermally induced by %.2fW silicon heat", p->cpu_watts + p->gpu_watts);
             fan_culprit.top_culprits.push_back(ProcessDomainShare{
                 .pid = p->pid,
                 .comm = p->comm,
                 .watts = p->fan_attributed_watts,
                 .share_percent = sh,
-                .detail = "Thermally induced by " + std::to_string(p->cpu_watts + p->gpu_watts).substr(0, 4) + "W silicon heat"
+                .detail = det_buf
             });
         }
         if (!fan_culprit.top_culprits.empty()) {
@@ -565,12 +566,14 @@ AnalysisReportData AttributionEngine::compute_attribution(
             [](const auto* a, const auto* b) { return a->io_watts > b->io_watts; });
 
         for (const auto* p : top_io) {
+            char det_buf[80];
+            std::snprintf(det_buf, sizeof(det_buf), "I/O: %.2f MB/s", p->disk_io_mb_per_sec);
             io_culprit.top_culprits.push_back(ProcessDomainShare{
                 .pid = p->pid,
                 .comm = p->comm,
                 .watts = p->io_watts,
                 .share_percent = 0.0,
-                .detail = "I/O: " + std::to_string(p->disk_io_mb_per_sec).substr(0, 4) + " MB/s"
+                .detail = det_buf
             });
         }
         if (!io_culprit.top_culprits.empty()) {
@@ -594,13 +597,15 @@ AnalysisReportData AttributionEngine::compute_attribution(
 
         for (const auto* p : top_wifi) {
             double sh = (total_wifi_watts > 0.0) ? (p->wifi_attributed_watts / total_wifi_watts) * 100.0 : 0.0;
+            char det_buf[80];
+            std::snprintf(det_buf, sizeof(det_buf), "%u active sockets (%lu w/s)",
+                          p->open_sockets, static_cast<unsigned long>(p->wakeups_per_sec));
             wifi_culprit.top_culprits.push_back(ProcessDomainShare{
                 .pid = p->pid,
                 .comm = p->comm,
                 .watts = p->wifi_attributed_watts,
                 .share_percent = sh,
-                .detail = std::to_string(p->open_sockets) + " active sockets (" +
-                          std::to_string(p->wakeups_per_sec) + " w/s)"
+                .detail = det_buf
             });
         }
         if (!wifi_culprit.top_culprits.empty()) {
@@ -623,13 +628,15 @@ AnalysisReportData AttributionEngine::compute_attribution(
             [](const auto* a, const auto* b) { return a->total_attributed_watts > b->total_attributed_watts; });
 
         for (const auto* p : top_ccx) {
+            char det_buf[80];
+            std::snprintf(det_buf, sizeof(det_buf), "Cross-CCX migration to Core %d (%u threads)",
+                          p->cpu_core, p->num_threads);
             ccx_culprit.top_culprits.push_back(ProcessDomainShare{
                 .pid = p->pid,
                 .comm = p->comm,
                 .watts = 0.18,
                 .share_percent = 0.0,
-                .detail = "Cross-CCX migration to Core " + std::to_string(p->cpu_core) +
-                          " (" + std::to_string(p->num_threads) + " threads)"
+                .detail = det_buf
             });
         }
         if (!ccx_culprit.top_culprits.empty()) {
@@ -653,13 +660,20 @@ AnalysisReportData AttributionEngine::compute_attribution(
 
         for (const auto* p : top_dram) {
             double sh = (total_dram_watts > 0.0) ? (p->dram_attributed_watts / total_dram_watts) * 100.0 : 0.0;
-            std::string flt_str = p->majflt_per_sec > 0 ? (", " + std::to_string(p->majflt_per_sec) + " majflt/s") : "";
+            char det_buf[80];
+            if (p->majflt_per_sec > 0) {
+                std::snprintf(det_buf, sizeof(det_buf), "%luMB PSS DRAM, %lu majflt/s",
+                              static_cast<unsigned long>(p->pss_kib / 1024), static_cast<unsigned long>(p->majflt_per_sec));
+            } else {
+                std::snprintf(det_buf, sizeof(det_buf), "%luMB PSS DRAM",
+                              static_cast<unsigned long>(p->pss_kib / 1024));
+            }
             dram_culprit.top_culprits.push_back(ProcessDomainShare{
                 .pid = p->pid,
                 .comm = p->comm,
                 .watts = p->dram_attributed_watts,
                 .share_percent = sh,
-                .detail = std::to_string(p->pss_kib / 1024) + "MB PSS DRAM" + flt_str
+                .detail = det_buf
             });
         }
         if (!dram_culprit.top_culprits.empty()) {
@@ -667,51 +681,55 @@ AnalysisReportData AttributionEngine::compute_attribution(
         }
     }
 
-    // Sort descending by WDI score
+    // Sort descending by WDI score and populate FixedVector top_processes
     {
         WATTCURB_PROFILE_SCOPE("policy.wdi_ranking");
         std::sort(attributed.begin(), attributed.end(), [](const auto& a, const auto& b) {
             return a.wdi_score > b.wdi_score;
         });
 
-        if (attributed.size() > top_n) {
-            attributed.resize(top_n);
+        size_t limit = std::min({top_n, attributed.size(), report.top_processes.capacity()});
+        report.top_processes.clear();
+        for (size_t i = 0; i < limit; ++i) {
+            report.top_processes.push_back(attributed[i]);
         }
     }
 
-    report.top_processes = std::move(attributed);
     return report;
 }
 
-AnalysisReportData AttributionEngine::compute_windowed_attribution(
-    const std::vector<HardwareSample>& hw_samples,
-    const std::vector<std::vector<ProcessSample>>& proc_samples,
+template <typename HwContainer, typename ProcContainer>
+static AnalysisReportData do_compute_windowed_attribution(
+    const AttributionEngine& engine,
+    const HwContainer& hw_samples,
+    const ProcContainer& proc_samples,
     size_t top_n
-) const {
+) {
     WATTCURB_PROFILE_SCOPE("policy.windowed_accum");
     if (hw_samples.empty() || proc_samples.empty()) {
         return AnalysisReportData{};
     }
     if (hw_samples.size() == 1 || proc_samples.size() == 1) {
-        return compute_attribution(hw_samples.front(), hw_samples.front(), proc_samples.front(), proc_samples.front(), top_n);
+        std::span<const ProcessSample> p_span(proc_samples.front().data(), proc_samples.front().size());
+        return engine.compute_attribution(hw_samples.front(), hw_samples.front(), p_span, p_span, top_n);
     }
     if (hw_samples.size() == 2 && proc_samples.size() == 2) {
-        return compute_attribution(hw_samples.front(), hw_samples.back(), proc_samples.front(), proc_samples.back(), top_n);
+        std::span<const ProcessSample> p_front(proc_samples.front().data(), proc_samples.front().size());
+        std::span<const ProcessSample> p_back(proc_samples.back().data(), proc_samples.back().size());
+        return engine.compute_attribution(hw_samples.front(), hw_samples.back(), p_front, p_back, top_n);
     }
 
     size_t num_intervals = std::min(hw_samples.size(), proc_samples.size()) - 1;
 
     // 1. Process intermediate delta accumulation using sorted Two-Pointer stream merge (REF-ARCH-005)
     // Completely eliminates std::unordered_map (0 heap node allocations, 100% L1D sequential access)
-    std::vector<ProcessSample> accumulated_procs;
-    accumulated_procs.reserve(proc_samples.back().size() + 64);
+    core::FixedVector<ProcessSample, 1024> accumulated_procs;
 
     for (size_t step = 1; step <= num_intervals; ++step) {
         const auto& prev_procs = proc_samples[step - 1];
         const auto& cur_procs = proc_samples[step];
 
-        std::vector<ProcessSample> next_accum;
-        next_accum.reserve(std::max(cur_procs.size(), accumulated_procs.size()) + 32);
+        core::FixedVector<ProcessSample, 1024> next_accum;
 
         size_t idx_prev = 0;
         size_t idx_cur = 0;
@@ -841,10 +859,8 @@ AnalysisReportData AttributionEngine::compute_windowed_attribution(
     if (count_nvme_temp > 0) hw_end.nvme_temp_composite_mdeg = static_cast<int32_t>(sum_nvme_temp / static_cast<double>(count_nvme_temp));
 
     // 3. Construct synthetic zero-base proc1 and accumulated delta proc2
-    std::vector<ProcessSample> proc_zero;
-    std::vector<ProcessSample> proc_delta;
-    proc_zero.reserve(accumulated_procs.size());
-    proc_delta.reserve(accumulated_procs.size());
+    core::FixedVector<ProcessSample, 1024> proc_zero;
+    core::FixedVector<ProcessSample, 1024> proc_delta;
 
     for (const auto& acc : accumulated_procs) {
         ProcessSample z{};
@@ -865,8 +881,7 @@ AnalysisReportData AttributionEngine::compute_windowed_attribution(
         proc_delta.push_back(acc);
     }
 
-
-    auto report = compute_attribution(hw_start, hw_end, proc_zero, proc_delta, top_n);
+    auto report = engine.compute_attribution(hw_start, hw_end, proc_zero.span(), proc_delta.span(), top_n);
     report.sample_count = num_intervals;
     auto dur_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(hw_end.timestamp - hw_start.timestamp).count();
     double total_sec = static_cast<double>(dur_ns) / 1'000'000'000.0;
@@ -877,6 +892,22 @@ AnalysisReportData AttributionEngine::compute_windowed_attribution(
     report.total_energy_joules = total_sys_power * total_sec;
 
     return report;
+}
+
+AnalysisReportData AttributionEngine::compute_windowed_attribution(
+    const std::vector<HardwareSample>& hw_samples,
+    const std::vector<std::vector<ProcessSample>>& proc_samples,
+    size_t top_n
+) const {
+    return do_compute_windowed_attribution(*this, hw_samples, proc_samples, top_n);
+}
+
+AnalysisReportData AttributionEngine::compute_windowed_attribution(
+    std::span<const HardwareSample> hw_samples,
+    std::span<const ProcessSnapshot> proc_samples,
+    size_t top_n
+) const {
+    return do_compute_windowed_attribution(*this, hw_samples, proc_samples, top_n);
 }
 
 } // namespace wattcurb::policy

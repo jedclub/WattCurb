@@ -126,15 +126,18 @@ int main(int argc, char* argv[]) {
 
         std::cout << "\033[?25l"; // Hide cursor
         auto hw_prev = hw_probe.capture_sample();
-        auto proc_prev = proc_analyzer.capture_active_processes();
+        wattcurb::ProcessPool proc_pool;
+        proc_analyzer.capture_snapshot(proc_pool.current());
 
         while (g_live_running) {
             std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
             if (!g_live_running) break;
 
             auto hw_cur = hw_probe.capture_sample();
-            auto proc_cur = proc_analyzer.capture_active_processes(&proc_prev);
-            auto report = engine.compute_attribution(hw_prev, hw_cur, proc_prev, proc_cur, top_n);
+            auto& prev_snapshot = proc_pool.current();
+            auto& cur_snapshot = proc_pool.next();
+            proc_analyzer.capture_snapshot(cur_snapshot, &prev_snapshot);
+            auto report = engine.compute_attribution(hw_prev, hw_cur, prev_snapshot.span(), cur_snapshot.span(), top_n);
 
             if (json_output) {
                 wattcurb::report::ReportGenerator::render_json(report, std::cout);
@@ -144,7 +147,7 @@ int main(int argc, char* argv[]) {
             }
 
             hw_prev = std::move(hw_cur);
-            proc_prev = std::move(proc_cur);
+            proc_pool.swap();
         }
 
         std::cout << "\033[?25h\n"; // Restore cursor
@@ -153,13 +156,14 @@ int main(int argc, char* argv[]) {
 
     // Windowed Multi-Sample or One-Shot Profiler (REF-REQ-012 Sec 2.1)
     std::vector<wattcurb::HardwareSample> hw_samples;
-    std::vector<std::vector<wattcurb::ProcessSample>> proc_samples;
+    std::vector<wattcurb::ProcessSnapshot> proc_samples;
     hw_samples.reserve(sample_count + 1);
     proc_samples.reserve(sample_count + 1);
 
     // Initial Baseline Capture (T0)
     hw_samples.push_back(hw_probe.capture_sample());
-    proc_samples.push_back(proc_analyzer.capture_active_processes());
+    proc_samples.emplace_back();
+    proc_analyzer.capture_snapshot(proc_samples.back());
 
     for (size_t step = 1; step <= sample_count; ++step) {
         if (!json_output && sample_count > 1) {
@@ -182,7 +186,8 @@ int main(int argc, char* argv[]) {
         std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
 
         hw_samples.push_back(hw_probe.capture_sample());
-        proc_samples.push_back(proc_analyzer.capture_active_processes(&proc_samples.back()));
+        proc_samples.emplace_back();
+        proc_analyzer.capture_snapshot(proc_samples.back(), &proc_samples[proc_samples.size() - 2]);
     }
 
     if (!json_output && sample_count > 1) {

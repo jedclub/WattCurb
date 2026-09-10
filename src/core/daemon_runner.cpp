@@ -116,9 +116,9 @@ int DaemonRunner::run() {
     std::cout << "[*] WattCurb background daemon initialized (PID: " << ::getpid()
               << ", interval: " << interval_sec_ << "s, Zero-Wakeup active)\n" << std::flush;
 
-    // Initial baseline capture
+    // Initial baseline capture into proc_pool_
     auto hw_prev = hw_probe_.capture_sample();
-    auto proc_prev = proc_analyzer_.capture_active_processes();
+    proc_analyzer_.capture_snapshot(proc_pool_.current());
 
     struct epoll_event events[8];
 
@@ -139,9 +139,11 @@ int DaemonRunner::run() {
                 (void)s;
 
                 auto hw_cur = hw_probe_.capture_sample();
-                auto proc_cur = proc_analyzer_.capture_active_processes(&proc_prev);
+                auto& prev_snapshot = proc_pool_.current();
+                auto& cur_snapshot = proc_pool_.next();
+                proc_analyzer_.capture_snapshot(cur_snapshot, &prev_snapshot);
 
-                cached_report_ = engine_.compute_attribution(hw_prev, hw_cur, proc_prev, proc_cur, 20);
+                cached_report_ = engine_.compute_attribution(hw_prev, hw_cur, prev_snapshot.span(), cur_snapshot.span(), 20);
 
                 // Update live file in /tmp/wattcurb_live.json atomically
                 {
@@ -158,7 +160,7 @@ int DaemonRunner::run() {
                 }
 
                 hw_prev = std::move(hw_cur);
-                proc_prev = std::move(proc_cur);
+                proc_pool_.swap(); // 0ns pointer ping-pong! Zero dynamic allocation!
 
             } else if (fd == signal_fd_) {
                 struct signalfd_siginfo fdsi{};
