@@ -5,14 +5,14 @@
 #include "hw/hardware_probe.hpp"
 #include "proc/process_analyzer.hpp"
 #include "policy/attribution_engine.hpp"
-#include "policy/mitigation_engine.hpp"
+#include "policy/battery_feature.hpp"
 
 #include <atomic>
 #include <string>
 
 namespace wattcurb::core {
 
-// Implements REF-REQ-002, REF-REQ-007, REF-REQ-019, REF-ARCH-004, REF-ARCH-008
+// Implements REF-REQ-002, REF-REQ-007, REF-REQ-019, REF-REQ-020, REF-ARCH-004, REF-ARCH-009
 class DaemonRunner {
 public:
     explicit DaemonRunner(double period_sec = 60.0, double window_sec = 5.0, std::string_view lock_name = "wattcurb.lock");
@@ -26,6 +26,8 @@ public:
     void stop() noexcept;
 
     [[nodiscard]] const AnalysisReportData& latest_report() const noexcept { return cached_report_; }
+    [[nodiscard]] policy::FeatureManager& feature_manager() noexcept { return feature_manager_; }
+    [[nodiscard]] const policy::FeatureManager& feature_manager() const noexcept { return feature_manager_; }
 
 private:
     double period_sec_{60.0};
@@ -37,7 +39,7 @@ private:
     hw::HardwareProbe hw_probe_;
     proc::ProcessAnalyzer proc_analyzer_;
     policy::AttributionEngine engine_;
-    policy::MitigationEngine mitigation_engine_;
+    policy::FeatureManager feature_manager_;
     ProcessPool proc_pool_;
     AnalysisReportData cached_report_;
 

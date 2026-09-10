@@ -134,38 +134,15 @@ void DaemonRunner::collect_observation_window() {
         20
     );
 
-    // 5. Adaptive Closed-Loop Mitigation Actuation (REF-REQ-019 & REF-ARCH-008)
+    // 5. Modular Battery Optimization Feature Actuation (REF-REQ-020 & REF-ARCH-009)
     bool on_battery = cached_report_.hardware.is_battery_discharging;
     double batt_pct = static_cast<double>(cached_report_.hardware.battery_capacity_percent);
-    mitigation_engine_.evaluate_and_actuate(cached_report_, on_battery, batt_pct);
+    feature_manager_.evaluate_and_actuate(cached_report_, on_battery, batt_pct);
 
-    // 6. Write JSON Telemetry Atomically (/tmp/wattcurb_live.json)
-    {
-        std::stringstream ss;
-        report::ReportGenerator::render_json(cached_report_, ss);
-        auto json_str = ss.str();
-        int out_fd = ::open("/tmp/wattcurb_live.json.tmp", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
-        if (out_fd >= 0) {
-            ssize_t w = ::write(out_fd, json_str.data(), json_str.size());
-            (void)w;
-            ::close(out_fd);
-            ::rename("/tmp/wattcurb_live.json.tmp", "/tmp/wattcurb_live.json");
-        }
-    }
-
-    // 7. Write Human-Readable Executive Briefing Atomically (/tmp/wattcurb_briefing.txt)
-    {
-        std::stringstream ss;
-        report::ReportGenerator::render_executive_briefing(cached_report_, ss);
-        auto brief_str = ss.str();
-        int out_fd = ::open("/tmp/wattcurb_briefing.txt.tmp", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
-        if (out_fd >= 0) {
-            ssize_t w = ::write(out_fd, brief_str.data(), brief_str.size());
-            (void)w;
-            ::close(out_fd);
-            ::rename("/tmp/wattcurb_briefing.txt.tmp", "/tmp/wattcurb_briefing.txt");
-        }
-    }
+    // Pure In-Memory Struct Pipeline:
+    // Zero string serialization or formatting is performed in the routine background loop!
+    // Telemetry and feature mitigation states are retained 100% in memory structures.
+    // Serialization executes on-demand exclusively upon receiving client IPC datagrams.
 
     proc_pool_.swap(); // 0ns pointer swap
 }

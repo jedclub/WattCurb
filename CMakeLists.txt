@@ -75,6 +75,7 @@ set(WATTCURB_LIB_SOURCES
     src/policy/attribution_engine.cpp
     src/policy/process_classifier.cpp
     src/policy/mitigation_engine.cpp
+    src/policy/battery_feature.cpp
     src/report/report_generator.cpp
 )
 

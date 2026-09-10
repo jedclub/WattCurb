@@ -24,6 +24,9 @@ public:
     // Client helper: check if another daemon instance is already active
     static bool is_daemon_running(std::string_view lock_name = "wattcurb.lock");
 
+    // Client helper: query running daemon over abstract UNIX datagram socket
+    static bool query_daemon(std::string_view command, std::string& out_response, std::string_view lock_name = "wattcurb.lock", int timeout_ms = 1500);
+
 private:
     std::string lock_name_;
     int socket_fd_{-1};

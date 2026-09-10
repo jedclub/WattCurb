@@ -6,6 +6,7 @@
 #include "policy/attribution_engine.hpp"
 #include "policy/process_classifier.hpp"
 #include "policy/mitigation_engine.hpp"
+#include "policy/battery_feature.hpp"
 #include "report/report_generator.hpp"
 #include "core/scoped_profiler.hpp"
 
@@ -678,13 +679,12 @@ void test_executive_briefing_and_telemetry() {
     std::ostringstream ss_briefing;
     report::ReportGenerator::render_executive_briefing(report, ss_briefing);
     std::string briefing = ss_briefing.str();
-    assert(briefing.find("WattCurb Executive Power & Battery Briefing") != std::string::npos);
-    assert(briefing.find("System Battery & Power Overview") != std::string::npos);
+    assert(briefing.find("WattCurb High-Fidelity Executive & Physical Power Briefing") != std::string::npos);
+    assert(briefing.find("System Battery & Power Supply Deep Telemetry") != std::string::npos);
     assert(briefing.find("10.84 Watts") != std::string::npos);
     assert(briefing.find("Top Battery Drain Culprits") != std::string::npos);
     assert(briefing.find("chrome") != std::string::npos);
-    assert(briefing.find("Active Closed-Loop Mitigations") != std::string::npos);
-    assert(briefing.find("Actionable Recommendations") != std::string::npos);
+    assert(briefing.find("Actionable Engineering Recommendations") != std::string::npos);
 
     // Test Part 2: JSON Serialization
     std::ostringstream ss_json;
@@ -695,6 +695,110 @@ void test_executive_briefing_and_telemetry() {
     assert(json_str.find("\"recommended_action\": 2") != std::string::npos);
 
     std::cout << " [PASS] test_executive_briefing_and_telemetry (Two-Part Telemetry & JSON verified)\n";
+}
+
+void test_modular_battery_features() {
+    using namespace wattcurb;
+    using namespace wattcurb::policy;
+
+    FeatureManager mgr;
+
+    // 1. Verify descriptors and defaults
+    for (size_t i = 0; i < static_cast<size_t>(FeatureId::Count); ++i) {
+        auto fid = static_cast<FeatureId>(i);
+        auto desc = FeatureManager::descriptor(fid);
+        assert(desc.name.size() > 0);
+        assert(desc.feature_code.view().starts_with("FEAT-"));
+        assert(desc.target_domain.size() > 0);
+        assert(desc.kernel_mechanism.size() > 0);
+        assert(desc.power_saving_rationale.size() > 0);
+        assert(desc.safety_constraints.size() > 0);
+        assert(desc.description.size() > 0);
+        assert(mgr.is_feature_enabled(fid) == desc.default_enabled);
+    }
+
+    // 2. Test Feature Toggling
+    mgr.set_feature_enabled(FeatureId::CgroupFreezer, false);
+    assert(!mgr.is_feature_enabled(FeatureId::CgroupFreezer));
+    mgr.set_feature_enabled(FeatureId::CgroupFreezer, true);
+    assert(mgr.is_feature_enabled(FeatureId::CgroupFreezer));
+
+    // 3. Mock Pipeline Execution across Features
+    AnalysisReportData report;
+    report.sample_duration = std::chrono::milliseconds(30000);
+    report.sample_count = 15;
+    report.total_energy_joules = 320.5;
+    report.hardware.total_system_watts = 10.68;
+    report.hardware.cpu_package_watts = 4.2;
+    report.hardware.gpu_watts = 1.8;
+    report.hardware.display_watts = 2.5;
+    report.hardware.fan_estimated_watts = 0.5;
+    report.hardware.storage_estimated_watts = 0.3;
+    report.hardware.uncore_and_platform_watts = 1.38;
+    report.hardware.is_battery_discharging = true;
+    report.hardware.battery_capacity_percent = 15; // Progressive mode trigger
+    report.hardware.battery_remaining_hours = 4.5;
+    report.hardware.battery_health_percent = 95.0;
+    report.hardware.battery_cycle_count = 45;
+    report.hardware.display_brightness_percent = 70.0;
+    report.hardware.aspm_policy = "default";
+
+    // Add Background Worker (Tier 4)
+    ProcessAttributedPower bg_worker;
+    bg_worker.pid = 8881;
+    bg_worker.comm = "baloo_file";
+    bg_worker.safety_tier = static_cast<uint8_t>(ProcessSafetyTier::BackgroundWorker);
+    bg_worker.cpu_watts = 2.0;
+    bg_worker.wdi_score = 12.0;
+    bg_worker.pss_kib = 150 * 1024;
+    bg_worker.wakeups_per_sec = 200;
+    bg_worker.primary_hw_domain = "CPU Core";
+    bg_worker.hardware_mechanism = "CFS Runaway Loop";
+    report.top_processes.push_back(bg_worker);
+
+    // Add Desktop Core (Tier 1, must remain immune)
+    ProcessAttributedPower compositor;
+    compositor.pid = 8882;
+    compositor.comm = "kwin_wayland";
+    compositor.safety_tier = static_cast<uint8_t>(ProcessSafetyTier::DesktopCore);
+    compositor.cpu_watts = 3.0;
+    compositor.wdi_score = 30.0;
+    compositor.primary_hw_domain = "GPU / Display";
+    compositor.hardware_mechanism = "Wayland Compositor";
+    report.top_processes.push_back(compositor);
+
+    auto status = mgr.evaluate_and_actuate(report, true, 15.0);
+
+    // Verify feature-specific metrics
+    assert(status.feature_summary_count > 0 && "Feature summaries must contain active feature reports");
+    assert(status.active_summary.size() > 0);
+
+    // 4. Test render_feature_catalog
+    std::ostringstream ss_catalog;
+    report::ReportGenerator::render_feature_catalog(ss_catalog);
+    std::string cat_str = ss_catalog.str();
+    assert(cat_str.find("FEAT-001") != std::string::npos);
+    assert(cat_str.find("FEAT-007") != std::string::npos);
+    assert(cat_str.find("SchedIdleThrottle") != std::string::npos);
+    assert(cat_str.find("PcieAspmEnforcer") != std::string::npos);
+
+    // 5. Test render_extreme_profile
+    std::ostringstream ss_extreme;
+    report::ReportGenerator::render_extreme_profile(report, ss_extreme);
+    std::string ext_str = ss_extreme.str();
+    assert(ext_str.find("Extreme 30-Second Physical Hardware Power") != std::string::npos);
+    assert(ext_str.find("Physical Hardware Domain Attribution Matrix") != std::string::npos);
+    assert(ext_str.find("Unmitigated Power Drain Opportunities for LLM Feature Synthesis") != std::string::npos);
+    assert(ext_str.find("LLM Feature Synthesis JSON Directive") != std::string::npos);
+
+    // 6. Test JSON with feature_catalog
+    std::ostringstream ss_json;
+    report::ReportGenerator::render_json(report, ss_json);
+    std::string json_str = ss_json.str();
+    assert(json_str.find("\"feature_catalog\"") != std::string::npos);
+    assert(json_str.find("\"code\": \"FEAT-001\"") != std::string::npos);
+
+    std::cout << " [PASS] test_modular_battery_features (7 features, metadata, catalog, & extreme profile verified)\n";
 }
 
 } // namespace test
@@ -708,6 +812,7 @@ int main() {
     test::test_custom_containers();
     test::test_process_classifier();
     test::test_mitigation_engine();
+    test::test_modular_battery_features();
     test::test_executive_briefing_and_telemetry();
     test::test_proc_stat_parsing();
     test::test_proc_statm_parsing();

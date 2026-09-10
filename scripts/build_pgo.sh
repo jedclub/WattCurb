@@ -26,8 +26,10 @@ ninja -C "${BUILD_DIR}" wattcurb wattcurb_tests
 # 2. Train profile with representative workloads
 echo "[2/4] Training profile data on realistic and synthetic workloads..."
 "${BUILD_DIR}/wattcurb_tests" > /dev/null
+"${BUILD_DIR}/wattcurb" --features > /dev/null
 "${BUILD_DIR}/wattcurb" --interval 1 --top 30 > /dev/null
 "${BUILD_DIR}/wattcurb" --interval 1 --top 30 --json > /dev/null
+"${BUILD_DIR}/wattcurb" -X -w 2 -i 1 > /dev/null
 
 # 3. Compile final PGO-optimized binary
 echo "[3/4] Compiling Stage 2: PGO Feedback-Optimized Release Binary..."

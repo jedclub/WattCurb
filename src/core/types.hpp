@@ -299,7 +299,11 @@ struct ActiveMitigationStatus {
     uint64_t reclaimed_bytes{0};
     double estimated_savings_watts{0.0};
     core::FixedString<128> active_summary;
+    std::array<core::FixedString<96>, 8> feature_summaries{};
+    size_t feature_summary_count{0};
 };
+
+static_assert(std::is_trivially_copyable_v<ActiveMitigationStatus>, "ActiveMitigationStatus must be TriviallyCopyable");
 
 // Implements REF-REQ-005, REF-REQ-011, REF-REQ-012 & REF-ARCH-002
 struct AnalysisReportData {

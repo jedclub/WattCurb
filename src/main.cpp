@@ -3,7 +3,7 @@
 #include "hw/hardware_probe.hpp"
 #include "proc/process_analyzer.hpp"
 #include "policy/attribution_engine.hpp"
-#include "policy/mitigation_engine.hpp"
+#include "policy/battery_feature.hpp"
 #include "report/report_generator.hpp"
 #include "core/scoped_profiler.hpp"
 
@@ -28,26 +28,36 @@ void handle_sigint(int) {
 
 void print_help(const char* prog) {
     std::cout << "Usage: " << prog << " [options]\n"
-              << "WattCurb: Ultra-low-overhead Linux power profiler and adaptive mitigation daemon\n\n"
-              << "Two-Part Telemetry & Executive Reporting (REF-REQ-019):\n"
-              << "  -b, --briefing         Executive text briefing (human-readable summary & power tips)\n"
+              << "WattCurb: Ultra-low-overhead Linux power profiler and modular battery mitigation daemon\n\n"
+              << "Two-Part Telemetry & High-Fidelity Executive Reporting (REF-REQ-020):\n"
+              << "  -b, --briefing         High-fidelity detailed executive briefing (10s observation by default)\n"
               << "  -j, --json             Machine-parsable JSON export of all structural telemetry fields\n"
-              << "      --detail           Comprehensive engineering/developer terminal table dashboard\n\n"
+              << "      --detail           Comprehensive engineering/developer terminal table dashboard\n"
+              << "  -F, --features         Print catalog of all modular optimization features with rationale\n"
+              << "  -X, --extreme-profile  Execute 30s extreme battery profile for LLM feature synthesis\n\n"
               << "Daemon & Live Modes:\n"
               << "  -d, --daemon           Run persistent daemon (Default: 60s period with 5s observation)\n"
-              << "  -s, --status           Query live report/status from running background daemon\n"
+              << "  -s, --status           Query live report/status from running background daemon via IPC\n"
               << "  -l, --live             Continuous live interactive terminal dashboard (Ctrl+C to stop)\n\n"
-              << "Tuning Options:\n"
+              << "Observation & Feature Tuning Options:\n"
               << "      --period <sec>     Daemon sleep period in seconds (default: 60.0s)\n"
               << "      --window <sec>     Daemon observation window in seconds (default: 5.0s)\n"
               << "  -i, --interval <sec>   Sampling interval in seconds (default: 2.0s)\n"
-              << "  -w, --duration <sec>   Total window duration in seconds (e.g. 5.0, 10.0, 30.0)\n"
+              << "  -w, --duration <sec>   Total window duration in seconds (default for briefing: 10.0s)\n"
               << "  -n, --top <count>      Number of top processes to display (default: 15)\n"
               << "      --dev-profile      Display fine-grained subsystem execution cost breakdown\n"
               << "  -h, --help             Display this help message and exit\n";
 }
 
 int query_daemon_briefing() {
+    // 1. First attempt direct on-demand IPC query to running daemon (Zero disk I/O)
+    std::string resp;
+    if (wattcurb::core::SingletonLock::query_daemon("BRIEFING", resp)) {
+        std::cout << resp << std::flush;
+        return 0;
+    }
+
+    // 2. Fallback to cached disk file if available
     std::ifstream file("/tmp/wattcurb_briefing.txt");
     if (file.is_open()) {
         std::string line;
@@ -58,7 +68,7 @@ int query_daemon_briefing() {
     }
 
     if (wattcurb::core::SingletonLock::is_daemon_running("wattcurb.lock")) {
-        std::cout << "[*] Daemon is running. Waiting for observation window to complete...\n";
+        std::cout << "[*] Daemon is running. Waiting for initial observation window to complete...\n";
         return 0;
     }
 
@@ -66,6 +76,14 @@ int query_daemon_briefing() {
 }
 
 int query_daemon_status() {
+    // 1. Direct on-demand IPC query to daemon
+    std::string resp;
+    if (wattcurb::core::SingletonLock::query_daemon("JSON", resp)) {
+        std::cout << resp << std::flush;
+        return 0;
+    }
+
+    // 2. Fallback to cached live file
     std::ifstream live_file("/tmp/wattcurb_live.json");
     if (live_file.is_open()) {
         std::string line;
@@ -80,7 +98,7 @@ int query_daemon_status() {
         return 0;
     }
 
-    std::cerr << "[!] No running WattCurb daemon found (or /tmp/wattcurb_live.json not yet generated).\n"
+    std::cerr << "[!] No running WattCurb daemon found (or daemon not responding to IPC).\n"
               << "    Start daemon with: wattcurb --daemon\n";
     return 1;
 }
@@ -99,12 +117,19 @@ int main(int argc, char* argv[]) {
     bool status_query = false;
     bool live_mode = false;
     bool dev_profile = false;
+    bool feature_catalog_mode = false;
+    bool extreme_profile_mode = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string_view arg = argv[i];
         if (arg == "-h" || arg == "--help") {
             print_help(argv[0]);
             return 0;
+        } else if (arg == "-F" || arg == "--features") {
+            feature_catalog_mode = true;
+        } else if (arg == "-X" || arg == "--extreme-profile") {
+            extreme_profile_mode = true;
+            if (duration_sec == 0.0) duration_sec = 30.0;
         } else if (arg == "-d" || arg == "--daemon") {
             daemon_mode = true;
         } else if (arg == "-s" || arg == "--status") {
@@ -134,19 +159,26 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    if (feature_catalog_mode) {
+        wattcurb::report::ReportGenerator::render_feature_catalog(std::cout);
+        return 0;
+    }
+
     if (status_query) {
         return query_daemon_status();
     }
 
-    if (briefing_mode && !daemon_mode) {
+    // Extended High-Fidelity Executive Briefing query/execution (REF-REQ-020)
+    if (!extreme_profile_mode && (briefing_mode || (!daemon_mode && !json_output && !detail_mode && !live_mode)) && duration_sec == 0.0) {
+        // First try to fetch on-demand live briefing from active daemon
         int ret = query_daemon_briefing();
         if (ret == 0) {
-            return 0; // Printed cached briefing from running daemon
+            return 0;
         }
-        // If daemon is not running, proceed to run a 5s one-shot observation below
-        if (duration_sec == 0.0) {
-            duration_sec = 5.0;
-        }
+        // If daemon is not running, configure sufficiently long default sampling (10.0 seconds)
+        // to isolate steady-state power and filter out transient noise spikes
+        duration_sec = 10.0;
+        briefing_mode = true;
     }
 
     if (daemon_mode) {
@@ -161,7 +193,7 @@ int main(int argc, char* argv[]) {
     wattcurb::hw::HardwareProbe hw_probe;
     wattcurb::proc::ProcessAnalyzer proc_analyzer;
     wattcurb::policy::AttributionEngine engine;
-    wattcurb::policy::MitigationEngine mitigation_engine;
+    wattcurb::policy::FeatureManager feature_manager;
 
     auto sleep_ms = static_cast<int64_t>(interval_sec * 1000.0);
 
@@ -184,7 +216,7 @@ int main(int argc, char* argv[]) {
             auto& cur_snapshot = proc_pool.next();
             proc_analyzer.capture_snapshot(cur_snapshot, &prev_snapshot);
             auto report = engine.compute_attribution(hw_prev, hw_cur, prev_snapshot.span(), cur_snapshot.span(), top_n);
-            mitigation_engine.evaluate_and_actuate(report, report.hardware.is_battery_discharging, static_cast<double>(report.hardware.battery_capacity_percent));
+            feature_manager.evaluate_and_actuate(report, report.hardware.is_battery_discharging, static_cast<double>(report.hardware.battery_capacity_percent));
 
             if (json_output) {
                 wattcurb::report::ReportGenerator::render_json(report, std::cout);
@@ -204,7 +236,7 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // Windowed Multi-Sample or One-Shot Profiler (REF-REQ-012 Sec 2.1)
+    // Extended Windowed Multi-Sample Profiler (REF-REQ-012, REF-REQ-020)
     std::vector<wattcurb::HardwareSample> hw_samples;
     std::vector<wattcurb::ProcessSnapshot> proc_samples;
     hw_samples.reserve(sample_count + 1);
@@ -218,7 +250,7 @@ int main(int argc, char* argv[]) {
     for (size_t step = 1; step <= sample_count; ++step) {
         if (!json_output && sample_count > 1) {
             double progress = static_cast<double>(step - 1) / static_cast<double>(sample_count);
-            int bar_width = 20;
+            int bar_width = 24;
             int filled = static_cast<int>(progress * bar_width);
             std::string bar = "[";
             for (int b = 0; b < bar_width; ++b) {
@@ -227,7 +259,7 @@ int main(int argc, char* argv[]) {
                 else bar += " ";
             }
             bar += "]";
-            std::cout << "\r\033[2m[*] WattCurb continuous window profiling: " << bar << " "
+            std::cout << "\r\033[2m[*] WattCurb deep observation window: " << bar << " "
                       << std::fixed << std::setprecision(1) << (static_cast<double>(step - 1) * interval_sec) << "s / "
                       << (static_cast<double>(sample_count) * interval_sec) << "s (Interval " << step << "/" << sample_count << ")...\033[0m"
                       << std::flush;
@@ -247,20 +279,23 @@ int main(int argc, char* argv[]) {
     // Compute Windowed Attribution (Accumulating all intervals)
     auto report = engine.compute_windowed_attribution(hw_samples, proc_samples, top_n);
 
-    // Evaluate closed-loop mitigation status (REF-REQ-019)
+    // Modular Battery Optimization Feature Evaluation (REF-REQ-020 & REF-ARCH-009)
     bool on_batt = report.hardware.is_battery_discharging;
     double b_pct = static_cast<double>(report.hardware.battery_capacity_percent);
-    mitigation_engine.evaluate_and_actuate(report, on_batt, b_pct);
+    feature_manager.evaluate_and_actuate(report, on_batt, b_pct);
 
-    // Render Two-Part Telemetry (REF-REQ-019)
+    // Render Telemetry Outputs (REF-REQ-019, REF-REQ-020, REF-REQ-021)
     if (json_output) {
         // Part 2 (Machine): Structured JSON
         wattcurb::report::ReportGenerator::render_json(report, std::cout);
+    } else if (extreme_profile_mode) {
+        // Part 4: Extreme 30s Physical Hardware Causation Profile for LLM Synthesis (REF-REQ-021)
+        wattcurb::report::ReportGenerator::render_extreme_profile(report, std::cout);
     } else if (detail_mode) {
         // Part 2 (Developer): Detailed Terminal Dashboard Table
         wattcurb::report::ReportGenerator::render_terminal(report, std::cout);
     } else {
-        // Part 1 (Human): Executive Power & Battery Briefing (Default!)
+        // Part 1 (Human): High-Fidelity Executive & Physical Power Briefing (Default!)
         wattcurb::report::ReportGenerator::render_executive_briefing(report, std::cout);
     }
 
