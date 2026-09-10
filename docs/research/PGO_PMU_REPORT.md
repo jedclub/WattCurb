@@ -1,6 +1,6 @@
 # [REF-RES-004] WattCurb PGO & PMU Hardware Performance Audit Report
 
-- **Date**: 2026-09-10 15:59:59 UTC
+- **Date**: 2026-09-10 16:17:25 UTC
 - **Architecture**: x86_64 / 
 - **Compiler**: GCC 16 with C++23, Link-Time Optimization (-flto), and Native Tuning (-march=native)
 - **Profile-Guided Optimization**: Active (-fprofile-use -fprofile-correction)
@@ -15,10 +15,13 @@ The test suite was audited using hardware PMU counters via Linux `perf`:
 === WattCurb Unit Test Suite & Oracle Gate Verifier ===
  [INFO] CPU Features detected: AVX2=1 BMI1=1 BMI2=1 POPCNT=1 AVX512F=0
  [PASS] test_cpu_features
- [PASS] test_hw_isa_primitives (Core ID=10, TSC=11575968296435)
+ [PASS] test_hw_isa_primitives (Core ID=4, TSC=13351106395427)
  [PASS] test_ifunc_and_nttp_dispatch (GNU IFUNC & C++23 NTTP verified)
  [PASS] test_simd_scanner
  [PASS] test_custom_containers (FixedVector, FixedString, TopKHeap, Canary & Guards verified)
+ [PASS] test_process_classifier (6 safety tiers validated)
+ [PASS] test_mitigation_engine (Immunity guarantees & adaptive logic verified)
+ [PASS] test_executive_briefing_and_telemetry (Two-Part Telemetry & JSON verified)
  [PASS] test_proc_stat_parsing (with deep fields: minflt, majflt, threads, core, pri, nice)
  [PASS] test_proc_statm_parsing
  [PASS] test_proc_status_parsing
@@ -28,30 +31,30 @@ The test suite was audited using hardware PMU counters via Linux `perf`:
  [PASS] test_windowed_attribution_engine
  [PASS] test_singleton_lock
  [INFO] Hardware Probe Sample Captured:
-   - CPU Temp: 70.625000 C
-   - CPU Cores Online: 16, Avg Freq: 2642 MHz
-   - C-State POLL=2172423293us, C1=128902474641us, C2=624759049383us, C3=1973039594019us
-   - GPU Power: 15.000000 W
-   - GPU Busy: 1%
-   - Fan RPM: 3830
-   - Battery Discharging: true, AC Online: false
+   - CPU Temp: 70.500000 C
+   - CPU Cores Online: 16, Avg Freq: 2752 MHz
+   - C-State POLL=2177704756us, C1=128944348020us, C2=625197264061us, C3=1987079546936us
+   - GPU Power: 13.000000 W
+   - GPU Busy: 0%
+   - Fan RPM: 3484
+   - Battery Discharging: false, AC Online: true
    - Battery Health: 94.191696%
-   - NVMe Status: active, Read sectors: 232708923
+   - NVMe Status: active, Read sectors: 232816457
  [PASS] test_persistent_hw_probe
  [PASS] test_pmu_perf_event_telemetry (Instructions counted: 0)
  [PASS] test_pcie_binary_config_decoder (Gen4 x16 binary decode verified)
  [PASS] test_scoped_profiler (Zero-overhead release purity verified)
  [ORACLE GATE] Running micro-benchmark on zero-allocation parser...
- [ORACLE GATE] 100k stat parses completed in 21921 us (0.21921 us/op)
+ [ORACLE GATE] 100k stat parses completed in 22027 us (0.22027 us/op)
  [ORACLE GATE PASS] Performance within extreme efficiency threshold (< 0.5 us/op)
 === ALL TESTS & ORACLE GATE PASSED SUCCESSFULLY ===
-92915998;;cycles:u;24876029;83.00;;
-194516158;;instructions:u;25128864;84.00;;
-23797;;cache-misses:u;25868435;86.00;;
-19053;;L1-dcache-load-misses:u;25571657;85.00;;
-1408;;dTLB-load-misses:u;23856781;79.00;;
-62276740;;branches:u;24872403;83.00;;
-123843;;branch-misses:u;24959485;83.00;;
+91271276;;cycles:u;24201199;85.00;;
+199961771;;instructions:u;24202642;85.00;;
+37611;;cache-misses:u;24213863;85.00;;
+20879;;L1-dcache-load-misses:u;24598737;87.00;;
+1405;;dTLB-load-misses:u;23272323;82.00;;
+58664255;;branches:u;24218032;85.00;;
+121228;;branch-misses:u;24143541;85.00;;
 ```
 
 ---

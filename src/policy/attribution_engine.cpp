@@ -1,4 +1,5 @@
 #include "policy/attribution_engine.hpp"
+#include "policy/process_classifier.hpp"
 #include "core/scoped_profiler.hpp"
 
 #include <algorithm>
@@ -454,6 +455,11 @@ AnalysisReportData AttributionEngine::compute_attribution(
             pap.primary_hw_domain = "Platform/Idle";
             pap.hardware_mechanism = "Background Poll (" + std::to_string(pap.wakeups_per_sec) + " w/s)";
         }
+
+        // Process Safety Classification & Recommended Action (REF-REQ-019 & REF-RES-008)
+        auto classification = ProcessClassifierDB::classify(pap.comm.c_str());
+        pap.safety_tier = static_cast<uint8_t>(classification.tier);
+        pap.recommended_action = static_cast<uint8_t>(classification.default_action);
     }
 }
 

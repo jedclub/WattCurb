@@ -270,6 +270,8 @@ struct ProcessAttributedPower {
 
     core::FixedString<32> primary_hw_domain;  // e.g. "GPU Silicon", "CPU C-State Wakeup", "CPU Compute", "NVMe Storage"
     core::FixedString<96> hardware_mechanism; // e.g. "AMDGPU GFX Engine (455MB VRAM, 98% GPU)"
+    uint8_t safety_tier{5};                  // ProcessSafetyTier (Tier 0-5)
+    uint8_t recommended_action{0};           // MitigationAction (0-5)
 };
 
 static_assert(std::is_trivially_copyable_v<ProcessAttributedPower>, "ProcessAttributedPower must be TriviallyCopyable for SIMD acceleration");
@@ -291,6 +293,14 @@ struct DomainCulprit {
     core::FixedVector<ProcessDomainShare, 8> top_culprits;
 };
 
+struct ActiveMitigationStatus {
+    size_t throttled_count{0};
+    size_t frozen_count{0};
+    uint64_t reclaimed_bytes{0};
+    double estimated_savings_watts{0.0};
+    core::FixedString<128> active_summary;
+};
+
 // Implements REF-REQ-005, REF-REQ-011, REF-REQ-012 & REF-ARCH-002
 struct AnalysisReportData {
     std::chrono::milliseconds sample_duration{0};
@@ -302,6 +312,7 @@ struct AnalysisReportData {
     size_t sample_count{1};
     double total_energy_joules{0.0};
     bool is_short_window{false};
+    ActiveMitigationStatus mitigation_status;
 };
 
 // Zero-Allocation Cacheline-Aligned Process Snapshot & Ping-Pong Pool (REF-ARCH-006, REF-REQ-018)

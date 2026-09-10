@@ -1,6 +1,7 @@
 #include "core/daemon_runner.hpp"
 #include "report/report_generator.hpp"
 
+#include <chrono>
 #include <csignal>
 #include <cstring>
 #include <fcntl.h>
@@ -12,12 +13,14 @@
 #include <sys/socket.h>
 #include <sys/timerfd.h>
 #include <sys/un.h>
+#include <thread>
 #include <unistd.h>
 
 namespace wattcurb::core {
 
-DaemonRunner::DaemonRunner(double interval_sec, std::string_view lock_name)
-    : interval_sec_(interval_sec),
+DaemonRunner::DaemonRunner(double period_sec, double window_sec, std::string_view lock_name)
+    : period_sec_(period_sec > 0.0 ? period_sec : 60.0),
+      window_sec_(window_sec > 0.0 ? window_sec : 5.0),
       lock_name_(lock_name),
       lock_(lock_name) {}
 
@@ -39,11 +42,11 @@ bool DaemonRunner::setup_timer() {
     // Set prctl timer slack to coalesce wakeups with other system activity (Zero-Wakeup)
     ::prctl(PR_SET_TIMERSLACK, 500'000'000UL); // 500ms slack
 
-    time_t sec = static_cast<time_t>(interval_sec_);
-    long nsec = static_cast<long>((interval_sec_ - static_cast<double>(sec)) * 1'000'000'000.0);
+    time_t sec = static_cast<time_t>(period_sec_);
+    long nsec = static_cast<long>((period_sec_ - static_cast<double>(sec)) * 1'000'000'000.0);
 
     struct itimerspec spec{};
-    spec.it_value.tv_sec = sec > 0 ? sec : 1;
+    spec.it_value.tv_sec = sec > 0 ? sec : 60;
     spec.it_value.tv_nsec = nsec;
     spec.it_interval = spec.it_value;
 
@@ -107,6 +110,66 @@ bool DaemonRunner::initialize() {
     return true;
 }
 
+void DaemonRunner::collect_observation_window() {
+    // 1. T0: Capture start baseline
+    auto hw_start = hw_probe_.capture_sample();
+    auto& start_snapshot = proc_pool_.current();
+    proc_analyzer_.capture_snapshot(start_snapshot);
+
+    // 2. Continuous Observation Window (~5 seconds)
+    auto sleep_us = static_cast<useconds_t>(window_sec_ * 1'000'000.0);
+    ::usleep(sleep_us);
+
+    // 3. T1: Capture end state
+    auto hw_end = hw_probe_.capture_sample();
+    auto& end_snapshot = proc_pool_.next();
+    proc_analyzer_.capture_snapshot(end_snapshot, &start_snapshot);
+
+    // 4. Compute Full-Domain Physical Attribution
+    cached_report_ = engine_.compute_attribution(
+        hw_start,
+        hw_end,
+        start_snapshot.span(),
+        end_snapshot.span(),
+        20
+    );
+
+    // 5. Adaptive Closed-Loop Mitigation Actuation (REF-REQ-019 & REF-ARCH-008)
+    bool on_battery = cached_report_.hardware.is_battery_discharging;
+    double batt_pct = static_cast<double>(cached_report_.hardware.battery_capacity_percent);
+    mitigation_engine_.evaluate_and_actuate(cached_report_, on_battery, batt_pct);
+
+    // 6. Write JSON Telemetry Atomically (/tmp/wattcurb_live.json)
+    {
+        std::stringstream ss;
+        report::ReportGenerator::render_json(cached_report_, ss);
+        auto json_str = ss.str();
+        int out_fd = ::open("/tmp/wattcurb_live.json.tmp", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+        if (out_fd >= 0) {
+            ssize_t w = ::write(out_fd, json_str.data(), json_str.size());
+            (void)w;
+            ::close(out_fd);
+            ::rename("/tmp/wattcurb_live.json.tmp", "/tmp/wattcurb_live.json");
+        }
+    }
+
+    // 7. Write Human-Readable Executive Briefing Atomically (/tmp/wattcurb_briefing.txt)
+    {
+        std::stringstream ss;
+        report::ReportGenerator::render_executive_briefing(cached_report_, ss);
+        auto brief_str = ss.str();
+        int out_fd = ::open("/tmp/wattcurb_briefing.txt.tmp", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+        if (out_fd >= 0) {
+            ssize_t w = ::write(out_fd, brief_str.data(), brief_str.size());
+            (void)w;
+            ::close(out_fd);
+            ::rename("/tmp/wattcurb_briefing.txt.tmp", "/tmp/wattcurb_briefing.txt");
+        }
+    }
+
+    proc_pool_.swap(); // 0ns pointer swap
+}
+
 int DaemonRunner::run() {
     if (epoll_fd_ < 0 && !initialize()) {
         return 1;
@@ -114,11 +177,10 @@ int DaemonRunner::run() {
 
     running_ = true;
     std::cout << "[*] WattCurb background daemon initialized (PID: " << ::getpid()
-              << ", interval: " << interval_sec_ << "s, Zero-Wakeup active)\n" << std::flush;
+              << ", period: " << period_sec_ << "s, window: " << window_sec_ << "s, Zero-Wakeup active)\n" << std::flush;
 
-    // Initial baseline capture into proc_pool_
-    auto hw_prev = hw_probe_.capture_sample();
-    proc_analyzer_.capture_snapshot(proc_pool_.current());
+    // Initial baseline capture immediately upon startup
+    collect_observation_window();
 
     struct epoll_event events[8];
 
@@ -138,29 +200,8 @@ int DaemonRunner::run() {
                 ssize_t s = ::read(timer_fd_, &expirations, sizeof(expirations));
                 (void)s;
 
-                auto hw_cur = hw_probe_.capture_sample();
-                auto& prev_snapshot = proc_pool_.current();
-                auto& cur_snapshot = proc_pool_.next();
-                proc_analyzer_.capture_snapshot(cur_snapshot, &prev_snapshot);
-
-                cached_report_ = engine_.compute_attribution(hw_prev, hw_cur, prev_snapshot.span(), cur_snapshot.span(), 20);
-
-                // Update live file in /tmp/wattcurb_live.json atomically
-                {
-                    std::stringstream ss;
-                    report::ReportGenerator::render_json(cached_report_, ss);
-                    auto json_str = ss.str();
-                    int out_fd = ::open("/tmp/wattcurb_live.json.tmp", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
-                    if (out_fd >= 0) {
-                        ssize_t w = ::write(out_fd, json_str.data(), json_str.size());
-                        (void)w;
-                        ::close(out_fd);
-                        ::rename("/tmp/wattcurb_live.json.tmp", "/tmp/wattcurb_live.json");
-                    }
-                }
-
-                hw_prev = std::move(hw_cur);
-                proc_pool_.swap(); // 0ns pointer ping-pong! Zero dynamic allocation!
+                // Collect 5-second window observation and apply mitigation
+                collect_observation_window();
 
             } else if (fd == signal_fd_) {
                 struct signalfd_siginfo fdsi{};
@@ -192,11 +233,17 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
     if (bytes <= 0) return;
     buf[bytes] = '\0';
 
+    std::string_view req(buf, static_cast<size_t>(bytes));
     std::stringstream ss;
-    report::ReportGenerator::render_json(cached_report_, ss);
-    auto json_str = ss.str();
 
-    ::sendto(fd, json_str.data(), json_str.size(), 0,
+    if (req.find("BRIEFING") != std::string_view::npos) {
+        report::ReportGenerator::render_executive_briefing(cached_report_, ss);
+    } else {
+        report::ReportGenerator::render_json(cached_report_, ss);
+    }
+
+    auto resp_str = ss.str();
+    ::sendto(fd, resp_str.data(), resp_str.size(), 0,
              reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
 }
 

@@ -3,6 +3,7 @@
 #include "hw/hardware_probe.hpp"
 #include "proc/process_analyzer.hpp"
 #include "policy/attribution_engine.hpp"
+#include "policy/mitigation_engine.hpp"
 #include "report/report_generator.hpp"
 #include "core/scoped_profiler.hpp"
 
@@ -27,47 +28,73 @@ void handle_sigint(int) {
 
 void print_help(const char* prog) {
     std::cout << "Usage: " << prog << " [options]\n"
-              << "WattCurb: Ultra-low-overhead Linux power profiler and analysis daemon\n\n"
-              << "Modes:\n"
-              << "  -d, --daemon           Run as a persistent low-overhead background daemon\n"
-              << "  -s, --status           Query live status and report from running daemon\n"
-              << "  -l, --live             Continuous live interactive monitoring mode (Ctrl+C to stop)\n"
-              << "  (default)              Execute windowed sampling and print report\n\n"
-              << "Options:\n"
-              << "  -i, --interval <sec>   Sampling interval in seconds (default: 2.0s, daemon: 5.0s)\n"
-              << "  -w, --duration <sec>   Total evaluation window duration in seconds (e.g. 10.0, 30.0)\n"
-              << "  -c, --count <num>      Number of sampling intervals to aggregate (default: 1)\n"
+              << "WattCurb: Ultra-low-overhead Linux power profiler and adaptive mitigation daemon\n\n"
+              << "Two-Part Telemetry & Executive Reporting (REF-REQ-019):\n"
+              << "  -b, --briefing         Executive text briefing (human-readable summary & power tips)\n"
+              << "  -j, --json             Machine-parsable JSON export of all structural telemetry fields\n"
+              << "      --detail           Comprehensive engineering/developer terminal table dashboard\n\n"
+              << "Daemon & Live Modes:\n"
+              << "  -d, --daemon           Run persistent daemon (Default: 60s period with 5s observation)\n"
+              << "  -s, --status           Query live report/status from running background daemon\n"
+              << "  -l, --live             Continuous live interactive terminal dashboard (Ctrl+C to stop)\n\n"
+              << "Tuning Options:\n"
+              << "      --period <sec>     Daemon sleep period in seconds (default: 60.0s)\n"
+              << "      --window <sec>     Daemon observation window in seconds (default: 5.0s)\n"
+              << "  -i, --interval <sec>   Sampling interval in seconds (default: 2.0s)\n"
+              << "  -w, --duration <sec>   Total window duration in seconds (e.g. 5.0, 10.0, 30.0)\n"
               << "  -n, --top <count>      Number of top processes to display (default: 15)\n"
-              << "  -j, --json             Output analysis in structured JSON format\n"
-              << "  --dev-profile          Display fine-grained subsystem execution cost breakdown (REF-REQ-014)\n"
+              << "      --dev-profile      Display fine-grained subsystem execution cost breakdown\n"
               << "  -h, --help             Display this help message and exit\n";
+}
+
+int query_daemon_briefing() {
+    std::ifstream file("/tmp/wattcurb_briefing.txt");
+    if (file.is_open()) {
+        std::string line;
+        while (std::getline(file, line)) {
+            std::cout << line << "\n";
+        }
+        return 0;
+    }
+
+    if (wattcurb::core::SingletonLock::is_daemon_running("wattcurb.lock")) {
+        std::cout << "[*] Daemon is running. Waiting for observation window to complete...\n";
+        return 0;
+    }
+
+    return -1; // Daemon not running
 }
 
 int query_daemon_status() {
     std::ifstream live_file("/tmp/wattcurb_live.json");
-    if (!live_file.is_open()) {
-        if (wattcurb::core::SingletonLock::is_daemon_running("wattcurb.lock")) {
-            std::cout << "[*] Daemon is running. Waiting for initial sample report...\n";
-            return 0;
+    if (live_file.is_open()) {
+        std::string line;
+        while (std::getline(live_file, line)) {
+            std::cout << line << "\n";
         }
-        std::cerr << "[!] No running WattCurb daemon found (or /tmp/wattcurb_live.json not yet generated).\n"
-                  << "    Start daemon with: wattcurb --daemon\n";
-        return 1;
+        return 0;
     }
 
-    std::string line;
-    while (std::getline(live_file, line)) {
-        std::cout << line << "\n";
+    if (wattcurb::core::SingletonLock::is_daemon_running("wattcurb.lock")) {
+        std::cout << "[*] Daemon is running. Waiting for initial sample report...\n";
+        return 0;
     }
-    return 0;
+
+    std::cerr << "[!] No running WattCurb daemon found (or /tmp/wattcurb_live.json not yet generated).\n"
+              << "    Start daemon with: wattcurb --daemon\n";
+    return 1;
 }
 
 int main(int argc, char* argv[]) {
     double interval_sec = 2.0;
     double duration_sec = 0.0;
+    double period_sec = 60.0;
+    double window_sec = 5.0;
     size_t sample_count = 1;
     size_t top_n = 15;
     bool json_output = false;
+    bool briefing_mode = false;
+    bool detail_mode = false;
     bool daemon_mode = false;
     bool status_query = false;
     bool live_mode = false;
@@ -82,10 +109,18 @@ int main(int argc, char* argv[]) {
             daemon_mode = true;
         } else if (arg == "-s" || arg == "--status") {
             status_query = true;
+        } else if (arg == "-b" || arg == "--briefing") {
+            briefing_mode = true;
+        } else if (arg == "--detail") {
+            detail_mode = true;
         } else if (arg == "-l" || arg == "--live") {
             live_mode = true;
         } else if (arg == "--dev-profile") {
             dev_profile = true;
+        } else if (arg == "--period" && i + 1 < argc) {
+            period_sec = std::max(5.0, std::strtod(argv[++i], nullptr));
+        } else if (arg == "--window" && i + 1 < argc) {
+            window_sec = std::max(1.0, std::strtod(argv[++i], nullptr));
         } else if ((arg == "-i" || arg == "--interval") && i + 1 < argc) {
             interval_sec = std::max(0.5, std::strtod(argv[++i], nullptr));
         } else if ((arg == "-w" || arg == "--duration") && i + 1 < argc) {
@@ -103,9 +138,19 @@ int main(int argc, char* argv[]) {
         return query_daemon_status();
     }
 
+    if (briefing_mode && !daemon_mode) {
+        int ret = query_daemon_briefing();
+        if (ret == 0) {
+            return 0; // Printed cached briefing from running daemon
+        }
+        // If daemon is not running, proceed to run a 5s one-shot observation below
+        if (duration_sec == 0.0) {
+            duration_sec = 5.0;
+        }
+    }
+
     if (daemon_mode) {
-        double d_interval = (interval_sec == 2.0) ? 5.0 : interval_sec;
-        wattcurb::core::DaemonRunner daemon(d_interval);
+        wattcurb::core::DaemonRunner daemon(period_sec, window_sec);
         return daemon.run();
     }
 
@@ -116,6 +161,7 @@ int main(int argc, char* argv[]) {
     wattcurb::hw::HardwareProbe hw_probe;
     wattcurb::proc::ProcessAnalyzer proc_analyzer;
     wattcurb::policy::AttributionEngine engine;
+    wattcurb::policy::MitigationEngine mitigation_engine;
 
     auto sleep_ms = static_cast<int64_t>(interval_sec * 1000.0);
 
@@ -138,11 +184,15 @@ int main(int argc, char* argv[]) {
             auto& cur_snapshot = proc_pool.next();
             proc_analyzer.capture_snapshot(cur_snapshot, &prev_snapshot);
             auto report = engine.compute_attribution(hw_prev, hw_cur, prev_snapshot.span(), cur_snapshot.span(), top_n);
+            mitigation_engine.evaluate_and_actuate(report, report.hardware.is_battery_discharging, static_cast<double>(report.hardware.battery_capacity_percent));
 
             if (json_output) {
                 wattcurb::report::ReportGenerator::render_json(report, std::cout);
+            } else if (briefing_mode) {
+                std::cout << "\033[H\033[2J";
+                wattcurb::report::ReportGenerator::render_executive_briefing(report, std::cout);
             } else {
-                std::cout << "\033[H\033[2J"; // Clear screen & reset to top
+                std::cout << "\033[H\033[2J";
                 wattcurb::report::ReportGenerator::render_terminal(report, std::cout);
             }
 
@@ -197,11 +247,21 @@ int main(int argc, char* argv[]) {
     // Compute Windowed Attribution (Accumulating all intervals)
     auto report = engine.compute_windowed_attribution(hw_samples, proc_samples, top_n);
 
-    // Render report
+    // Evaluate closed-loop mitigation status (REF-REQ-019)
+    bool on_batt = report.hardware.is_battery_discharging;
+    double b_pct = static_cast<double>(report.hardware.battery_capacity_percent);
+    mitigation_engine.evaluate_and_actuate(report, on_batt, b_pct);
+
+    // Render Two-Part Telemetry (REF-REQ-019)
     if (json_output) {
+        // Part 2 (Machine): Structured JSON
         wattcurb::report::ReportGenerator::render_json(report, std::cout);
-    } else {
+    } else if (detail_mode) {
+        // Part 2 (Developer): Detailed Terminal Dashboard Table
         wattcurb::report::ReportGenerator::render_terminal(report, std::cout);
+    } else {
+        // Part 1 (Human): Executive Power & Battery Briefing (Default!)
+        wattcurb::report::ReportGenerator::render_executive_briefing(report, std::cout);
     }
 
     if (dev_profile) {
@@ -210,4 +270,3 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
-

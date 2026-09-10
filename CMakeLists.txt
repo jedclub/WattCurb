@@ -73,6 +73,8 @@ set(WATTCURB_LIB_SOURCES
     src/hw/hardware_probe.cpp
     src/proc/process_analyzer.cpp
     src/policy/attribution_engine.cpp
+    src/policy/process_classifier.cpp
+    src/policy/mitigation_engine.cpp
     src/report/report_generator.cpp
 )
 

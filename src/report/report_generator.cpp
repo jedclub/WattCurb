@@ -1,4 +1,5 @@
 #include "report/report_generator.hpp"
+#include "policy/process_classifier.hpp"
 
 #include <algorithm>
 #include <iomanip>
@@ -34,6 +35,112 @@ std::string format_bar(double percent, int width = 16) {
 }
 
 } // namespace
+
+void ReportGenerator::render_executive_briefing(const AnalysisReportData& r, std::ostream& out) {
+    double total_sys = r.hardware.total_system_watts > 0.0 ? r.hardware.total_system_watts :
+                       (r.hardware.cpu_package_watts + r.hardware.gpu_watts + r.hardware.display_watts +
+                        r.hardware.fan_estimated_watts + r.hardware.storage_estimated_watts + r.hardware.uncore_and_platform_watts);
+
+    out << "\n" << BOLD << CYAN;
+    out << "========================================================================================\n";
+    out << "                       WattCurb Executive Power & Battery Briefing                     \n";
+    out << "========================================================================================\n";
+    out << RESET;
+
+    // 1. Battery & Power Status
+    out << BOLD << " [1] System Battery & Power Overview" << RESET << "\n";
+    out << "  - Total System Drain  : " << BOLD << (total_sys > 20.0 ? RED : (total_sys > 10.0 ? YELLOW : GREEN))
+        << std::fixed << std::setprecision(2) << total_sys << " Watts" << RESET << "\n";
+    out << "  - Power State         : "
+        << (r.hardware.is_battery_discharging ? (RED + std::string("Discharging (On Battery)")) : (GREEN + std::string("AC Connected (Charging / Line)")))
+        << RESET << "\n";
+
+    if (r.hardware.is_battery_discharging) {
+        out << "  - Battery Remaining   : " << BOLD << r.hardware.battery_capacity_percent << "% ("
+            << std::fixed << std::setprecision(1) << r.hardware.battery_remaining_hours << " hours remaining)" << RESET << "\n";
+        out << "  - Battery Health      : " << std::fixed << std::setprecision(1) << r.hardware.battery_health_percent
+            << "% (" << r.hardware.battery_cycle_count << " charge cycles)\n";
+    }
+    out << "  - Observation Window  : " << r.sample_duration.count() << " ms ("
+        << r.total_monitored_processes << " monitored processes, "
+        << r.total_system_wakeups_per_sec << " wakeups/sec)\n\n";
+
+    // 2. Hardware Subsystem Drain
+    out << BOLD << " [2] Hardware Domain Power Breakdown" << RESET << "\n";
+    auto print_hw_line = [&](const char* domain, double watts, const char* extra = "") {
+        double pct = total_sys > 0.0 ? (watts / total_sys) * 100.0 : 0.0;
+        out << "  - " << std::left << std::setw(20) << domain << ": "
+            << std::right << std::setw(6) << std::fixed << std::setprecision(2) << watts << " W "
+            << "(" << std::setw(5) << std::fixed << std::setprecision(1) << pct << "%) "
+            << extra << "\n";
+    };
+
+    print_hw_line("CPU Package (RAPL)", r.hardware.cpu_package_watts, (r.hardware.cpu_temp_c > 0 ? ("Temp: " + std::to_string(static_cast<int>(r.hardware.cpu_temp_c)) + "°C").c_str() : ""));
+    print_hw_line("GPU Silicon (DRM)", r.hardware.gpu_watts, (r.hardware.gpu_busy_percent > 0 ? ("Busy: " + std::to_string(r.hardware.gpu_busy_percent) + "%").c_str() : ""));
+    print_hw_line("Display Backlight", r.hardware.display_watts, (r.hardware.display_brightness_percent > 0 ? ("Brightness: " + std::to_string(static_cast<int>(r.hardware.display_brightness_percent)) + "%").c_str() : ""));
+    print_hw_line("Storage (NVMe)", r.hardware.storage_estimated_watts);
+    print_hw_line("Cooling Fan", r.hardware.fan_estimated_watts, (r.hardware.fan_rpm > 0 ? (std::to_string(r.hardware.fan_rpm) + " RPM").c_str() : ""));
+    print_hw_line("Platform & Loss", r.hardware.uncore_and_platform_watts);
+    out << "\n";
+
+    // 3. Top Culprit Processes
+    out << BOLD << " [3] Top Battery Drain Culprits & Root Causes" << RESET << "\n";
+    size_t count = std::min(size_t{5}, r.top_processes.size());
+    if (count == 0) {
+        out << "  (No active drain candidates identified)\n";
+    } else {
+        for (size_t i = 0; i < count; ++i) {
+            const auto& p = r.top_processes[i];
+            auto tier = static_cast<policy::ProcessSafetyTier>(p.safety_tier);
+            const char* tier_label = policy::ProcessClassifierDB::tier_name(tier);
+            out << "  " << (i + 1) << ". " << BOLD << p.comm.c_str() << RESET
+                << " (PID: " << p.pid << ", " << tier_label << ")\n";
+            out << "     Drain: " << BOLD << (p.total_attributed_watts > 1.0 ? RED : YELLOW)
+                << std::fixed << std::setprecision(2) << p.total_attributed_watts << " W" << RESET
+                << " | Primary Domain: " << CYAN << p.primary_hw_domain.c_str() << RESET << "\n";
+            out << "     Mechanism: " << DIM << p.hardware_mechanism.c_str() << RESET << "\n";
+        }
+    }
+    out << "\n";
+
+    // 4. Active Mitigations & Resource Savings
+    out << BOLD << " [4] Active Closed-Loop Mitigations" << RESET << "\n";
+    const auto& ms = r.mitigation_status;
+    out << "  - Mitigation Status   : " << (ms.throttled_count > 0 || ms.frozen_count > 0 ? GREEN : DIM)
+        << ms.active_summary.c_str() << RESET << "\n";
+    if (ms.throttled_count > 0 || ms.frozen_count > 0 || ms.reclaimed_bytes > 0) {
+        out << "  - Throttled (IDLE)    : " << ms.throttled_count << " processes\n";
+        out << "  - Frozen (Cgroups v2) : " << ms.frozen_count << " processes\n";
+        out << "  - Reclaimed RAM       : " << (ms.reclaimed_bytes / (1024 * 1024)) << " MB\n";
+        out << "  - Estimated Savings   : " << BOLD << GREEN << std::fixed << std::setprecision(2)
+            << ms.estimated_savings_watts << " Watts" << RESET << "\n";
+    }
+    out << "\n";
+
+    // 5. Actionable Power Saving Recommendations
+    out << BOLD << " [5] Actionable Recommendations" << RESET << "\n";
+    bool has_tip = false;
+    if (r.hardware.display_brightness_percent > 60.0) {
+        out << "  * Tip: Display brightness is " << static_cast<int>(r.hardware.display_brightness_percent)
+            << "%. Lowering to 40% can save ~"
+            << std::fixed << std::setprecision(2) << (r.hardware.display_watts * 0.4) << " W.\n";
+        has_tip = true;
+    }
+    if (r.hardware.is_battery_discharging && r.hardware.gpu_watts > 2.0) {
+        out << "  * Tip: High GPU power draw (" << std::fixed << std::setprecision(1) << r.hardware.gpu_watts
+            << " W). Closing hardware-accelerated background tabs may extend battery life.\n";
+        has_tip = true;
+    }
+    if (r.total_system_wakeups_per_sec > 500) {
+        out << "  * Tip: System wakeup rate is high (" << r.total_system_wakeups_per_sec
+            << " /s), preventing CPU C3/C6 deep sleep.\n";
+        has_tip = true;
+    }
+    if (!has_tip) {
+        out << "  * System is running near optimal baseline power efficiency.\n";
+    }
+    out << "========================================================================================\n\n";
+}
 
 void ReportGenerator::render_terminal(const AnalysisReportData& r, std::ostream& out) {
     double total_sys = r.hardware.total_system_watts > 0.0 ? r.hardware.total_system_watts :
@@ -289,6 +396,13 @@ void ReportGenerator::render_json(const AnalysisReportData& r, std::ostream& out
     out << "  \"is_short_window\": " << (r.is_short_window ? "true" : "false") << ",\n";
     out << "  \"total_monitored_processes\": " << r.total_monitored_processes << ",\n";
     out << "  \"total_system_wakeups_per_sec\": " << r.total_system_wakeups_per_sec << ",\n";
+    out << "  \"mitigation_status\": {\n";
+    out << "    \"throttled_count\": " << r.mitigation_status.throttled_count << ",\n";
+    out << "    \"frozen_count\": " << r.mitigation_status.frozen_count << ",\n";
+    out << "    \"reclaimed_bytes\": " << r.mitigation_status.reclaimed_bytes << ",\n";
+    out << "    \"estimated_savings_watts\": " << r.mitigation_status.estimated_savings_watts << ",\n";
+    out << "    \"active_summary\": \"" << r.mitigation_status.active_summary << "\"\n";
+    out << "  },\n";
     out << "  \"hardware_breakdown\": {\n";
     out << "    \"total_system_watts\": " << r.hardware.total_system_watts << ",\n";
     out << "    \"cpu_package_watts\": " << r.hardware.cpu_package_watts << ",\n";
@@ -388,6 +502,8 @@ void ReportGenerator::render_json(const AnalysisReportData& r, std::ostream& out
         out << "      \"dram_watts\": " << p.dram_attributed_watts << ",\n";
         out << "      \"primary_hw_domain\": \"" << p.primary_hw_domain << "\",\n";
         out << "      \"hardware_mechanism\": \"" << p.hardware_mechanism << "\",\n";
+        out << "      \"safety_tier\": " << static_cast<int>(p.safety_tier) << ",\n";
+        out << "      \"recommended_action\": " << static_cast<int>(p.recommended_action) << ",\n";
         out << "      \"is_runaway\": " << (p.is_runaway_candidate ? "true" : "false") << "\n";
         out << "    }" << (i + 1 < r.top_processes.size() ? "," : "") << "\n";
     }

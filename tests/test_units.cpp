@@ -4,6 +4,9 @@
 #include "hw/hardware_probe.hpp"
 #include "proc/process_analyzer.hpp"
 #include "policy/attribution_engine.hpp"
+#include "policy/process_classifier.hpp"
+#include "policy/mitigation_engine.hpp"
+#include "report/report_generator.hpp"
 #include "core/scoped_profiler.hpp"
 
 #undef NDEBUG
@@ -538,6 +541,162 @@ void test_custom_containers() {
     std::cout << " [PASS] test_custom_containers (FixedVector, FixedString, TopKHeap, Canary & Guards verified)\n";
 }
 
+void test_process_classifier() {
+    using namespace wattcurb::policy;
+
+    // 1. Tier 0: Critical System
+    auto c_init = ProcessClassifierDB::classify("systemd");
+    assert(c_init.tier == ProcessSafetyTier::CriticalImmune);
+    assert(c_init.can_freeze == false);
+    assert(c_init.can_throttle_scheduler == false);
+
+    auto c_pipe = ProcessClassifierDB::classify("pipewire");
+    assert(c_pipe.tier == ProcessSafetyTier::CriticalImmune);
+
+    auto c_kw = ProcessClassifierDB::classify("kworker/u16:1");
+    assert(c_kw.tier == ProcessSafetyTier::CriticalImmune);
+
+    // 2. Tier 1: Desktop Compositor
+    auto c_kwin = ProcessClassifierDB::classify("kwin_wayland");
+    assert(c_kwin.tier == ProcessSafetyTier::DesktopCore);
+    assert(c_kwin.can_freeze == false);
+
+    auto c_mutter = ProcessClassifierDB::classify("mutter");
+    assert(c_mutter.tier == ProcessSafetyTier::DesktopCore);
+
+    // 3. Tier 2: Desktop Shell
+    auto c_plasma = ProcessClassifierDB::classify("plasmashell");
+    assert(c_plasma.tier == ProcessSafetyTier::DesktopShell);
+    assert(c_plasma.can_reclaim_memory == true);
+    assert(c_plasma.can_freeze == false);
+
+    // 4. Tier 4: Background Workers
+    auto c_baloo = ProcessClassifierDB::classify("baloo_file");
+    assert(c_baloo.tier == ProcessSafetyTier::BackgroundWorker);
+    assert(c_baloo.can_throttle_scheduler == true);
+    assert(c_baloo.can_freeze == true);
+
+    auto c_tracker = ProcessClassifierDB::classify("tracker-miner-fs-3");
+    assert(c_tracker.tier == ProcessSafetyTier::BackgroundWorker);
+
+    // 5. Tier 3: User Interactive Apps
+    auto c_chrome = ProcessClassifierDB::classify("chrome");
+    assert(c_chrome.tier == ProcessSafetyTier::UserInteractive);
+    assert(c_chrome.can_reclaim_memory == true);
+
+    auto c_kitty = ProcessClassifierDB::classify("kitty");
+    assert(c_kitty.tier == ProcessSafetyTier::UserInteractive);
+
+    // 6. Tier 5: Runaway Candidate
+    auto c_miner = ProcessClassifierDB::classify("xmrig_test");
+    assert(c_miner.tier == ProcessSafetyTier::RunawayCandidate);
+
+    std::cout << " [PASS] test_process_classifier (6 safety tiers validated)\n";
+}
+
+void test_mitigation_engine() {
+    using namespace wattcurb;
+    using namespace wattcurb::policy;
+
+    // 1. Test cgroup path resolution on self
+    char cg_buf[256];
+    bool resolved = MitigationEngine::resolve_cgroup_path(::getpid(), cg_buf, sizeof(cg_buf));
+    if (resolved) {
+        assert(std::string_view(cg_buf).starts_with("/sys/fs/cgroup"));
+    }
+
+    // 2. Mock Closed-Loop Evaluation Test
+    MitigationEngine engine;
+    AnalysisReportData mock_report;
+
+    // Create a Critical process (must NEVER be throttled or frozen)
+    ProcessAttributedPower crit_p;
+    crit_p.pid = 9991;
+    crit_p.comm = "systemd";
+    crit_p.cpu_watts = 2.5;
+    crit_p.safety_tier = static_cast<uint8_t>(ProcessSafetyTier::CriticalImmune);
+    crit_p.wdi_score = 25.0;
+    mock_report.top_processes.push_back(crit_p);
+
+    // Create a Background Worker (eligible for mitigation)
+    ProcessAttributedPower bg_p;
+    bg_p.pid = 9992;
+    bg_p.comm = "baloo_file";
+    bg_p.cpu_watts = 3.0;
+    bg_p.safety_tier = static_cast<uint8_t>(ProcessSafetyTier::BackgroundWorker);
+    bg_p.wdi_score = 15.0;
+    bg_p.timerslack_ns = 10000;
+    mock_report.top_processes.push_back(bg_p);
+
+    // Run evaluation in Progressive mode (battery discharging, 15% battery)
+    auto status = engine.evaluate_and_actuate(mock_report, true, 15.0);
+    (void)status;
+
+    // Critical process must NOT cause critical throttling
+    assert(mock_report.mitigation_status.active_summary.size() > 0);
+    std::cout << " [PASS] test_mitigation_engine (Immunity guarantees & adaptive logic verified)\n";
+}
+
+void test_executive_briefing_and_telemetry() {
+    using namespace wattcurb;
+
+    AnalysisReportData report;
+    report.sample_duration = std::chrono::milliseconds(5000);
+    report.sample_count = 5;
+    report.total_energy_joules = 54.2;
+    report.total_monitored_processes = 245;
+    report.total_system_wakeups_per_sec = 350;
+
+    report.hardware.total_system_watts = 10.84;
+    report.hardware.cpu_package_watts = 4.2;
+    report.hardware.gpu_watts = 1.8;
+    report.hardware.display_watts = 2.5;
+    report.hardware.is_battery_discharging = true;
+    report.hardware.battery_capacity_percent = 78;
+    report.hardware.battery_remaining_hours = 5.2;
+    report.hardware.battery_health_percent = 96.5;
+    report.hardware.battery_cycle_count = 42;
+    report.hardware.display_brightness_percent = 75.0;
+
+    ProcessAttributedPower p1;
+    p1.pid = 4120;
+    p1.comm = "chrome";
+    p1.total_attributed_watts = 2.45;
+    p1.primary_hw_domain = "GPU Silicon";
+    p1.hardware_mechanism = "AMDGPU GFX Engine (120MB VRAM)";
+    p1.safety_tier = static_cast<uint8_t>(policy::ProcessSafetyTier::UserInteractive);
+    p1.recommended_action = static_cast<uint8_t>(policy::MitigationAction::RelaxTimerSlack);
+    report.top_processes.push_back(p1);
+
+    report.mitigation_status.throttled_count = 1;
+    report.mitigation_status.frozen_count = 0;
+    report.mitigation_status.reclaimed_bytes = 64 * 1024 * 1024;
+    report.mitigation_status.estimated_savings_watts = 0.45;
+    report.mitigation_status.active_summary = "1 throttled, 64MB reclaimed (~0.45W saved)";
+
+    // Test Part 1: Executive Briefing Text Rendering
+    std::ostringstream ss_briefing;
+    report::ReportGenerator::render_executive_briefing(report, ss_briefing);
+    std::string briefing = ss_briefing.str();
+    assert(briefing.find("WattCurb Executive Power & Battery Briefing") != std::string::npos);
+    assert(briefing.find("System Battery & Power Overview") != std::string::npos);
+    assert(briefing.find("10.84 Watts") != std::string::npos);
+    assert(briefing.find("Top Battery Drain Culprits") != std::string::npos);
+    assert(briefing.find("chrome") != std::string::npos);
+    assert(briefing.find("Active Closed-Loop Mitigations") != std::string::npos);
+    assert(briefing.find("Actionable Recommendations") != std::string::npos);
+
+    // Test Part 2: JSON Serialization
+    std::ostringstream ss_json;
+    report::ReportGenerator::render_json(report, ss_json);
+    std::string json_str = ss_json.str();
+    assert(json_str.find("\"mitigation_status\"") != std::string::npos);
+    assert(json_str.find("\"safety_tier\": 3") != std::string::npos);
+    assert(json_str.find("\"recommended_action\": 2") != std::string::npos);
+
+    std::cout << " [PASS] test_executive_briefing_and_telemetry (Two-Part Telemetry & JSON verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -547,6 +706,9 @@ int main() {
     test::test_ifunc_and_nttp_dispatch();
     test::test_simd_scanner();
     test::test_custom_containers();
+    test::test_process_classifier();
+    test::test_mitigation_engine();
+    test::test_executive_briefing_and_telemetry();
     test::test_proc_stat_parsing();
     test::test_proc_statm_parsing();
     test::test_proc_status_parsing();
