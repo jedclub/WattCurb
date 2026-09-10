@@ -80,14 +80,66 @@ public:
     [[nodiscard]] const_iterator end() const noexcept { return data() + size_; }
     [[nodiscard]] const_iterator cend() const noexcept { return data() + size_; }
 
-    [[nodiscard]] reference operator[](size_type idx) noexcept { return data()[idx]; }
-    [[nodiscard]] const_reference operator[](size_type idx) const noexcept { return data()[idx]; }
+    static reference dummy_instance() noexcept {
+        static T dummy{};
+        return dummy;
+    }
 
-    [[nodiscard]] reference front() noexcept { return data()[0]; }
-    [[nodiscard]] const_reference front() const noexcept { return data()[0]; }
+    [[nodiscard]] bool check_integrity() const noexcept {
+        return canary_ == CANARY_MAGIC;
+    }
 
-    [[nodiscard]] reference back() noexcept { return data()[size_ - 1]; }
-    [[nodiscard]] const_reference back() const noexcept { return data()[size_ - 1]; }
+    [[nodiscard]] bool overflow_occurred() const noexcept {
+        return overflow_count_ > 0;
+    }
+
+    [[nodiscard]] uint32_t overflow_count() const noexcept {
+        return overflow_count_;
+    }
+
+    void reset_overflow() noexcept {
+        overflow_count_ = 0;
+    }
+
+    [[nodiscard]] reference operator[](size_type idx) noexcept {
+        if (size_ == 0) return dummy_instance();
+        if (idx >= size_) idx = size_ - 1; // Safe saturating clamp
+        return data()[idx];
+    }
+    [[nodiscard]] const_reference operator[](size_type idx) const noexcept {
+        if (size_ == 0) return dummy_instance();
+        if (idx >= size_) idx = size_ - 1; // Safe saturating clamp
+        return data()[idx];
+    }
+
+    [[nodiscard]] reference at(size_type idx) noexcept {
+        if (size_ == 0) return dummy_instance();
+        if (idx >= size_) idx = size_ - 1;
+        return data()[idx];
+    }
+    [[nodiscard]] const_reference at(size_type idx) const noexcept {
+        if (size_ == 0) return dummy_instance();
+        if (idx >= size_) idx = size_ - 1;
+        return data()[idx];
+    }
+
+    [[nodiscard]] reference front() noexcept {
+        if (size_ == 0) return dummy_instance();
+        return data()[0];
+    }
+    [[nodiscard]] const_reference front() const noexcept {
+        if (size_ == 0) return dummy_instance();
+        return data()[0];
+    }
+
+    [[nodiscard]] reference back() noexcept {
+        if (size_ == 0) return dummy_instance();
+        return data()[size_ - 1];
+    }
+    [[nodiscard]] const_reference back() const noexcept {
+        if (size_ == 0) return dummy_instance();
+        return data()[size_ - 1];
+    }
 
     [[nodiscard]] std::span<T> span() noexcept { return std::span<T>(data(), size_); }
     [[nodiscard]] std::span<const T> span() const noexcept { return std::span<const T>(data(), size_); }
@@ -95,7 +147,10 @@ public:
     operator std::span<const T>() const noexcept { return std::span<const T>(data(), size_); }
 
     bool push_back(const T& val) noexcept {
-        if (size_ >= Capacity) return false;
+        if (size_ >= Capacity) {
+            ++overflow_count_;
+            return false;
+        }
         if constexpr (std::is_trivially_copyable_v<T>) {
             std::memcpy(data() + size_, &val, sizeof(T));
         } else {
@@ -106,7 +161,10 @@ public:
     }
 
     bool push_back(T&& val) noexcept {
-        if (size_ >= Capacity) return false;
+        if (size_ >= Capacity) {
+            ++overflow_count_;
+            return false;
+        }
         if constexpr (std::is_trivially_copyable_v<T>) {
             std::memcpy(data() + size_, &val, sizeof(T));
         } else {
@@ -119,7 +177,8 @@ public:
     template <typename... Args>
     reference emplace_back(Args&&... args) noexcept {
         if (size_ >= Capacity) {
-            return data()[Capacity - 1]; // Safe bound clamp
+            ++overflow_count_;
+            return (size_ > 0) ? data()[size_ - 1] : dummy_instance(); // Safe bound clamp
         }
         pointer ptr = data() + size_;
         ::new (static_cast<void*>(ptr)) T(std::forward<Args>(args)...);
@@ -163,8 +222,12 @@ public:
     }
 
 private:
+    static constexpr uint64_t CANARY_MAGIC = 0xDEADBEEFCAFE0001ULL;
+
     void copy_from(const FixedVector& other) noexcept {
         size_ = other.size_;
+        overflow_count_ = other.overflow_count_;
+        canary_ = CANARY_MAGIC;
         if constexpr (std::is_trivially_copyable_v<T>) {
             if (size_ > 0) {
                 std::memcpy(data(), other.data(), size_ * sizeof(T));
@@ -178,6 +241,8 @@ private:
 
     void move_from(FixedVector&& other) noexcept {
         size_ = other.size_;
+        overflow_count_ = other.overflow_count_;
+        canary_ = CANARY_MAGIC;
         if constexpr (std::is_trivially_copyable_v<T>) {
             if (size_ > 0) {
                 std::memcpy(data(), other.data(), size_ * sizeof(T));
@@ -191,7 +256,9 @@ private:
     }
 
     size_type size_{0};
+    uint32_t overflow_count_{0};
     alignas(T) std::byte storage_[sizeof(T) * Capacity];
+    uint64_t canary_{CANARY_MAGIC};
 };
 
 
@@ -283,6 +350,15 @@ public:
         return false;
     }
 
+    [[nodiscard]] char operator[](size_t idx) const noexcept {
+        if (idx >= len_) return '\0';
+        return buf_[idx];
+    }
+
+    [[nodiscard]] bool check_integrity() const noexcept {
+        return len_ < Capacity && buf_[len_] == '\0' && canary_ == CANARY_MAGIC;
+    }
+
     operator std::string_view() const noexcept { return view(); }
 
     bool operator==(std::string_view sv) const noexcept { return view() == sv; }
@@ -294,8 +370,11 @@ public:
     }
 
 private:
+    static constexpr uint64_t CANARY_MAGIC = 0x5354524741555244ULL; // "STRGUARD"
+
     std::array<char, Capacity> buf_{};
     size_t len_{0};
+    uint64_t canary_{CANARY_MAGIC};
 };
 
 static_assert(std::is_trivially_copyable_v<FixedString<64>>, "FixedString must be TriviallyCopyable");

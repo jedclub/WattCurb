@@ -456,40 +456,73 @@ void test_pcie_binary_config_decoder() {
 void test_custom_containers() {
     using namespace wattcurb::core;
 
-    // 1. Test FixedVector
+    // 1. Test FixedVector Basic Operations
     FixedVector<int, 4> v;
     assert(v.empty());
     assert(v.capacity() == 4);
+    assert(v.check_integrity());
+    assert(!v.overflow_occurred());
     assert(v.push_back(10));
     assert(v.push_back(20));
     assert(v.push_back(30));
     assert(v.push_back(40));
-    assert(!v.push_back(50)); // Capacity full
+    assert(!v.push_back(50)); // Capacity full: rejected gracefully
     assert(v.size() == 4);
     assert(v.full());
+    assert(v.overflow_occurred());
+    assert(v.overflow_count() == 1);
+    assert(v.check_integrity());
     assert(v[0] == 10 && v[3] == 40);
     assert(v.front() == 10 && v.back() == 40);
 
-    // Test copy and move
+    // Test safe bounds clamping on out-of-range index (REF-ARCH-007)
+    assert(v[100] == 40 && "Out-of-range index must clamp to last valid element");
+    assert(v.at(50) == 40 && "at() must clamp to valid element without crashing");
+
+    // Test copy and move with canary preservation
     FixedVector<int, 4> v_copy = v;
     assert(v_copy.size() == 4 && v_copy[2] == 30);
+    assert(v_copy.check_integrity());
     v_copy.pop_back();
     assert(v_copy.size() == 3);
 
     FixedVector<int, 4> v_move = std::move(v_copy);
     assert(v_move.size() == 3 && v_move[1] == 20);
+    assert(v_move.check_integrity());
 
-    // 2. Test FixedString
+    // Test empty container safe access (REF-REQ-018)
+    FixedVector<int, 8> v_empty;
+    assert(v_empty.empty());
+    assert(v_empty.check_integrity());
+    int f = v_empty.front();
+    int b = v_empty.back();
+    int at_val = v_empty.at(10);
+    (void)f; (void)b; (void)at_val; // Must not crash or dereference invalid memory
+
+    // 2. High-Capacity Headroom Stress Test (REF-TEST-007)
+    FixedVector<int, 2048> v_large;
+    for (int i = 0; i < 3000; ++i) {
+        v_large.push_back(i);
+    }
+    assert(v_large.size() == 2048 && "Size must cap strictly at 2048");
+    assert(v_large.overflow_occurred() && "Overflow must be flagged");
+    assert(v_large.overflow_count() == (3000 - 2048) && "Overflow count must be exactly 952");
+    assert(v_large.check_integrity() && "Canary must remain untouched after 3000 insertions");
+
+    // 3. Test FixedString with Canary & Safety Guards
     FixedString<32> fs("hello");
     assert(fs.size() == 5);
     assert(fs == "hello");
+    assert(fs.check_integrity());
     assert(fs.append(" world"));
     assert(fs == "hello world");
     assert(fs.append_i32(-42));
     assert(fs == "hello world-42");
+    assert(fs.check_integrity());
+    assert(fs[100] == '\0' && "Out-of-range character access must return null-terminator");
     static_assert(std::is_trivially_copyable_v<FixedString<32>>, "FixedString must be TriviallyCopyable");
 
-    // 3. Test TopKHeap (streaming top-3)
+    // 4. Test TopKHeap (streaming top-3)
     TopKHeap<int, 3, std::greater<int>> heap;
     int data[] = {5, 12, 1, 88, 32, 7, 95, 23};
     for (int x : data) {
@@ -502,7 +535,7 @@ void test_custom_containers() {
     assert(top3[1] == 88);
     assert(top3[2] == 32);
 
-    std::cout << " [PASS] test_custom_containers (FixedVector, FixedString, TopKHeap verified)\n";
+    std::cout << " [PASS] test_custom_containers (FixedVector, FixedString, TopKHeap, Canary & Guards verified)\n";
 }
 
 } // namespace test

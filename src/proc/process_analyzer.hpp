@@ -33,7 +33,7 @@ public:
 
 private:
     std::filesystem::path procfs_root_;
-    mutable core::FixedVector<int32_t, 256> kthread_pids_; // REF-RES-006: Cached kernel threads (ppid == 2)
+    mutable core::FixedVector<int32_t, 512> kthread_pids_; // REF-RES-006: Cached kernel threads (ppid == 2)
     mutable uint64_t pass_counter_{0};
 
     bool read_pid_details(int32_t pid, ProcessSample& sample) const;

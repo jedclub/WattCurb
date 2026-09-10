@@ -106,7 +106,7 @@ static void do_capture_active_processes(
     OutputContainer& samples,
     const PrevContainer* prev_samples,
     const std::filesystem::path& procfs_root,
-    core::FixedVector<int32_t, 256>& kthread_pids,
+    core::FixedVector<int32_t, 512>& kthread_pids,
     [[maybe_unused]] uint64_t pass_counter
 ) {
     WATTCURB_PROFILE_SCOPE("proc.capture_active_all");

@@ -288,15 +288,15 @@ static_assert(std::is_trivially_copyable_v<ProcessDomainShare>, "ProcessDomainSh
 struct DomainCulprit {
     core::FixedString<64> domain_name;
     double domain_total_watts{0.0};
-    core::FixedVector<ProcessDomainShare, 5> top_culprits;
+    core::FixedVector<ProcessDomainShare, 8> top_culprits;
 };
 
 // Implements REF-REQ-005, REF-REQ-011, REF-REQ-012 & REF-ARCH-002
 struct AnalysisReportData {
     std::chrono::milliseconds sample_duration{0};
     HardwarePowerBreakdown hardware;
-    core::FixedVector<ProcessAttributedPower, 32> top_processes;
-    core::FixedVector<DomainCulprit, 8> domain_culprits;
+    core::FixedVector<ProcessAttributedPower, 64> top_processes;
+    core::FixedVector<DomainCulprit, 16> domain_culprits;
     size_t total_monitored_processes{0};
     uint64_t total_system_wakeups_per_sec{0};
     size_t sample_count{1};
@@ -304,8 +304,9 @@ struct AnalysisReportData {
     bool is_short_window{false};
 };
 
-// Zero-Allocation Cacheline-Aligned Process Snapshot & Ping-Pong Pool (REF-ARCH-006)
-using ProcessSnapshot = core::FixedVector<ProcessSample, 1024>;
-using ProcessPool = core::DoubleBufferedPool<ProcessSample, 1024>;
+// Zero-Allocation Cacheline-Aligned Process Snapshot & Ping-Pong Pool (REF-ARCH-006, REF-REQ-018)
+// Generous 2048-entry headroom accommodates server bursts and container storms.
+using ProcessSnapshot = core::FixedVector<ProcessSample, 2048>;
+using ProcessPool = core::DoubleBufferedPool<ProcessSample, 2048>;
 
 } // namespace wattcurb

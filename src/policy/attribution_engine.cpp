@@ -225,7 +225,7 @@ AnalysisReportData AttributionEngine::compute_attribution(
         int32_t prev_core;
     };
 
-    core::FixedVector<IntermediateProc, 1024> deltas;
+    core::FixedVector<IntermediateProc, 2048> deltas;
 
     uint64_t total_delta_cpu = 0;
     uint64_t total_delta_gpu_ns = 0;
@@ -312,7 +312,7 @@ AnalysisReportData AttributionEngine::compute_attribution(
     double static_cpu_power = report.hardware.cpu_package_watts * 0.25;
     double static_per_proc = deltas.empty() ? 0.0 : (static_cpu_power / static_cast<double>(deltas.size()));
 
-    core::FixedVector<ProcessAttributedPower, 1024> attributed;
+    core::FixedVector<ProcessAttributedPower, 2048> attributed;
 
     double total_thermal_watts = 0.0;
 
@@ -723,13 +723,13 @@ static AnalysisReportData do_compute_windowed_attribution(
 
     // 1. Process intermediate delta accumulation using sorted Two-Pointer stream merge (REF-ARCH-005)
     // Completely eliminates std::unordered_map (0 heap node allocations, 100% L1D sequential access)
-    core::FixedVector<ProcessSample, 1024> accumulated_procs;
+    core::FixedVector<ProcessSample, 2048> accumulated_procs;
 
     for (size_t step = 1; step <= num_intervals; ++step) {
         const auto& prev_procs = proc_samples[step - 1];
         const auto& cur_procs = proc_samples[step];
 
-        core::FixedVector<ProcessSample, 1024> next_accum;
+        core::FixedVector<ProcessSample, 2048> next_accum;
 
         size_t idx_prev = 0;
         size_t idx_cur = 0;
@@ -859,8 +859,8 @@ static AnalysisReportData do_compute_windowed_attribution(
     if (count_nvme_temp > 0) hw_end.nvme_temp_composite_mdeg = static_cast<int32_t>(sum_nvme_temp / static_cast<double>(count_nvme_temp));
 
     // 3. Construct synthetic zero-base proc1 and accumulated delta proc2
-    core::FixedVector<ProcessSample, 1024> proc_zero;
-    core::FixedVector<ProcessSample, 1024> proc_delta;
+    core::FixedVector<ProcessSample, 2048> proc_zero;
+    core::FixedVector<ProcessSample, 2048> proc_delta;
 
     for (const auto& acc : accumulated_procs) {
         ProcessSample z{};
