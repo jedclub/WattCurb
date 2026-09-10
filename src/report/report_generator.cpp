@@ -177,12 +177,44 @@ void ReportGenerator::render_terminal(const AnalysisReportData& r, std::ostream&
 
     for (const auto& p : r.top_processes) {
         std::string comm_trunc = p.comm.size() > 13 ? p.comm.substr(0, 12) + "…" : std::string(p.comm.view());
-        std::string core_str = p.cpu_core >= 0 ? ("C" + std::to_string(p.cpu_core) + (p.cross_ccx_migration ? "!" : "")) : "-";
-        std::string pss_str = p.pss_kib > 0 ? (std::to_string(p.pss_kib / 1024) + "M") : "-";
-        std::string skt_str = p.open_sockets > 0 ? std::to_string(p.open_sockets) : "-";
-        std::string th_str = std::to_string(p.num_threads);
-        std::string flt_str = p.majflt_per_sec > 0 ? (std::to_string(p.majflt_per_sec) + "M") :
-                              (p.minflt_per_sec > 0 ? (std::to_string(p.minflt_per_sec) + "m") : "-");
+
+        char core_buf[16] = "-";
+        if (p.cpu_core >= 0) {
+            core_buf[0] = 'C';
+            auto [ptr, ec] = std::to_chars(core_buf + 1, core_buf + 14, p.cpu_core);
+            if (p.cross_ccx_migration) { *ptr++ = '!'; }
+            *ptr = '\0';
+        }
+
+        char pss_buf[16] = "-";
+        if (p.pss_kib > 0) {
+            auto [ptr, ec] = std::to_chars(pss_buf, pss_buf + 14, p.pss_kib / 1024);
+            *ptr++ = 'M';
+            *ptr = '\0';
+        }
+
+        char skt_buf[16] = "-";
+        if (p.open_sockets > 0) {
+            auto [ptr, ec] = std::to_chars(skt_buf, skt_buf + 14, p.open_sockets);
+            *ptr = '\0';
+        }
+
+        char th_buf[16];
+        {
+            auto [ptr, ec] = std::to_chars(th_buf, th_buf + 14, p.num_threads);
+            *ptr = '\0';
+        }
+
+        char flt_buf[16] = "-";
+        if (p.majflt_per_sec > 0) {
+            auto [ptr, ec] = std::to_chars(flt_buf, flt_buf + 14, p.majflt_per_sec);
+            *ptr++ = 'M';
+            *ptr = '\0';
+        } else if (p.minflt_per_sec > 0) {
+            auto [ptr, ec] = std::to_chars(flt_buf, flt_buf + 14, p.minflt_per_sec);
+            *ptr++ = 'm';
+            *ptr = '\0';
+        }
 
         out << " " << std::left << std::setw(6) << p.pid
             << std::setw(15) << comm_trunc
@@ -195,11 +227,11 @@ void ReportGenerator::render_terminal(const AnalysisReportData& r, std::ostream&
             << std::setw(5) << p.fan_attributed_watts << " "
             << BOLD << std::setw(7) << p.total_attributed_watts << RESET << " "
             << std::setw(4) << std::setprecision(1) << p.wdi_score << " "
-            << std::setw(5) << core_str << " "
-            << std::setw(3) << th_str << " "
-            << std::setw(6) << flt_str << " "
-            << std::setw(6) << pss_str << " "
-            << std::setw(3) << skt_str << "  "
+            << std::setw(5) << core_buf << " "
+            << std::setw(3) << th_buf << " "
+            << std::setw(6) << flt_buf << " "
+            << std::setw(6) << pss_buf << " "
+            << std::setw(3) << skt_buf << "  "
             << "[" << BOLD << p.primary_hw_domain << RESET << "] " << DIM << p.hardware_mechanism << RESET << "\n";
     }
 

@@ -459,28 +459,40 @@ AnalysisReportData AttributionEngine::compute_attribution(
     }
 }
 
-    // 3. Build Domain Culprits Registry (REF-REQ-011 Sec 3.2)
+    // 3. Build Domain Culprits Registry (REF-REQ-011 Sec 3.2) - Zero-Copy Pointer-Based Partial Sort
+    // Eliminates 3,000+ deep copies of ProcessAttributedPower (with std::string heap allocations)
+    auto select_top_culprits = [](const std::vector<ProcessAttributedPower>& procs, auto filter_pred, auto sort_pred, size_t top_k = 5) {
+        std::vector<const ProcessAttributedPower*> ptrs;
+        ptrs.reserve(procs.size());
+        for (const auto& p : procs) {
+            if (filter_pred(p)) ptrs.push_back(&p);
+        }
+        size_t k = std::min(top_k, ptrs.size());
+        if (k > 0) {
+            std::partial_sort(ptrs.begin(), ptrs.begin() + static_cast<std::ptrdiff_t>(k), ptrs.end(), sort_pred);
+            ptrs.resize(k);
+        }
+        return ptrs;
+    };
+
     // Domain A: GPU Silicon
     if (report.hardware.gpu_watts > 0.05) {
         DomainCulprit gpu_culprit;
         gpu_culprit.domain_name = "GPU Silicon (AMDGPU / DRM)";
         gpu_culprit.domain_total_watts = report.hardware.gpu_watts;
 
-        std::vector<ProcessAttributedPower> gpu_procs;
-        for (const auto& p : attributed) {
-            if (p.gpu_watts > 0.01) gpu_procs.push_back(p);
-        }
-        std::sort(gpu_procs.begin(), gpu_procs.end(), [](const auto& a, const auto& b) {
-            return a.gpu_watts > b.gpu_watts;
-        });
-        for (size_t i = 0; i < std::min<size_t>(5, gpu_procs.size()); ++i) {
-            double sh = (gpu_procs[i].gpu_watts / report.hardware.gpu_watts) * 100.0;
+        auto top_gpu = select_top_culprits(attributed,
+            [](const auto& p) { return p.gpu_watts > 0.01; },
+            [](const auto* a, const auto* b) { return a->gpu_watts > b->gpu_watts; });
+
+        for (const auto* p : top_gpu) {
+            double sh = (p->gpu_watts / report.hardware.gpu_watts) * 100.0;
             gpu_culprit.top_culprits.push_back(ProcessDomainShare{
-                .pid = gpu_procs[i].pid,
-                .comm = gpu_procs[i].comm,
-                .watts = gpu_procs[i].gpu_watts,
+                .pid = p->pid,
+                .comm = p->comm,
+                .watts = p->gpu_watts,
                 .share_percent = sh,
-                .detail = gpu_procs[i].hardware_mechanism
+                .detail = p->hardware_mechanism
             });
         }
         if (!gpu_culprit.top_culprits.empty()) {
@@ -496,23 +508,20 @@ AnalysisReportData AttributionEngine::compute_attribution(
         for (const auto& p : attributed) total_wake_tax += p.wakeup_tax_watts;
         wake_culprit.domain_total_watts = total_wake_tax;
 
-        std::vector<ProcessAttributedPower> wake_procs;
-        for (const auto& p : attributed) {
-            if (p.wakeups_per_sec > 25) wake_procs.push_back(p);
-        }
-        std::sort(wake_procs.begin(), wake_procs.end(), [](const auto& a, const auto& b) {
-            return a.wakeups_per_sec > b.wakeups_per_sec;
-        });
-        for (size_t i = 0; i < std::min<size_t>(5, wake_procs.size()); ++i) {
+        auto top_wake = select_top_culprits(attributed,
+            [](const auto& p) { return p.wakeups_per_sec > 25; },
+            [](const auto* a, const auto* b) { return a->wakeups_per_sec > b->wakeups_per_sec; });
+
+        for (const auto* p : top_wake) {
             double sh = (report.total_system_wakeups_per_sec > 0) ?
-                (static_cast<double>(wake_procs[i].wakeups_per_sec) * 100.0 / static_cast<double>(report.total_system_wakeups_per_sec)) : 0.0;
+                (static_cast<double>(p->wakeups_per_sec) * 100.0 / static_cast<double>(report.total_system_wakeups_per_sec)) : 0.0;
             wake_culprit.top_culprits.push_back(ProcessDomainShare{
-                .pid = wake_procs[i].pid,
-                .comm = wake_procs[i].comm,
-                .watts = wake_procs[i].wakeup_tax_watts,
+                .pid = p->pid,
+                .comm = p->comm,
+                .watts = p->wakeup_tax_watts,
                 .share_percent = sh,
-                .detail = std::to_string(wake_procs[i].wakeups_per_sec) + " wakeups/s (" +
-                          std::to_string(wake_procs[i].wakeup_tax_watts).substr(0, 4) + "W Tax)"
+                .detail = std::to_string(p->wakeups_per_sec) + " wakeups/s (" +
+                          std::to_string(p->wakeup_tax_watts).substr(0, 4) + "W Tax)"
             });
         }
         if (!wake_culprit.top_culprits.empty()) {
@@ -526,21 +535,18 @@ AnalysisReportData AttributionEngine::compute_attribution(
         fan_culprit.domain_name = "Cooling Fan Mechanical Drain (" + std::to_string(report.hardware.fan_rpm) + " RPM ThinkPad EC)";
         fan_culprit.domain_total_watts = report.hardware.fan_estimated_watts;
 
-        std::vector<ProcessAttributedPower> fan_procs;
-        for (const auto& p : attributed) {
-            if (p.fan_attributed_watts > 0.01) fan_procs.push_back(p);
-        }
-        std::sort(fan_procs.begin(), fan_procs.end(), [](const auto& a, const auto& b) {
-            return a.fan_attributed_watts > b.fan_attributed_watts;
-        });
-        for (size_t i = 0; i < std::min<size_t>(5, fan_procs.size()); ++i) {
-            double sh = (fan_procs[i].fan_attributed_watts / report.hardware.fan_estimated_watts) * 100.0;
+        auto top_fan = select_top_culprits(attributed,
+            [](const auto& p) { return p.fan_attributed_watts > 0.01; },
+            [](const auto* a, const auto* b) { return a->fan_attributed_watts > b->fan_attributed_watts; });
+
+        for (const auto* p : top_fan) {
+            double sh = (p->fan_attributed_watts / report.hardware.fan_estimated_watts) * 100.0;
             fan_culprit.top_culprits.push_back(ProcessDomainShare{
-                .pid = fan_procs[i].pid,
-                .comm = fan_procs[i].comm,
-                .watts = fan_procs[i].fan_attributed_watts,
+                .pid = p->pid,
+                .comm = p->comm,
+                .watts = p->fan_attributed_watts,
                 .share_percent = sh,
-                .detail = "Thermally induced by " + std::to_string(fan_procs[i].cpu_watts + fan_procs[i].gpu_watts).substr(0, 4) + "W silicon heat"
+                .detail = "Thermally induced by " + std::to_string(p->cpu_watts + p->gpu_watts).substr(0, 4) + "W silicon heat"
             });
         }
         if (!fan_culprit.top_culprits.empty()) {
@@ -554,20 +560,17 @@ AnalysisReportData AttributionEngine::compute_attribution(
         io_culprit.domain_name = "Storage / NVMe Subsystem (APST Disrupters)";
         io_culprit.domain_total_watts = report.hardware.storage_estimated_watts;
 
-        std::vector<ProcessAttributedPower> io_procs;
-        for (const auto& p : attributed) {
-            if (p.io_watts > 0.005 || p.disk_io_mb_per_sec > 0.01) io_procs.push_back(p);
-        }
-        std::sort(io_procs.begin(), io_procs.end(), [](const auto& a, const auto& b) {
-            return a.io_watts > b.io_watts;
-        });
-        for (size_t i = 0; i < std::min<size_t>(5, io_procs.size()); ++i) {
+        auto top_io = select_top_culprits(attributed,
+            [](const auto& p) { return p.io_watts > 0.005 || p.disk_io_mb_per_sec > 0.01; },
+            [](const auto* a, const auto* b) { return a->io_watts > b->io_watts; });
+
+        for (const auto* p : top_io) {
             io_culprit.top_culprits.push_back(ProcessDomainShare{
-                .pid = io_procs[i].pid,
-                .comm = io_procs[i].comm,
-                .watts = io_procs[i].io_watts,
+                .pid = p->pid,
+                .comm = p->comm,
+                .watts = p->io_watts,
                 .share_percent = 0.0,
-                .detail = "I/O: " + std::to_string(io_procs[i].disk_io_mb_per_sec).substr(0, 4) + " MB/s"
+                .detail = "I/O: " + std::to_string(p->disk_io_mb_per_sec).substr(0, 4) + " MB/s"
             });
         }
         if (!io_culprit.top_culprits.empty()) {
@@ -580,26 +583,24 @@ AnalysisReportData AttributionEngine::compute_attribution(
         DomainCulprit wifi_culprit;
         wifi_culprit.domain_name = "WiFi Wireless Transceiver (Active Sockets in CAM Mode)";
         double total_wifi_watts = 0.0;
-        std::vector<ProcessAttributedPower> wifi_procs;
         for (const auto& p : attributed) {
-            if (p.wifi_attributed_watts > 0.01 || p.open_sockets > 0) {
-                wifi_procs.push_back(p);
-                total_wifi_watts += p.wifi_attributed_watts;
-            }
+            if (p.wifi_attributed_watts > 0.01 || p.open_sockets > 0) total_wifi_watts += p.wifi_attributed_watts;
         }
         wifi_culprit.domain_total_watts = total_wifi_watts;
-        std::sort(wifi_procs.begin(), wifi_procs.end(), [](const auto& a, const auto& b) {
-            return a.wifi_attributed_watts > b.wifi_attributed_watts;
-        });
-        for (size_t i = 0; i < std::min<size_t>(5, wifi_procs.size()); ++i) {
-            double sh = (total_wifi_watts > 0.0) ? (wifi_procs[i].wifi_attributed_watts / total_wifi_watts) * 100.0 : 0.0;
+
+        auto top_wifi = select_top_culprits(attributed,
+            [](const auto& p) { return p.wifi_attributed_watts > 0.01 || p.open_sockets > 0; },
+            [](const auto* a, const auto* b) { return a->wifi_attributed_watts > b->wifi_attributed_watts; });
+
+        for (const auto* p : top_wifi) {
+            double sh = (total_wifi_watts > 0.0) ? (p->wifi_attributed_watts / total_wifi_watts) * 100.0 : 0.0;
             wifi_culprit.top_culprits.push_back(ProcessDomainShare{
-                .pid = wifi_procs[i].pid,
-                .comm = wifi_procs[i].comm,
-                .watts = wifi_procs[i].wifi_attributed_watts,
+                .pid = p->pid,
+                .comm = p->comm,
+                .watts = p->wifi_attributed_watts,
                 .share_percent = sh,
-                .detail = std::to_string(wifi_procs[i].open_sockets) + " active sockets (" +
-                          std::to_string(wifi_procs[i].wakeups_per_sec) + " w/s)"
+                .detail = std::to_string(p->open_sockets) + " active sockets (" +
+                          std::to_string(p->wakeups_per_sec) + " w/s)"
             });
         }
         if (!wifi_culprit.top_culprits.empty()) {
@@ -612,22 +613,23 @@ AnalysisReportData AttributionEngine::compute_attribution(
         DomainCulprit ccx_culprit;
         ccx_culprit.domain_name = "AMD Zen CCX Core Migrations (Infinity Fabric & L3 Thrashing)";
         double total_ccx_watts = 0.0;
-        std::vector<ProcessAttributedPower> ccx_procs;
         for (const auto& p : attributed) {
-            if (p.cross_ccx_migration) {
-                ccx_procs.push_back(p);
-                total_ccx_watts += 0.18;
-            }
+            if (p.cross_ccx_migration) total_ccx_watts += 0.18;
         }
         ccx_culprit.domain_total_watts = total_ccx_watts;
-        for (size_t i = 0; i < std::min<size_t>(5, ccx_procs.size()); ++i) {
+
+        auto top_ccx = select_top_culprits(attributed,
+            [](const auto& p) { return p.cross_ccx_migration; },
+            [](const auto* a, const auto* b) { return a->total_attributed_watts > b->total_attributed_watts; });
+
+        for (const auto* p : top_ccx) {
             ccx_culprit.top_culprits.push_back(ProcessDomainShare{
-                .pid = ccx_procs[i].pid,
-                .comm = ccx_procs[i].comm,
+                .pid = p->pid,
+                .comm = p->comm,
                 .watts = 0.18,
                 .share_percent = 0.0,
-                .detail = "Cross-CCX migration to Core " + std::to_string(ccx_procs[i].cpu_core) +
-                          " (" + std::to_string(ccx_procs[i].num_threads) + " threads)"
+                .detail = "Cross-CCX migration to Core " + std::to_string(p->cpu_core) +
+                          " (" + std::to_string(p->num_threads) + " threads)"
             });
         }
         if (!ccx_culprit.top_culprits.empty()) {
@@ -640,26 +642,24 @@ AnalysisReportData AttributionEngine::compute_attribution(
         DomainCulprit dram_culprit;
         dram_culprit.domain_name = "Memory & DRAM Subsystem (PSS Retention & Page Faults)";
         double total_dram_watts = 0.0;
-        std::vector<ProcessAttributedPower> dram_procs;
         for (const auto& p : attributed) {
-            if (p.dram_attributed_watts > 0.01 || p.pss_kib > 50 * 1024) {
-                dram_procs.push_back(p);
-                total_dram_watts += p.dram_attributed_watts;
-            }
+            if (p.dram_attributed_watts > 0.01 || p.pss_kib > 50 * 1024) total_dram_watts += p.dram_attributed_watts;
         }
         dram_culprit.domain_total_watts = total_dram_watts;
-        std::sort(dram_procs.begin(), dram_procs.end(), [](const auto& a, const auto& b) {
-            return a.dram_attributed_watts > b.dram_attributed_watts;
-        });
-        for (size_t i = 0; i < std::min<size_t>(5, dram_procs.size()); ++i) {
-            double sh = (total_dram_watts > 0.0) ? (dram_procs[i].dram_attributed_watts / total_dram_watts) * 100.0 : 0.0;
-            std::string flt_str = dram_procs[i].majflt_per_sec > 0 ? (", " + std::to_string(dram_procs[i].majflt_per_sec) + " majflt/s") : "";
+
+        auto top_dram = select_top_culprits(attributed,
+            [](const auto& p) { return p.dram_attributed_watts > 0.01 || p.pss_kib > 50 * 1024; },
+            [](const auto* a, const auto* b) { return a->dram_attributed_watts > b->dram_attributed_watts; });
+
+        for (const auto* p : top_dram) {
+            double sh = (total_dram_watts > 0.0) ? (p->dram_attributed_watts / total_dram_watts) * 100.0 : 0.0;
+            std::string flt_str = p->majflt_per_sec > 0 ? (", " + std::to_string(p->majflt_per_sec) + " majflt/s") : "";
             dram_culprit.top_culprits.push_back(ProcessDomainShare{
-                .pid = dram_procs[i].pid,
-                .comm = dram_procs[i].comm,
-                .watts = dram_procs[i].dram_attributed_watts,
+                .pid = p->pid,
+                .comm = p->comm,
+                .watts = p->dram_attributed_watts,
                 .share_percent = sh,
-                .detail = std::to_string(dram_procs[i].pss_kib / 1024) + "MB PSS DRAM" + flt_str
+                .detail = std::to_string(p->pss_kib / 1024) + "MB PSS DRAM" + flt_str
             });
         }
         if (!dram_culprit.top_culprits.empty()) {
@@ -701,26 +701,49 @@ AnalysisReportData AttributionEngine::compute_windowed_attribution(
 
     size_t num_intervals = std::min(hw_samples.size(), proc_samples.size()) - 1;
 
-    // 1. Process intermediate delta accumulation
-    std::unordered_map<int32_t, ProcessSample> accumulated_procs;
-    accumulated_procs.reserve(proc_samples.front().size() + 64);
+    // 1. Process intermediate delta accumulation using sorted Two-Pointer stream merge (REF-ARCH-005)
+    // Completely eliminates std::unordered_map (0 heap node allocations, 100% L1D sequential access)
+    std::vector<ProcessSample> accumulated_procs;
+    accumulated_procs.reserve(proc_samples.back().size() + 64);
 
     for (size_t step = 1; step <= num_intervals; ++step) {
         const auto& prev_procs = proc_samples[step - 1];
         const auto& cur_procs = proc_samples[step];
 
-        std::unordered_map<int32_t, const ProcessSample*> prev_map;
-        prev_map.reserve(prev_procs.size());
-        for (const auto& p : prev_procs) {
-            prev_map[p.pid] = &p;
-        }
+        std::vector<ProcessSample> next_accum;
+        next_accum.reserve(std::max(cur_procs.size(), accumulated_procs.size()) + 32);
 
-        for (const auto& cur : cur_procs) {
-            auto& acc = accumulated_procs[cur.pid];
-            acc.pid = cur.pid;
-            acc.ppid = cur.ppid;
-            acc.comm = cur.comm;
-            acc.uid = cur.uid;
+        size_t idx_prev = 0;
+        size_t idx_cur = 0;
+        size_t idx_acc = 0;
+        const size_t sz_prev = prev_procs.size();
+        const size_t sz_cur = cur_procs.size();
+        const size_t sz_acc = accumulated_procs.size();
+
+        while (idx_cur < sz_cur) {
+            const auto& cur = cur_procs[idx_cur];
+
+            // Match prev_procs (sorted by PID)
+            while (idx_prev < sz_prev && prev_procs[idx_prev].pid < cur.pid) {
+                ++idx_prev;
+            }
+            const ProcessSample* prev = (idx_prev < sz_prev && prev_procs[idx_prev].pid == cur.pid) ? &prev_procs[idx_prev] : nullptr;
+
+            // Advance accumulated_procs to match cur.pid
+            while (idx_acc < sz_acc && accumulated_procs[idx_acc].pid < cur.pid) {
+                next_accum.push_back(accumulated_procs[idx_acc++]);
+            }
+
+            ProcessSample acc{};
+            if (idx_acc < sz_acc && accumulated_procs[idx_acc].pid == cur.pid) {
+                acc = accumulated_procs[idx_acc++];
+            } else {
+                acc.pid = cur.pid;
+                acc.ppid = cur.ppid;
+                acc.comm = cur.comm;
+                acc.uid = cur.uid;
+            }
+
             acc.cpu_core = cur.cpu_core;
             acc.num_threads = cur.num_threads;
             acc.nice = cur.nice;
@@ -731,9 +754,7 @@ AnalysisReportData AttributionEngine::compute_windowed_attribution(
             acc.open_sockets = std::max(acc.open_sockets, cur.open_sockets);
             acc.drm_vram_kib = std::max(acc.drm_vram_kib, cur.drm_vram_kib);
 
-            auto it = prev_map.find(cur.pid);
-            if (it != prev_map.end()) {
-                const auto* prev = it->second;
+            if (prev != nullptr) {
                 if (cur.utime_ticks >= prev->utime_ticks) acc.utime_ticks += (cur.utime_ticks - prev->utime_ticks);
                 if (cur.stime_ticks >= prev->stime_ticks) acc.stime_ticks += (cur.stime_ticks - prev->stime_ticks);
                 if (cur.voluntary_ctxt_switches >= prev->voluntary_ctxt_switches)
@@ -768,9 +789,17 @@ AnalysisReportData AttributionEngine::compute_windowed_attribution(
                 acc.drm_engine_dec_ns += cur.drm_engine_dec_ns;
                 acc.drm_engine_enc_ns += cur.drm_engine_enc_ns;
             }
-        }
-    }
 
+            next_accum.push_back(acc);
+            ++idx_cur;
+        }
+
+        while (idx_acc < sz_acc) {
+            next_accum.push_back(accumulated_procs[idx_acc++]);
+        }
+
+        accumulated_procs = std::move(next_accum);
+    }
 
     // 2. Hardware telemetry averaging
     HardwareSample hw_start = hw_samples.front();
@@ -817,9 +846,9 @@ AnalysisReportData AttributionEngine::compute_windowed_attribution(
     proc_zero.reserve(accumulated_procs.size());
     proc_delta.reserve(accumulated_procs.size());
 
-    for (const auto& [pid, acc] : accumulated_procs) {
+    for (const auto& acc : accumulated_procs) {
         ProcessSample z{};
-        z.pid = pid;
+        z.pid = acc.pid;
         z.ppid = acc.ppid;
         z.comm = acc.comm;
         z.uid = acc.uid;

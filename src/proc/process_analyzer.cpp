@@ -515,24 +515,24 @@ bool ProcessAnalyzer::parse_proc_stat(std::string_view content, ProcessSample& o
     out_sample.ppid = parse_i32_fast(cur, end);
     while (cur < end && *cur == ' ') ++cur;
 
-    // Tokens 5..9: Skip 5 tokens to reach Token 10 (minflt)
-    for (int i = 5; i <= 9 && cur < end; ++i) {
-        skip_token_fast(cur, end);
-    }
+    // Tokens 5..9: Skip 5 tokens rapidly with AVX2 SIMD to reach Token 10 (minflt)
+    core::simd::skip_tokens_simd(cur, end, 5);
 
     // Token 10: minflt
     out_sample.minflt = parse_u64_fast(cur, end);
     while (cur < end && *cur == ' ') ++cur;
 
     // Token 11: cminflt (skip 1 token)
-    skip_token_fast(cur, end);
+    core::simd::find_whitespace_simd(cur, end);
+    core::simd::skip_whitespace_simd(cur, end);
 
     // Token 12: majflt
     out_sample.majflt = parse_u64_fast(cur, end);
     while (cur < end && *cur == ' ') ++cur;
 
     // Token 13: cmajflt (skip 1 token)
-    skip_token_fast(cur, end);
+    core::simd::find_whitespace_simd(cur, end);
+    core::simd::skip_whitespace_simd(cur, end);
 
     // Token 14: utime
     out_sample.utime_ticks = parse_u64_fast(cur, end);
@@ -542,9 +542,8 @@ bool ProcessAnalyzer::parse_proc_stat(std::string_view content, ProcessSample& o
     out_sample.stime_ticks = parse_u64_fast(cur, end);
     while (cur < end && *cur == ' ') ++cur;
 
-    // Tokens 16..17: Skip cutime and cstime
-    skip_token_fast(cur, end);
-    skip_token_fast(cur, end);
+    // Tokens 16..17: Skip cutime and cstime (2 tokens) with SIMD
+    core::simd::skip_tokens_simd(cur, end, 2);
 
     // Token 18: priority
     out_sample.priority = parse_i32_fast(cur, end);
@@ -558,10 +557,8 @@ bool ProcessAnalyzer::parse_proc_stat(std::string_view content, ProcessSample& o
     out_sample.num_threads = static_cast<uint32_t>(parse_u64_fast(cur, end));
     while (cur < end && *cur == ' ') ++cur;
 
-    // Tokens 21..38: Skip 18 tokens to reach Token 39 (processor)
-    for (int i = 21; i <= 38 && cur < end; ++i) {
-        skip_token_fast(cur, end);
-    }
+    // Tokens 21..38: Skip 18 tokens rapidly with AVX2 SIMD to reach Token 39 (processor)
+    core::simd::skip_tokens_simd(cur, end, 18);
 
     // Token 39: processor (Core ID)
     if (cur < end) {

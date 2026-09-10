@@ -297,6 +297,15 @@ inline void find_whitespace_simd(const char*& cur, const char* end) noexcept {
     }
 }
 
+// Skip N space-separated tokens rapidly using SIMD/BMI2 (REF-ARCH-005)
+inline void skip_tokens_simd(const char*& cur, const char* end, int count) noexcept {
+    while (count > 0 && cur < end) {
+        find_whitespace_simd(cur, end);
+        skip_whitespace_simd(cur, end);
+        --count;
+    }
+}
+
 } // namespace simd
 
 } // namespace wattcurb::core
