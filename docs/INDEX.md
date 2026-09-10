@@ -44,6 +44,7 @@ All documents follow the Ref-ID naming standard:
 | [`REF-RES-004`](file:///home/jedclub/Develop/WattCurb/docs/research/PGO_PMU_REPORT.md) | WattCurb PGO & PMU Hardware Performance Audit Report | Hardware PMU counters (IPC 3.64, L1D, dTLB), ASM inspection | 2026-09-10 |
 | [`REF-RES-005`](file:///home/jedclub/Develop/WattCurb/docs/research/PMU_BENCHMARKS.md) | Continuous PMU Milestone Benchmark & Optimization History | Living PMU tracking history across development milestones | 2026-09-10 |
 | [`REF-RES-006`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-006-syscall-level-kernel-telemetry-optimization.md) | Deep Kernel & Syscall-Level Telemetry Optimization Research | procfs / sysfs VFS syscall reduction, DRM FD pinning, kthread mask | 2026-09-10 |
+| [`REF-RES-007`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-007-deep-kernel-primitives-and-simd-isa.md) | Radical Syscall Elimination: Single-Read uevent, /proc getdents64, C++23 SIMD | BAT0/uevent single read, /proc direct getdents64, Socket classifier, Fan EC decoupling | 2026-09-10 |
 
 ---
 

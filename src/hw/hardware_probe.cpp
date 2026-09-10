@@ -1,4 +1,5 @@
 #include "hw/hardware_probe.hpp"
+#include "core/cpu_features.hpp"
 #include "core/scoped_profiler.hpp"
 
 #include <algorithm>
@@ -28,6 +29,76 @@ void safe_close(int& fd) noexcept {
     }
 }
 
+// Ultra-fast single-read uevent battery parser (REF-RES-007)
+inline void parse_battery_uevent_buf(std::string_view content, HardwareSample& sample) noexcept {
+    const char* cur = content.data();
+    const char* end = cur + content.size();
+
+    while (cur < end) {
+        const char* next_nl = core::simd::find_char_fast(cur, end, '\n');
+        std::string_view line(cur, static_cast<size_t>(next_nl - cur));
+        cur = (next_nl < end) ? next_nl + 1 : end;
+
+        if (line.rfind("POWER_SUPPLY_STATUS=", 0) == 0) {
+            auto val = line.substr(20);
+            sample.is_discharging = (val == "Discharging");
+        } else if (line.rfind("POWER_SUPPLY_VOLTAGE_NOW=", 0) == 0) {
+            uint64_t v = 0;
+            const char* p = line.data() + 25;
+            if (std::from_chars(p, line.data() + line.size(), v).ec == std::errc()) {
+                sample.battery_voltage_uv = v;
+            }
+        } else if (line.rfind("POWER_SUPPLY_CURRENT_NOW=", 0) == 0) {
+            int64_t i = 0;
+            const char* p = line.data() + 25;
+            if (std::from_chars(p, line.data() + line.size(), i).ec == std::errc()) {
+                sample.battery_current_ua = i;
+            }
+        } else if (line.rfind("POWER_SUPPLY_POWER_NOW=", 0) == 0) {
+            uint64_t p_val = 0;
+            const char* p = line.data() + 23;
+            if (std::from_chars(p, line.data() + line.size(), p_val).ec == std::errc()) {
+                sample.battery_power_uw = p_val;
+            }
+        } else if (line.rfind("POWER_SUPPLY_ENERGY_NOW=", 0) == 0) {
+            uint64_t e_val = 0;
+            const char* p = line.data() + 24;
+            if (std::from_chars(p, line.data() + line.size(), e_val).ec == std::errc()) {
+                sample.battery_energy_now_uwh = e_val;
+            }
+        } else if (line.rfind("POWER_SUPPLY_ENERGY_FULL=", 0) == 0) {
+            uint64_t e_val = 0;
+            const char* p = line.data() + 25;
+            if (std::from_chars(p, line.data() + line.size(), e_val).ec == std::errc()) {
+                sample.battery_energy_full_uwh = e_val;
+            }
+        } else if (line.rfind("POWER_SUPPLY_ENERGY_FULL_DESIGN=", 0) == 0) {
+            uint64_t e_val = 0;
+            const char* p = line.data() + 32;
+            if (std::from_chars(p, line.data() + line.size(), e_val).ec == std::errc()) {
+                sample.battery_energy_full_design_uwh = e_val;
+            }
+        } else if (line.rfind("POWER_SUPPLY_CAPACITY=", 0) == 0) {
+            uint32_t cap = 0;
+            const char* p = line.data() + 22;
+            if (std::from_chars(p, line.data() + line.size(), cap).ec == std::errc()) {
+                sample.battery_capacity_percent = cap;
+            }
+        } else if (line.rfind("POWER_SUPPLY_CYCLE_COUNT=", 0) == 0) {
+            uint32_t c = 0;
+            const char* p = line.data() + 25;
+            if (std::from_chars(p, line.data() + line.size(), c).ec == std::errc()) {
+                sample.battery_cycle_count = c;
+            }
+        }
+    }
+
+    if (!sample.battery_power_uw.has_value() && sample.battery_voltage_uv.has_value() && sample.battery_current_ua.has_value()) {
+        int64_t abs_curr = *sample.battery_current_ua < 0 ? -*sample.battery_current_ua : *sample.battery_current_ua;
+        sample.battery_power_uw = static_cast<uint64_t>((*sample.battery_voltage_uv * static_cast<uint64_t>(abs_curr)) / 1'000'000ULL);
+    }
+}
+
 } // namespace
 
 HardwareProbe::HardwareProbe(std::filesystem::path sysfs_root)
@@ -42,6 +113,7 @@ HardwareProbe::~HardwareProbe() {
 HardwareProbe::HardwareProbe(HardwareProbe&& other) noexcept
     : sysfs_root_(std::move(other.sysfs_root_)),
       battery_path_(std::move(other.battery_path_)),
+      battery_uevent_path_(std::move(other.battery_uevent_path_)),
       ac_path_(std::move(other.ac_path_)),
       usbc_pd_path_(std::move(other.usbc_pd_path_)),
       rapl_pkg_path_(std::move(other.rapl_pkg_path_)),
@@ -68,6 +140,7 @@ HardwareProbe::HardwareProbe(HardwareProbe&& other) noexcept
       wifi_status_path_(std::move(other.wifi_status_path_)),
       wifi_temp_path_(std::move(other.wifi_temp_path_)),
       aspm_policy_path_(std::move(other.aspm_policy_path_)),
+      battery_uevent_fd_(std::exchange(other.battery_uevent_fd_, -1)),
       battery_power_fd_(std::exchange(other.battery_power_fd_, -1)),
       battery_status_fd_(std::exchange(other.battery_status_fd_, -1)),
       battery_voltage_fd_(std::exchange(other.battery_voltage_fd_, -1)),
@@ -124,6 +197,7 @@ HardwareProbe& HardwareProbe::operator=(HardwareProbe&& other) noexcept {
         close_fds();
         sysfs_root_ = std::move(other.sysfs_root_);
         battery_path_ = std::move(other.battery_path_);
+        battery_uevent_path_ = std::move(other.battery_uevent_path_);
         ac_path_ = std::move(other.ac_path_);
         usbc_pd_path_ = std::move(other.usbc_pd_path_);
         rapl_pkg_path_ = std::move(other.rapl_pkg_path_);
@@ -151,6 +225,7 @@ HardwareProbe& HardwareProbe::operator=(HardwareProbe&& other) noexcept {
         wifi_temp_path_ = std::move(other.wifi_temp_path_);
         aspm_policy_path_ = std::move(other.aspm_policy_path_);
 
+        battery_uevent_fd_ = std::exchange(other.battery_uevent_fd_, -1);
         battery_power_fd_ = std::exchange(other.battery_power_fd_, -1);
         battery_status_fd_ = std::exchange(other.battery_status_fd_, -1);
         battery_voltage_fd_ = std::exchange(other.battery_voltage_fd_, -1);
@@ -206,6 +281,7 @@ HardwareProbe& HardwareProbe::operator=(HardwareProbe&& other) noexcept {
 }
 
 void HardwareProbe::close_fds() noexcept {
+    safe_close(battery_uevent_fd_);
     safe_close(battery_power_fd_);
     safe_close(battery_status_fd_);
     safe_close(battery_voltage_fd_);
@@ -278,6 +354,9 @@ void HardwareProbe::open_persistent_fds() {
     close_fds();
 
     // 1. Battery & Power Rail
+    if (!battery_uevent_path_.empty()) {
+        battery_uevent_fd_ = open_ro_cloexec(battery_uevent_path_);
+    }
     if (!battery_path_.empty()) {
         battery_power_fd_ = open_ro_cloexec(battery_path_ / "power_now");
         battery_status_fd_ = open_ro_cloexec(battery_path_ / "status");
@@ -469,6 +548,7 @@ void HardwareProbe::refresh_device_paths() {
             const auto filename = entry.path().filename().string();
             if (filename.rfind("BAT", 0) == 0 && battery_path_.empty()) {
                 battery_path_ = entry.path();
+                battery_uevent_path_ = entry.path() / "uevent";
             } else if (filename == "AC" && ac_path_.empty()) {
                 ac_path_ = entry.path();
             } else if (filename.rfind("ucsi-source-psy-", 0) == 0) {
@@ -617,59 +697,103 @@ HardwareSample HardwareProbe::capture_sample() const {
             sample.is_ac_online = (ac_val.value_or(0) == 1);
         }
 
-        if (battery_status_fd_ >= 0) {
-            std::array<char, 32> stat_buf{};
-            if (read_string_buf(battery_status_fd_, stat_buf.data(), stat_buf.size())) {
-                sample.is_discharging = (std::strncmp(stat_buf.data(), "Discharging", 11) == 0);
-            }
-        }
-
-        // Fast path for AC power (REF-RES-006):
-        // When running on AC and battery is not discharging, battery rail draw is 0W.
-        // Subsample slow ACPI gas-gauge nodes to once every 30 passes (~60 seconds).
-        bool skip_detailed_bat = sample.is_ac_online && !sample.is_discharging && cached_battery_static_initialized_ && (sample_counter_ % 30 != 1);
-
-        if (!skip_detailed_bat) {
-            if (battery_power_fd_ >= 0) {
-                sample.battery_power_uw = read_uint64_fd(battery_power_fd_);
-            } else if (battery_voltage_fd_ >= 0 && battery_current_fd_ >= 0) {
-                auto v = read_uint64_fd(battery_voltage_fd_);
-                auto i = read_int64_fd(battery_current_fd_);
-                if (v.has_value() && i.has_value()) {
-                    sample.battery_voltage_uv = v;
-                    sample.battery_current_ua = i;
-                    int64_t abs_curr = *i < 0 ? -*i : *i;
-                    sample.battery_power_uw = static_cast<uint64_t>((*v * static_cast<uint64_t>(abs_curr)) / 1'000'000ULL);
+        // Fast Single-Read uevent Telemetry (REF-RES-007):
+        // Read the entire battery state in a SINGLE 1KB pread() syscall!
+        if (battery_uevent_fd_ >= 0) {
+            bool skip_bat = false;
+            if (cached_battery_static_initialized_) {
+                if (sample.is_ac_online && !cached_is_discharging_) {
+                    skip_bat = (sample_counter_ % 30 != 1);
+                } else {
+                    // Discharging / Battery mode: ACPI _BST transaction incurs I2C/SMBus bus wait.
+                    // Battery chemistry time-constant is tens of seconds; sample every 2 turns (4s).
+                    skip_bat = (sample_counter_ % 2 != 1);
                 }
             }
 
-            if (battery_voltage_fd_ >= 0 && !sample.battery_voltage_uv) {
-                sample.battery_voltage_uv = read_uint64_fd(battery_voltage_fd_);
+            if (!skip_bat) {
+                alignas(64) char uevent_buf[1024];
+                ssize_t n = ::pread(battery_uevent_fd_, uevent_buf, sizeof(uevent_buf) - 1, 0);
+                if (n > 0) {
+                    uevent_buf[n] = '\0';
+                    parse_battery_uevent_buf(std::string_view(uevent_buf, static_cast<size_t>(n)), sample);
+                    cached_is_discharging_ = sample.is_discharging;
+                    cached_bat_power_uw_ = sample.battery_power_uw;
+                    cached_bat_current_ua_ = sample.battery_current_ua;
+                    cached_bat_voltage_ = sample.battery_voltage_uv;
+                    cached_bat_energy_now_ = sample.battery_energy_now_uwh;
+                    cached_bat_capacity_percent_ = sample.battery_capacity_percent;
+                    cached_energy_full_ = sample.battery_energy_full_uwh;
+                    cached_energy_full_design_ = sample.battery_energy_full_design_uwh;
+                    cached_cycle_count_ = sample.battery_cycle_count;
+                    cached_battery_static_initialized_ = true;
+                }
+            } else {
+                sample.is_discharging = cached_is_discharging_;
+                sample.battery_power_uw = cached_bat_power_uw_;
+                sample.battery_current_ua = cached_bat_current_ua_;
+                sample.battery_voltage_uv = cached_bat_voltage_;
+                sample.battery_energy_now_uwh = cached_bat_energy_now_;
+                sample.battery_capacity_percent = cached_bat_capacity_percent_;
+                sample.battery_energy_full_uwh = cached_energy_full_;
+                sample.battery_energy_full_design_uwh = cached_energy_full_design_;
+                sample.battery_cycle_count = cached_cycle_count_;
             }
-            if (battery_current_fd_ >= 0 && !sample.battery_current_ua) {
-                sample.battery_current_ua = read_int64_fd(battery_current_fd_);
-            }
-            if (battery_energy_now_fd_ >= 0) {
-                cached_bat_energy_now_ = read_uint64_fd(battery_energy_now_fd_);
-            }
-            if (battery_voltage_fd_ >= 0) {
-                cached_bat_voltage_ = sample.battery_voltage_uv;
-            }
-            sample.battery_energy_now_uwh = cached_bat_energy_now_;
-            if (!cached_battery_static_initialized_ || sample_counter_ % 30 == 1) {
-                if (battery_energy_full_fd_ >= 0) cached_energy_full_ = read_uint64_fd(battery_energy_full_fd_);
-                if (battery_energy_full_design_fd_ >= 0) cached_energy_full_design_ = read_uint64_fd(battery_energy_full_design_fd_);
-                if (battery_cycle_fd_ >= 0) cached_cycle_count_ = read_uint32_fd(battery_cycle_fd_);
-                cached_battery_static_initialized_ = true;
-            }
-            if (battery_capacity_fd_ >= 0) sample.battery_capacity_percent = read_uint32_fd(battery_capacity_fd_);
         } else {
-            sample.battery_energy_now_uwh = cached_bat_energy_now_;
-            sample.battery_voltage_uv = cached_bat_voltage_;
+            if (battery_status_fd_ >= 0) {
+                std::array<char, 32> stat_buf{};
+                if (read_string_buf(battery_status_fd_, stat_buf.data(), stat_buf.size())) {
+                    sample.is_discharging = (std::strncmp(stat_buf.data(), "Discharging", 11) == 0);
+                }
+            }
+
+            // Fast path for AC power (REF-RES-006):
+            // When running on AC and battery is not discharging, battery rail draw is 0W.
+            // Subsample slow ACPI gas-gauge nodes to once every 30 passes (~60 seconds).
+            bool skip_detailed_bat = sample.is_ac_online && !sample.is_discharging && cached_battery_static_initialized_ && (sample_counter_ % 30 != 1);
+
+            if (!skip_detailed_bat) {
+                if (battery_power_fd_ >= 0) {
+                    sample.battery_power_uw = read_uint64_fd(battery_power_fd_);
+                } else if (battery_voltage_fd_ >= 0 && battery_current_fd_ >= 0) {
+                    auto v = read_uint64_fd(battery_voltage_fd_);
+                    auto i = read_int64_fd(battery_current_fd_);
+                    if (v.has_value() && i.has_value()) {
+                        sample.battery_voltage_uv = v;
+                        sample.battery_current_ua = i;
+                        int64_t abs_curr = *i < 0 ? -*i : *i;
+                        sample.battery_power_uw = static_cast<uint64_t>((*v * static_cast<uint64_t>(abs_curr)) / 1'000'000ULL);
+                    }
+                }
+
+                if (battery_voltage_fd_ >= 0 && !sample.battery_voltage_uv) {
+                    sample.battery_voltage_uv = read_uint64_fd(battery_voltage_fd_);
+                }
+                if (battery_current_fd_ >= 0 && !sample.battery_current_ua) {
+                    sample.battery_current_ua = read_int64_fd(battery_current_fd_);
+                }
+                if (battery_energy_now_fd_ >= 0) {
+                    cached_bat_energy_now_ = read_uint64_fd(battery_energy_now_fd_);
+                }
+                if (battery_voltage_fd_ >= 0) {
+                    cached_bat_voltage_ = sample.battery_voltage_uv;
+                }
+                sample.battery_energy_now_uwh = cached_bat_energy_now_;
+                if (!cached_battery_static_initialized_ || sample_counter_ % 30 == 1) {
+                    if (battery_energy_full_fd_ >= 0) cached_energy_full_ = read_uint64_fd(battery_energy_full_fd_);
+                    if (battery_energy_full_design_fd_ >= 0) cached_energy_full_design_ = read_uint64_fd(battery_energy_full_design_fd_);
+                    if (battery_cycle_fd_ >= 0) cached_cycle_count_ = read_uint32_fd(battery_cycle_fd_);
+                    cached_battery_static_initialized_ = true;
+                }
+                if (battery_capacity_fd_ >= 0) sample.battery_capacity_percent = read_uint32_fd(battery_capacity_fd_);
+            } else {
+                sample.battery_energy_now_uwh = cached_bat_energy_now_;
+                sample.battery_voltage_uv = cached_bat_voltage_;
+            }
+            sample.battery_energy_full_uwh = cached_energy_full_;
+            sample.battery_energy_full_design_uwh = cached_energy_full_design_;
+            sample.battery_cycle_count = cached_cycle_count_;
         }
-        sample.battery_energy_full_uwh = cached_energy_full_;
-        sample.battery_energy_full_design_uwh = cached_energy_full_design_;
-        sample.battery_cycle_count = cached_cycle_count_;
 
         if (usbc_online_fd_ >= 0) {
             auto u_on = read_uint32_fd(usbc_online_fd_);

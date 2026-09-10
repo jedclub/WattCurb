@@ -48,6 +48,7 @@ private:
 
     // 1. Power Supply & Battery paths
     std::filesystem::path battery_path_;
+    std::filesystem::path battery_uevent_path_;
     std::filesystem::path ac_path_;
     std::filesystem::path usbc_pd_path_;
 
@@ -64,15 +65,20 @@ private:
     std::filesystem::path gpu_freq_path_;
     std::filesystem::path gpu_in0_path_;
     std::filesystem::path gpu_in1_path_;
+    std::filesystem::path gpu_busy_path_;
+    std::filesystem::path gpu_vram_used_path_;
+    std::filesystem::path gpu_vram_total_path_;
+    std::filesystem::path gpu_link_speed_path_;
+    std::filesystem::path gpu_link_width_path_;
     std::filesystem::path drm_device_path_;
 
-    // 4. Storage paths
+    // 4. Storage / NVMe paths
     std::filesystem::path nvme_status_path_;
     std::filesystem::path nvme_temp1_path_;
     std::filesystem::path nvme_temp2_path_;
     std::filesystem::path block_stat_path_;
 
-    // 5. Chassis & Thermal paths
+    // 5. Chassis / Fan paths
     std::filesystem::path fan_rpm_path_;
     std::filesystem::path fan_pwm_path_;
     std::filesystem::path chassis_temp_path_;
@@ -89,6 +95,7 @@ private:
 
     // Persistent file descriptors for direct kernel access without pathname traversal
     // 1. Battery & Power Rail
+    int battery_uevent_fd_{-1}; // REF-RES-007: Single-read battery telemetry
     int battery_power_fd_{-1};
     int battery_status_fd_{-1};
     int battery_voltage_fd_{-1};
@@ -167,6 +174,10 @@ private:
     mutable std::optional<int32_t> cached_wifi_temp_{std::nullopt};
     mutable std::array<char, 32> cached_aspm_policy_{};
     mutable bool cached_aspm_policy_initialized_{false};
+    mutable std::optional<uint64_t> cached_bat_power_uw_{std::nullopt};
+    mutable std::optional<int64_t> cached_bat_current_ua_{std::nullopt};
+    mutable std::optional<uint32_t> cached_bat_capacity_percent_{std::nullopt};
+    mutable bool cached_is_discharging_{false};
     mutable std::optional<uint64_t> cached_bat_voltage_{std::nullopt};
     mutable std::optional<uint64_t> cached_bat_energy_now_{std::nullopt};
     mutable std::optional<int32_t> cached_nvme_temp1_{std::nullopt};

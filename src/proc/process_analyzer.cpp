@@ -123,20 +123,26 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
     alignas(64) char read_buf[2048];
     char path_buf[128];
 
-    DIR* proc_dir = ::opendir(procfs_root_.c_str());
-    if (!proc_dir) return samples;
-    int proc_dfd = ::dirfd(proc_dir);
+    int proc_dfd = ::open(procfs_root_.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (proc_dfd < 0) return samples;
 
-    struct dirent* proc_entry = nullptr;
-    while ((proc_entry = ::readdir(proc_dir)) != nullptr) {
-        if (proc_entry->d_name[0] < '1' || proc_entry->d_name[0] > '9') continue;
+    alignas(64) char dentry_buf[8192];
+    while (true) {
+        long nread = ::syscall(SYS_getdents64, proc_dfd, dentry_buf, sizeof(dentry_buf));
+        if (nread <= 0) break;
 
-        int32_t pid = 0;
-        const char* p_name = proc_entry->d_name;
-        while (*p_name >= '0' && *p_name <= '9') {
-            pid = pid * 10 + (*p_name - '0');
-            ++p_name;
-        }
+        for (long bpos = 0; bpos < nread;) {
+            auto* proc_entry = reinterpret_cast<const LinuxDirent64*>(dentry_buf + bpos);
+            bpos += proc_entry->d_reclen;
+
+            if (proc_entry->d_name[0] < '1' || proc_entry->d_name[0] > '9') continue;
+
+            int32_t pid = 0;
+            const char* p_name = proc_entry->d_name;
+            while (*p_name >= '0' && *p_name <= '9') {
+                pid = pid * 10 + (*p_name - '0');
+                ++p_name;
+            }
         if (*p_name != '\0' || pid <= 0) continue;
 
         // Fast kernel thread filter (REF-RES-006):
@@ -260,8 +266,9 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
         }
 
         samples.push_back(std::move(sample));
+        }
     }
-    ::closedir(proc_dir);
+    ::close(proc_dfd);
 
     // Always return sorted by PID for O(log N) binary search lookup in next cycle
     {
@@ -330,16 +337,23 @@ void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample, const 
         }
     }
 
-    // 2. Fast Socket and FD Bypass (REF-RES-006):
+    // 2. Fast Socket and FD Bypass (REF-RES-006, REF-RES-007):
     // If previous sample exists, preserve socket count.
     // If context switches didn't change and DRM is already resolved (or non-graphical app),
     // skip the entire directory open and 100+ readlinkat calls completely!
     if (prev != nullptr) {
         sample.open_sockets = prev->open_sockets;
         if (drm_resolved || prev->pinned_drm_fd == -1) {
-            // Bypass if context switches haven't changed, OR on alternating passes when socket count is already established
-            if (sample.voluntary_ctxt_switches == prev->voluntary_ctxt_switches ||
-                (pass_counter_ % 2 != 0 && prev->open_sockets > 0)) {
+            // Bypass if context switches haven't changed
+            if (sample.voluntary_ctxt_switches == prev->voluntary_ctxt_switches) {
+                return;
+            }
+            // Non-network processes (open_sockets == 0): rescan only once every 10 passes
+            if (prev->open_sockets == 0 && (pass_counter_ % 10 != 0)) {
+                return;
+            }
+            // Established network processes: rescan only once every 4 passes
+            if (prev->open_sockets > 0 && (pass_counter_ % 4 != 0)) {
                 return;
             }
         }
@@ -363,7 +377,7 @@ void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample, const 
     std::snprintf(fdinfo_dir_path, sizeof(fdinfo_dir_path), "%s/%d/fdinfo", procfs_root_.c_str(), pid);
 
     alignas(64) char dentry_buf[2048];
-    alignas(64) char symlink_buf[256];
+    alignas(64) char symlink_buf[64]; // REF-RES-007: Single 64-byte cacheline buffer
     alignas(64) char fdinfo_buf[2048];
 
     // 64-bit constants for 1-cycle string matching (REF-ARCH-005)
