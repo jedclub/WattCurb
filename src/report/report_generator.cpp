@@ -35,12 +35,19 @@ std::string format_bar(double percent, int width = 16) {
     return bar;
 }
 
+double get_effective_total_watts(const AnalysisReportData& r) {
+    double hw_sum = r.hardware.cpu_package_watts + r.hardware.gpu_watts + r.hardware.display_watts +
+                    r.hardware.fan_estimated_watts + r.hardware.storage_estimated_watts + r.hardware.uncore_and_platform_watts;
+    if (r.hardware.is_battery_discharging && r.hardware.total_system_watts > 0.0) {
+        return std::max(r.hardware.total_system_watts, hw_sum);
+    }
+    return hw_sum > 0.0 ? hw_sum : r.hardware.total_system_watts;
+}
+
 } // namespace
 
 void ReportGenerator::render_executive_briefing(const AnalysisReportData& r, std::ostream& out) {
-    double total_sys = r.hardware.total_system_watts > 0.0 ? r.hardware.total_system_watts :
-                       (r.hardware.cpu_package_watts + r.hardware.gpu_watts + r.hardware.display_watts +
-                        r.hardware.fan_estimated_watts + r.hardware.storage_estimated_watts + r.hardware.uncore_and_platform_watts);
+    double total_sys = get_effective_total_watts(r);
 
     out << "\n" << BOLD << CYAN;
     out << "================================================================================================================\n";
@@ -209,9 +216,7 @@ void ReportGenerator::render_executive_briefing(const AnalysisReportData& r, std
 }
 
 void ReportGenerator::render_terminal(const AnalysisReportData& r, std::ostream& out) {
-    double total_sys = r.hardware.total_system_watts > 0.0 ? r.hardware.total_system_watts :
-                       (r.hardware.cpu_package_watts + r.hardware.gpu_watts + r.hardware.display_watts +
-                        r.hardware.fan_estimated_watts + r.hardware.storage_estimated_watts + r.hardware.uncore_and_platform_watts);
+    double total_sys = get_effective_total_watts(r);
 
     out << "\n" << BOLD << CYAN;
     out << "========================================================================================================================\n";
@@ -621,9 +626,7 @@ void ReportGenerator::render_feature_catalog(std::ostream& out) {
 }
 
 void ReportGenerator::render_extreme_profile(const AnalysisReportData& r, std::ostream& out) {
-    double total_sys = r.hardware.total_system_watts > 0.0 ? r.hardware.total_system_watts :
-        (r.hardware.cpu_package_watts + r.hardware.gpu_watts + r.hardware.display_watts +
-         r.hardware.fan_estimated_watts + r.hardware.storage_estimated_watts + r.hardware.uncore_and_platform_watts);
+    double total_sys = get_effective_total_watts(r);
 
     out << "\n" << BOLD << MAGENTA;
     out << "========================================================================================================================\n";
