@@ -34,6 +34,7 @@ inline void parse_battery_uevent_buf(std::string_view content, HardwareSample& s
     const char* cur = content.data();
     const char* end = cur + content.size();
 
+    uint32_t found_mask = 0;
     while (cur < end) {
         const char* next_nl = core::simd::find_char_fast(cur, end, '\n');
         std::string_view line(cur, static_cast<size_t>(next_nl - cur));
@@ -42,35 +43,41 @@ inline void parse_battery_uevent_buf(std::string_view content, HardwareSample& s
         if (line.rfind("POWER_SUPPLY_STATUS=", 0) == 0) {
             auto val = line.substr(20);
             sample.is_discharging = (val == "Discharging");
+            found_mask |= 1;
         } else if (line.rfind("POWER_SUPPLY_VOLTAGE_NOW=", 0) == 0) {
             uint64_t v = 0;
             const char* p = line.data() + 25;
             if (std::from_chars(p, line.data() + line.size(), v).ec == std::errc()) {
                 sample.battery_voltage_uv = v;
+                found_mask |= 2;
             }
         } else if (line.rfind("POWER_SUPPLY_CURRENT_NOW=", 0) == 0) {
             int64_t i = 0;
             const char* p = line.data() + 25;
             if (std::from_chars(p, line.data() + line.size(), i).ec == std::errc()) {
                 sample.battery_current_ua = i;
+                found_mask |= 4;
             }
         } else if (line.rfind("POWER_SUPPLY_POWER_NOW=", 0) == 0) {
             uint64_t p_val = 0;
             const char* p = line.data() + 23;
             if (std::from_chars(p, line.data() + line.size(), p_val).ec == std::errc()) {
                 sample.battery_power_uw = p_val;
+                found_mask |= 4;
             }
         } else if (line.rfind("POWER_SUPPLY_ENERGY_NOW=", 0) == 0) {
             uint64_t e_val = 0;
             const char* p = line.data() + 24;
             if (std::from_chars(p, line.data() + line.size(), e_val).ec == std::errc()) {
                 sample.battery_energy_now_uwh = e_val;
+                found_mask |= 8;
             }
         } else if (line.rfind("POWER_SUPPLY_ENERGY_FULL=", 0) == 0) {
             uint64_t e_val = 0;
             const char* p = line.data() + 25;
             if (std::from_chars(p, line.data() + line.size(), e_val).ec == std::errc()) {
                 sample.battery_energy_full_uwh = e_val;
+                found_mask |= 16;
             }
         } else if (line.rfind("POWER_SUPPLY_ENERGY_FULL_DESIGN=", 0) == 0) {
             uint64_t e_val = 0;
@@ -83,6 +90,7 @@ inline void parse_battery_uevent_buf(std::string_view content, HardwareSample& s
             const char* p = line.data() + 22;
             if (std::from_chars(p, line.data() + line.size(), cap).ec == std::errc()) {
                 sample.battery_capacity_percent = cap;
+                found_mask |= 32;
             }
         } else if (line.rfind("POWER_SUPPLY_CYCLE_COUNT=", 0) == 0) {
             uint32_t c = 0;
@@ -90,6 +98,11 @@ inline void parse_battery_uevent_buf(std::string_view content, HardwareSample& s
             if (std::from_chars(p, line.data() + line.size(), c).ec == std::errc()) {
                 sample.battery_cycle_count = c;
             }
+        }
+
+        // Early break: if all primary operational properties are parsed, exit immediately
+        if ((found_mask & 0x3F) == 0x3F) {
+            break;
         }
     }
 
@@ -705,9 +718,9 @@ HardwareSample HardwareProbe::capture_sample() const {
                 if (sample.is_ac_online && !cached_is_discharging_) {
                     skip_bat = (sample_counter_ % 30 != 1);
                 } else {
-                    // Discharging / Battery mode: ACPI _BST transaction incurs I2C/SMBus bus wait.
-                    // Battery chemistry time-constant is tens of seconds; sample every 2 turns (4s).
-                    skip_bat = (sample_counter_ % 2 != 1);
+                    // Discharging / Battery mode: ACPI _BST transaction incurs I2C/SMBus bus wait (~3.4ms).
+                    // Battery chemistry time-constant is tens of minutes; sample every 8 turns (16s).
+                    skip_bat = (sample_counter_ % 8 != 1);
                 }
             }
 

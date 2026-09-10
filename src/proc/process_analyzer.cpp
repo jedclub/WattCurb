@@ -126,7 +126,7 @@ std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
     int proc_dfd = ::open(procfs_root_.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (proc_dfd < 0) return samples;
 
-    alignas(64) char dentry_buf[8192];
+    alignas(64) char dentry_buf[16384];
     while (true) {
         long nread = ::syscall(SYS_getdents64, proc_dfd, dentry_buf, sizeof(dentry_buf));
         if (nread <= 0) break;
@@ -318,6 +318,15 @@ bool ProcessAnalyzer::read_pid_details(int32_t pid, ProcessSample& sample) const
 }
 
 void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample, const ProcessSample* prev) const {
+    // Fast bypass for ephemeral and low-CPU processes (REF-RES-007)
+    // Ephemeral or low-activity processes (< 5 ticks) never hold long-lived 3D DRM or sockets
+    // and querying their fd/ triggers kernel mmap_lock contention during fork/exec.
+    if (prev == nullptr && (sample.utime_ticks + sample.stime_ticks < 5)) {
+        sample.open_sockets = 0;
+        sample.pinned_drm_fd = -1;
+        return;
+    }
+
     // 1. Persistent DRM FD Pinning (REF-RES-006):
     // If we previously located a DRM render node FD for this PID, query its fdinfo directly with ZERO readlinkat!
     bool drm_resolved = false;
@@ -339,21 +348,23 @@ void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample, const 
 
     // 2. Fast Socket and FD Bypass (REF-RES-006, REF-RES-007):
     // If previous sample exists, preserve socket count.
-    // If context switches didn't change and DRM is already resolved (or non-graphical app),
-    // skip the entire directory open and 100+ readlinkat calls completely!
+    // WiFi CAM attribution strictly requires wakeups_per_sec > 10 (delta_sw >= 20 over 2s).
+    // Processes below this rate cannot hold WiFi radio in active mode; skip expensive fd inspection!
     if (prev != nullptr) {
         sample.open_sockets = prev->open_sockets;
         if (drm_resolved || prev->pinned_drm_fd == -1) {
-            // Bypass if context switches haven't changed
-            if (sample.voluntary_ctxt_switches == prev->voluntary_ctxt_switches) {
+            uint64_t cur_sw = sample.voluntary_ctxt_switches + sample.nonvoluntary_ctxt_switches;
+            uint64_t prev_sw = prev->voluntary_ctxt_switches + prev->nonvoluntary_ctxt_switches;
+            uint64_t delta_sw = (cur_sw >= prev_sw) ? (cur_sw - prev_sw) : 0;
+
+            if (delta_sw < 20 && prev->open_sockets == 0) {
                 return;
             }
-            // Non-network processes (open_sockets == 0): rescan only once every 10 passes
-            if (prev->open_sockets == 0 && (pass_counter_ % 10 != 0)) {
+            if (delta_sw < 20 && (pass_counter_ % 10 != 0)) {
                 return;
             }
-            // Established network processes: rescan only once every 4 passes
-            if (prev->open_sockets > 0 && (pass_counter_ % 4 != 0)) {
+            // Established network processes: rescan on alternating passes (REF-RES-006)
+            if (prev->open_sockets > 0 && (pass_counter_ % 2 != 0)) {
                 return;
             }
         }
@@ -405,6 +416,11 @@ void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample, const 
                 // 1-cycle 64-bit register comparison
                 if (len >= 8 && (*reinterpret_cast<const uint64_t*>(symlink_buf) == SOCKET_PREFIX)) {
                     ++sockets_count;
+                    // Cap at 32 sockets: WiFi CAM attribution saturates at 0.65W (REF-REQ-011).
+                    // Prevents scanning hundreds of file/pipe FDs in browsers and complex daemons!
+                    if (drm_resolved && sockets_count >= 32) {
+                        break;
+                    }
                 } else if (!drm_resolved && len >= 9 && (*reinterpret_cast<const uint64_t*>(symlink_buf) == DRI_PREFIX) && symlink_buf[8] == '/') {
                     char info_path[160];
                     std::snprintf(info_path, sizeof(info_path), "%s/%s", fdinfo_dir_path, entry->d_name);
@@ -424,6 +440,7 @@ void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample, const 
                     }
                 }
             }
+            if (drm_resolved && sockets_count >= 32) break;
         }
     }
     sample.open_sockets = sockets_count;
