@@ -77,7 +77,7 @@ inline void skip_token_fast(const char*& cur, const char* end) noexcept {
 
 inline uint64_t parse_u64_fast(const char*& cur, const char* end) noexcept {
     uint64_t val = 0;
-    while (cur < end && *cur >= '0' && *cur <= '9') {
+    while (cur < end && static_cast<unsigned char>(*cur - '0') <= 9) {
         val = val * 10 + static_cast<uint64_t>(*cur - '0');
         ++cur;
     }
@@ -91,8 +91,8 @@ inline int32_t parse_i32_fast(const char*& cur, const char* end) noexcept {
         ++cur;
     }
     int32_t val = 0;
-    while (cur < end && *cur >= '0' && *cur <= '9') {
-        val = val * 10 + (*cur - '0');
+    while (cur < end && static_cast<unsigned char>(*cur - '0') <= 9) {
+        val = val * 10 + static_cast<int32_t>(*cur - '0');
         ++cur;
     }
     return neg ? -val : val;
@@ -496,24 +496,32 @@ bool ProcessAnalyzer::parse_proc_statm(std::string_view content, ProcessSample& 
 
 bool ProcessAnalyzer::parse_proc_stat(std::string_view content, ProcessSample& out_sample) {
     // Format: pid (comm) state ppid ...
-    auto open_paren = content.find('(');
-    auto close_paren = content.rfind(')');
-    if (open_paren == std::string_view::npos || close_paren == std::string_view::npos || close_paren <= open_paren) {
-        return false;
+    const char* start = content.data();
+    const char* end = start + content.size();
+
+    const char* open_paren = core::simd::find_char_fast(start, end, '(');
+    if (open_paren == end) return false;
+
+    // Fast parse PID before '('
+    const char* p_cur = start;
+    out_sample.pid = parse_i32_fast(p_cur, open_paren);
+
+    // Fast find matching ')' from open_paren + 1 with AVX2
+    const char* close_paren = core::simd::find_char_fast(open_paren + 1, end, ')');
+    if (close_paren == end) return false;
+
+    // Check for rare case of nested ')' in process comm
+    const char* next_close = core::simd::find_char_fast(close_paren + 1, end, ')');
+    while (next_close != end) {
+        close_paren = next_close;
+        next_close = core::simd::find_char_fast(close_paren + 1, end, ')');
     }
 
-    // Parse PID
-    const char* p_cur = content.data();
-    out_sample.pid = parse_i32_fast(p_cur, content.data() + open_paren);
-
     // Parse comm into zero-allocation ProcessComm (REF-ARCH-005)
-    out_sample.comm = ProcessComm(content.substr(open_paren + 1, close_paren - open_paren - 1));
+    out_sample.comm = ProcessComm(std::string_view(open_paren + 1, static_cast<size_t>(close_paren - open_paren - 1)));
 
     // Parse fields after ')'
-    const char* cur = content.data() + close_paren + 1;
-    const char* end = content.data() + content.size();
-
-    // Skip whitespace after ')'
+    const char* cur = close_paren + 1;
     while (cur < end && *cur == ' ') ++cur;
 
     // Field 3: state (single char)
@@ -524,7 +532,7 @@ bool ProcessAnalyzer::parse_proc_stat(std::string_view content, ProcessSample& o
     out_sample.ppid = parse_i32_fast(cur, end);
     while (cur < end && *cur == ' ') ++cur;
 
-    // Tokens 5..9: Skip 5 tokens rapidly with AVX2 SIMD to reach Token 10 (minflt)
+    // Tokens 5..9: Skip 5 tokens rapidly with AVX2 SIMD bitmask to reach Token 10 (minflt)
     core::simd::skip_tokens_simd(cur, end, 5);
 
     // Token 10: minflt
@@ -532,16 +540,14 @@ bool ProcessAnalyzer::parse_proc_stat(std::string_view content, ProcessSample& o
     while (cur < end && *cur == ' ') ++cur;
 
     // Token 11: cminflt (skip 1 token)
-    core::simd::find_whitespace_simd(cur, end);
-    core::simd::skip_whitespace_simd(cur, end);
+    core::simd::skip_tokens_simd(cur, end, 1);
 
     // Token 12: majflt
     out_sample.majflt = parse_u64_fast(cur, end);
     while (cur < end && *cur == ' ') ++cur;
 
     // Token 13: cmajflt (skip 1 token)
-    core::simd::find_whitespace_simd(cur, end);
-    core::simd::skip_whitespace_simd(cur, end);
+    core::simd::skip_tokens_simd(cur, end, 1);
 
     // Token 14: utime
     out_sample.utime_ticks = parse_u64_fast(cur, end);
@@ -551,7 +557,7 @@ bool ProcessAnalyzer::parse_proc_stat(std::string_view content, ProcessSample& o
     out_sample.stime_ticks = parse_u64_fast(cur, end);
     while (cur < end && *cur == ' ') ++cur;
 
-    // Tokens 16..17: Skip cutime and cstime (2 tokens) with SIMD
+    // Tokens 16..17: Skip cutime and cstime (2 tokens) with fast scalar/SIMD
     core::simd::skip_tokens_simd(cur, end, 2);
 
     // Token 18: priority
@@ -566,7 +572,7 @@ bool ProcessAnalyzer::parse_proc_stat(std::string_view content, ProcessSample& o
     out_sample.num_threads = static_cast<uint32_t>(parse_u64_fast(cur, end));
     while (cur < end && *cur == ' ') ++cur;
 
-    // Tokens 21..38: Skip 18 tokens rapidly with AVX2 SIMD to reach Token 39 (processor)
+    // Tokens 21..38: Skip 18 tokens rapidly with AVX2 SIMD vector bitmask to reach Token 39 (processor)
     core::simd::skip_tokens_simd(cur, end, 18);
 
     // Token 39: processor (Core ID)

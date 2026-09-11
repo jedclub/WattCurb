@@ -6,6 +6,7 @@
 #include <cpuid.h>
 #include <cstring>
 #include <sched.h>
+#include <bit>
 
 namespace wattcurb::core {
 
@@ -241,67 +242,72 @@ inline const char* find_char_fast(const char* start, const char* end, char targe
     }
 }
 
-// Skip spaces and tabs in 32-byte SIMD chunks
+// Skip spaces and tabs rapidly
 inline void skip_whitespace_simd(const char*& cur, const char* end) noexcept {
-    if constexpr (has_compile_time<CpuFeature::AVX2>()) {
-        const __m256i space_vec = _mm256_set1_epi8(' ');
-        const __m256i tab_vec = _mm256_set1_epi8('\t');
-
-        while (cur + 32 <= end) {
-            __m256i chunk = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(cur));
-            __m256i cmp_sp = _mm256_cmpeq_epi8(chunk, space_vec);
-            __m256i cmp_tb = _mm256_cmpeq_epi8(chunk, tab_vec);
-            __m256i is_ws = _mm256_or_si256(cmp_sp, cmp_tb);
-
-            uint32_t mask = static_cast<uint32_t>(_mm256_movemask_epi8(is_ws));
-            if (mask != 0xFFFFFFFFu) {
-                // Invert to find the first non-whitespace character
-                uint32_t non_ws_mask = ~mask;
-                uint32_t offset = static_cast<uint32_t>(_tzcnt_u32(non_ws_mask));
-                cur += offset;
-                return;
-            }
-            cur += 32;
-        }
+    // Fast path: if already pointing to non-whitespace, 0 cost
+    if (cur < end && static_cast<unsigned char>(*cur) > ' ') {
+        return;
     }
-
-    while (cur < end && (*cur == ' ' || *cur == '\t')) {
+    while (cur < end && static_cast<unsigned char>(*cur) <= ' ') {
         ++cur;
     }
 }
 
-// Find next whitespace (space or tab) in 32-byte SIMD chunks
+// Find next whitespace rapidly
 inline void find_whitespace_simd(const char*& cur, const char* end) noexcept {
-    if constexpr (has_compile_time<CpuFeature::AVX2>()) {
-        const __m256i space_vec = _mm256_set1_epi8(' ');
-        const __m256i tab_vec = _mm256_set1_epi8('\t');
-
-        while (cur + 32 <= end) {
-            __m256i chunk = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(cur));
-            __m256i cmp_sp = _mm256_cmpeq_epi8(chunk, space_vec);
-            __m256i cmp_tb = _mm256_cmpeq_epi8(chunk, tab_vec);
-            __m256i is_ws = _mm256_or_si256(cmp_sp, cmp_tb);
-
-            uint32_t mask = static_cast<uint32_t>(_mm256_movemask_epi8(is_ws));
-            if (mask != 0) {
-                uint32_t offset = static_cast<uint32_t>(_tzcnt_u32(mask));
-                cur += offset;
-                return;
-            }
-            cur += 32;
-        }
-    }
-
-    while (cur < end && *cur != ' ' && *cur != '\t') {
+    while (cur < end && static_cast<unsigned char>(*cur) > ' ') {
         ++cur;
     }
 }
 
-// Skip N space-separated tokens rapidly using SIMD/BMI2 (REF-ARCH-005)
+// Skip N space-separated tokens rapidly using AVX2 bitmask counting & BMI1 BLSR (REF-ARCH-005)
 inline void skip_tokens_simd(const char*& cur, const char* end, int count) noexcept {
+    if (count <= 0 || cur >= end) return;
+
+    // Fast-path for 1 or 2 tokens: direct scalar register scan (2-4 cycles)
+    if (count <= 2) {
+        while (count > 0 && cur < end) {
+            while (cur < end && static_cast<unsigned char>(*cur) > ' ') ++cur;
+            while (cur < end && static_cast<unsigned char>(*cur) <= ' ') ++cur;
+            --count;
+        }
+        return;
+    }
+
+    // High-throughput AVX2 SIMD multi-token skipping for larger token spans (e.g. 5, 18)
+    if constexpr (has_compile_time<CpuFeature::AVX2>()) {
+        const __m256i space_vec = _mm256_set1_epi8(' ');
+
+        while (cur + 32 <= end && count > 0) {
+            __m256i chunk = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(cur));
+            __m256i cmp = _mm256_cmpeq_epi8(chunk, space_vec);
+            uint32_t mask = static_cast<uint32_t>(_mm256_movemask_epi8(cmp));
+
+            int spaces_in_chunk = std::popcount(mask);
+
+            if (spaces_in_chunk < count) {
+                // Chunk has fewer spaces than target: advance entire 32-byte chunk in 1 cycle
+                count -= spaces_in_chunk;
+                cur += 32;
+            } else {
+                // Target token space is located inside this 32-byte vector!
+                // Clear the first (count - 1) spaces using hardware BMI1 BLSR
+                for (int i = 0; i < count - 1; ++i) {
+                    mask &= (mask - 1);
+                }
+                uint32_t offset = static_cast<uint32_t>(std::countr_zero(mask));
+                cur += offset;
+                // Skip the space itself and any trailing whitespace
+                while (cur < end && static_cast<unsigned char>(*cur) <= ' ') ++cur;
+                return;
+            }
+        }
+    }
+
+    // Scalar fallback
     while (count > 0 && cur < end) {
-        find_whitespace_simd(cur, end);
-        skip_whitespace_simd(cur, end);
+        while (cur < end && static_cast<unsigned char>(*cur) > ' ') ++cur;
+        while (cur < end && static_cast<unsigned char>(*cur) <= ' ') ++cur;
         --count;
     }
 }
