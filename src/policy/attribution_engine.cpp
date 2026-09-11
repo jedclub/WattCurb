@@ -200,31 +200,40 @@ AnalysisReportData AttributionEngine::compute_attribution(
 
     // REF-ARCH-005: Zero-allocation Two-Pointer matching on sorted PID streams
     // Eliminates std::unordered_map completely (0 heap allocations, 100% L1D sequential access)
-    struct IntermediateProc {
-        int32_t pid;
-        ProcessComm comm;
-        uint32_t uid;
-        uint64_t delta_cpu_ticks;
-        uint64_t delta_gpu_ns;
-        uint64_t delta_wakeups;
-        uint64_t delta_io_bytes;
-        uint64_t delta_io_syscalls;
-        uint64_t vram_kib;
+    // REF-ARCH-005, REF-ARCH-007 & REF-RES-011: 64-byte Hot-Aligned Intermediate Process Structure
+    // Keeps all fields accessed during WDI scoring within a single L1D cache line.
+    struct alignas(64) IntermediateProc {
+        // --- Line 0 (Hot Cacheline: Bytes 0..63) ---
+        int32_t pid{0};
+        uint32_t delta_cpu_ticks{0};
+        uint64_t delta_wakeups{0};
+        uint32_t rss_kib{0};
+        uint32_t pss_kib{0};
+        uint32_t delta_minflt{0};
+        uint32_t delta_majflt{0};
 
-        // Deep Process Physical Telemetry (REF-REQ-013, REF-REQ-016)
-        int32_t cpu_core;
-        uint32_t num_threads;
-        int32_t nice;
-        int32_t priority;
-        uint64_t delta_minflt;
-        uint64_t delta_majflt;
-        uint64_t pss_kib;
-        uint64_t rss_kib;
-        uint64_t timerslack_ns;
-        uint32_t open_sockets;
-        bool cross_ccx_migration;
-        int32_t prev_core;
+        // Bit-packed metadata word (8 bytes = 64 bits)
+        int64_t cpu_core : 10 {-1};
+        int64_t prev_core : 10 {-1};
+        uint64_t num_threads : 16 {1};
+        int64_t nice : 6 {0};
+        int64_t priority : 8 {0};
+        uint64_t open_sockets : 12 {0};
+        uint64_t cross_ccx_migration : 1 {0};
+        uint64_t reserved : 1 {0};
+
+        uint64_t timerslack_ns{50000};
+        uint64_t vram_kib{0};
+
+        // --- Line 1 (Cold Cacheline: Bytes 64..127) ---
+        ProcessComm comm{};
+        uint32_t uid{0};
+        uint32_t pad0{0};
+        uint64_t delta_gpu_ns{0};
+        uint64_t delta_io_bytes{0};
+        uint64_t delta_io_syscalls{0};
     };
+    static_assert(sizeof(IntermediateProc) == 128, "IntermediateProc must span exactly 2 cache lines (1 Hot + 1 Cold)");
 
     core::FixedVector<IntermediateProc, 2048> deltas;
 
@@ -276,29 +285,29 @@ AnalysisReportData AttributionEngine::compute_attribution(
                 total_delta_gpu_ns += d_gpu;
                 total_system_wakeups += d_wake;
 
-                deltas.push_back(IntermediateProc{
-                    .pid = p2.pid,
-                    .comm = p2.comm,
-                    .uid = p2.uid,
-                    .delta_cpu_ticks = d_cpu,
-                    .delta_gpu_ns = d_gpu,
-                    .delta_wakeups = d_wake,
-                    .delta_io_bytes = d_io,
-                    .delta_io_syscalls = d_syscalls,
-                    .vram_kib = p2.drm_vram_kib,
-                    .cpu_core = p2.cpu_core,
-                    .num_threads = p2.num_threads,
-                    .nice = p2.nice,
-                    .priority = p2.priority,
-                    .delta_minflt = d_minflt,
-                    .delta_majflt = d_majflt,
-                    .pss_kib = p2.pss_kib > 0 ? p2.pss_kib : p1.pss_kib,
-                    .rss_kib = p2.rss_kib > 0 ? p2.rss_kib : p1.rss_kib,
-                    .timerslack_ns = p2.timerslack_ns,
-                    .open_sockets = std::max(p1.open_sockets, p2.open_sockets),
-                    .cross_ccx_migration = cross_ccx,
-                    .prev_core = p1.cpu_core
-                });
+                IntermediateProc ip;
+                ip.pid = p2.pid;
+                ip.delta_cpu_ticks = static_cast<uint32_t>(d_cpu);
+                ip.delta_wakeups = d_wake;
+                ip.rss_kib = p2.rss_kib > 0 ? p2.rss_kib : p1.rss_kib;
+                ip.pss_kib = p2.pss_kib > 0 ? p2.pss_kib : p1.pss_kib;
+                ip.delta_minflt = static_cast<uint32_t>(d_minflt);
+                ip.delta_majflt = static_cast<uint32_t>(d_majflt);
+                ip.cpu_core = p2.cpu_core;
+                ip.prev_core = p1.cpu_core;
+                ip.num_threads = p2.num_threads;
+                ip.nice = p2.nice;
+                ip.priority = p2.priority;
+                ip.open_sockets = std::max(static_cast<uint32_t>(p1.open_sockets), static_cast<uint32_t>(p2.open_sockets));
+                ip.cross_ccx_migration = cross_ccx ? 1 : 0;
+                ip.timerslack_ns = p2.timerslack_ns;
+                ip.vram_kib = p2.drm_vram_kib;
+                ip.comm = p2.comm;
+                ip.uid = p2.uid;
+                ip.delta_gpu_ns = d_gpu;
+                ip.delta_io_bytes = d_io;
+                ip.delta_io_syscalls = d_syscalls;
+                deltas.push_back(ip);
 
                 ++idx1;
                 ++idx2;

@@ -11,6 +11,8 @@
 #include "core/scoped_profiler.hpp"
 
 #undef NDEBUG
+#define WATTCURB_MEMORY_PROBE 1
+#include "core/memory_sequence_probe.hpp"
 #include <cassert>
 #include <chrono>
 #include <cstring>
@@ -128,13 +130,13 @@ void test_attribution_engine() {
     hw2.backlight_max_brightness = 60000;
 
     std::vector<wattcurb::ProcessSample> p1 = {
-        {.pid = 101, .comm = "renderer", .utime_ticks = 100, .stime_ticks = 20, .drm_engine_gfx_ns = 1'000'000, .drm_vram_kib = 65536},
-        {.pid = 102, .comm = "idle_daemon", .utime_ticks = 10, .stime_ticks = 5, .drm_engine_gfx_ns = 0, .drm_vram_kib = 0}
+        {.pid = 101, .utime_ticks = 100, .stime_ticks = 20, .comm = "renderer", .drm_engine_gfx_ns = 1'000'000, .drm_vram_kib = 65536},
+        {.pid = 102, .utime_ticks = 10, .stime_ticks = 5, .comm = "idle_daemon", .drm_engine_gfx_ns = 0, .drm_vram_kib = 0}
     };
 
     std::vector<wattcurb::ProcessSample> p2 = {
-        {.pid = 101, .comm = "renderer", .utime_ticks = 300, .stime_ticks = 60, .drm_engine_gfx_ns = 101'000'000, .drm_vram_kib = 65536},
-        {.pid = 102, .comm = "idle_daemon", .utime_ticks = 11, .stime_ticks = 5, .drm_engine_gfx_ns = 0, .drm_vram_kib = 0}
+        {.pid = 101, .utime_ticks = 300, .stime_ticks = 60, .comm = "renderer", .drm_engine_gfx_ns = 101'000'000, .drm_vram_kib = 65536},
+        {.pid = 102, .utime_ticks = 11, .stime_ticks = 5, .comm = "idle_daemon", .drm_engine_gfx_ns = 0, .drm_vram_kib = 0}
     };
 
     wattcurb::policy::AttributionEngine engine;
@@ -163,8 +165,8 @@ void test_windowed_attribution_engine() {
         hw_list.push_back(h);
 
         std::vector<wattcurb::ProcessSample> procs = {
-            {.pid = 201, .comm = "continuous_worker", .utime_ticks = static_cast<uint64_t>(100 + i * 50), .stime_ticks = 10},
-            {.pid = 202, .comm = "ephemeral_task", .utime_ticks = (i == 2 ? 30ULL : 0ULL), .stime_ticks = 0}
+            {.pid = 201, .utime_ticks = static_cast<uint64_t>(100 + i * 50), .stime_ticks = 10, .comm = "continuous_worker"},
+            {.pid = 202, .utime_ticks = (i == 2 ? 30ULL : 0ULL), .stime_ticks = 0, .comm = "ephemeral_task"}
         };
         proc_list.push_back(procs);
     }
@@ -801,6 +803,75 @@ void test_modular_battery_features() {
     std::cout << " [PASS] test_modular_battery_features (7 features, metadata, catalog, & extreme profile verified)\n";
 }
 
+void test_memory_sequence_probe_and_cache_chunking() {
+    // 1. Verify 64-byte Hot Chunk layout and cache alignment (REF-ARCH-007, REF-RES-011)
+    static_assert(sizeof(wattcurb::ProcessHotChunk) == 64, "ProcessHotChunk must be exactly 64 bytes");
+    static_assert(alignof(wattcurb::ProcessHotChunk) == 64, "ProcessHotChunk must be 64-byte aligned");
+    static_assert(sizeof(wattcurb::CompactProcessHot) == 32, "CompactProcessHot must be exactly 32 bytes");
+    static_assert(sizeof(wattcurb::ProcessSample) == 192, "ProcessSample must be exactly 192 bytes (3 cache lines)");
+    static_assert(alignof(wattcurb::ProcessSample) == 64, "ProcessSample must be 64-byte aligned");
+
+    // 2. Verify bit-packed metadata precision
+    wattcurb::ProcessSample sample;
+    sample.pid = 12345;
+    sample.cpu_core = 15;
+    sample.nice = -10;
+    sample.priority = 20;
+    sample.num_threads = 64;
+    sample.open_sockets = 120;
+    sample.has_io_perm = 1;
+    sample.is_kthread = 0;
+    sample.cross_ccx_migrated = 1;
+
+    assert(sample.pid == 12345);
+    assert(sample.cpu_core == 15);
+    assert(sample.nice == -10);
+    assert(sample.priority == 20);
+    assert(sample.num_threads == 64);
+    assert(sample.open_sockets == 120);
+    assert(sample.has_io_perm == 1);
+    assert(sample.is_kthread == 0);
+    assert(sample.cross_ccx_migrated == 1);
+
+    // Test negative cpu_core (-1) and negative nice (-20)
+    sample.cpu_core = -1;
+    sample.nice = -20;
+    assert(sample.cpu_core == -1);
+    assert(sample.nice == -20);
+
+    // 3. Verify MemorySequenceProbe & Cacheline Crossings
+    auto& probe = wattcurb::core::MemorySequenceProbe::instance();
+    probe.reset();
+    probe.begin_pass();
+
+    // Simulate 10 iterations of pure Hot sequence
+    for (int p = 0; p < 10; ++p) {
+        probe.record_access(static_cast<uint32_t>(wattcurb::core::ProcFieldId::Pid), "pid", offsetof(wattcurb::ProcessSample, pid), sizeof(sample.pid));
+        probe.record_access(static_cast<uint32_t>(wattcurb::core::ProcFieldId::UtimeTicks), "utime_ticks", offsetof(wattcurb::ProcessSample, utime_ticks), sizeof(sample.utime_ticks));
+        probe.record_access(static_cast<uint32_t>(wattcurb::core::ProcFieldId::StimeTicks), "stime_ticks", offsetof(wattcurb::ProcessSample, stime_ticks), sizeof(sample.stime_ticks));
+        probe.record_access(static_cast<uint32_t>(wattcurb::core::ProcFieldId::VoluntaryCtxt), "vol_ctxt", offsetof(wattcurb::ProcessSample, voluntary_ctxt_switches), sizeof(sample.voluntary_ctxt_switches));
+        probe.record_access(static_cast<uint32_t>(wattcurb::core::ProcFieldId::NonvoluntaryCtxt), "nonvol_ctxt", offsetof(wattcurb::ProcessSample, nonvoluntary_ctxt_switches), sizeof(sample.nonvoluntary_ctxt_switches));
+        probe.record_access(static_cast<uint32_t>(wattcurb::core::ProcFieldId::RssKib), "rss_kib", offsetof(wattcurb::ProcessSample, rss_kib), sizeof(sample.rss_kib));
+        probe.record_access(static_cast<uint32_t>(wattcurb::core::ProcFieldId::PssKib), "pss_kib", offsetof(wattcurb::ProcessSample, pss_kib), sizeof(sample.pss_kib));
+        probe.record_access(static_cast<uint32_t>(wattcurb::core::ProcFieldId::Minflt), "minflt", offsetof(wattcurb::ProcessSample, minflt), sizeof(sample.minflt));
+        probe.record_access(static_cast<uint32_t>(wattcurb::core::ProcFieldId::Majflt), "majflt", offsetof(wattcurb::ProcessSample, majflt), sizeof(sample.majflt));
+    }
+    probe.end_pass();
+
+    // All these 9 fields are in Line 0 (offset < 64) -> ZERO cache line crossings within the hot chunk!
+    assert(probe.total_crossings() == 0 && "Hot sequence within Line 0 must have 0 cache-line crossings!");
+
+    // Now record a cold field access (comm at offset 64) -> causes a crossing to Line 1!
+    probe.record_access(static_cast<uint32_t>(wattcurb::core::ProcFieldId::Comm), "comm", offsetof(wattcurb::ProcessSample, comm), sizeof(sample.comm));
+    assert(probe.total_crossings() == 1 && "Accessing cold field (comm) must correctly register 1 cache-line crossing");
+
+    std::string report = probe.generate_report();
+    assert(report.find("WattCurb Deep Memory Access Sequence") != std::string::npos);
+    assert(report.find("HOT (L1D)") != std::string::npos);
+
+    std::cout << " [PASS] test_memory_sequence_probe_and_cache_chunking (64B HotChunk, 32B CompactHot, 0-crossing Hot loop)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -810,6 +881,7 @@ int main() {
     test::test_ifunc_and_nttp_dispatch();
     test::test_simd_scanner();
     test::test_custom_containers();
+    test::test_memory_sequence_probe_and_cache_chunking();
     test::test_process_classifier();
     test::test_mitigation_engine();
     test::test_modular_battery_features();

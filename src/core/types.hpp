@@ -127,17 +127,107 @@ struct ProcessComm {
     }
 };
 
-// Implements REF-REQ-004, REF-REQ-011 & REF-ARCH-002
-// TriviallyCopyable POD: Zero-allocation, L1D-cache aligned
-struct ProcessSample {
+// Implements REF-REQ-004, REF-REQ-011, REF-ARCH-002, REF-ARCH-007 & REF-RES-011
+// Cache-Line Aligned Process Hot Chunk (64 bytes exact)
+// Holds all high-probability metrics accessed in 100% of monitoring iterations.
+struct alignas(64) ProcessHotChunk {
     int32_t pid{0};
     int32_t ppid{0};
-    ProcessComm comm{};
-    uint32_t uid{0};
     uint64_t utime_ticks{0};
     uint64_t stime_ticks{0};
     uint64_t voluntary_ctxt_switches{0};
     uint64_t nonvoluntary_ctxt_switches{0};
+    uint32_t rss_kib{0};
+    uint32_t pss_kib{0};
+    uint32_t minflt{0};
+    uint32_t majflt{0};
+
+    // Bit-Packed Metadata Word (8 bytes / 64 bits):
+    // Extreme 66% space reduction vs unpackaged scalar ints.
+    int64_t cpu_core : 10 {-1};
+    uint64_t num_threads : 16 {1};
+    int64_t nice : 6 {0};
+    int64_t priority : 8 {0};
+    uint64_t open_sockets : 12 {0};
+    uint64_t has_io_perm : 1 {1};
+    uint64_t is_kthread : 1 {0};
+    uint64_t cross_ccx_migrated : 1 {0};
+    uint64_t reserved_flags : 9 {0};
+
+    [[nodiscard]] inline uint64_t total_cpu_ticks() const noexcept {
+        return utime_ticks + stime_ticks;
+    }
+    [[nodiscard]] inline uint64_t total_wakeups() const noexcept {
+        return voluntary_ctxt_switches + nonvoluntary_ctxt_switches;
+    }
+};
+static_assert(sizeof(ProcessHotChunk) == 64, "ProcessHotChunk must be exactly 64 bytes (1 cache line)");
+static_assert(alignof(ProcessHotChunk) == 64, "ProcessHotChunk must be 64-byte cacheline aligned");
+static_assert(std::is_trivially_copyable_v<ProcessHotChunk>, "ProcessHotChunk must be TriviallyCopyable");
+
+// Ultra-Dense 32-byte Process Hot Record (REF-ARCH-007)
+// Packs two complete processes into a single 64-byte hardware cache line.
+// 500 active processes require ONLY 16 KB (fits in half of L1D cache).
+struct CompactProcessHot {
+    uint32_t pid : 22 {0};
+    uint32_t is_kthread : 1 {0};
+    uint32_t has_io_perm : 1 {1};
+    uint32_t reserved_bits : 8 {0};
+
+    uint32_t delta_cpu_ticks{0};
+    uint32_t delta_wakeups{0};
+    uint32_t rss_kib{0};
+    uint32_t pss_kib{0};
+    uint32_t minflt{0};
+    uint16_t majflt{0};
+
+    int16_t cpu_core{-1};
+    uint16_t num_threads{1};
+    int8_t nice{0};
+    int8_t priority{0};
+};
+static_assert(sizeof(CompactProcessHot) == 32, "CompactProcessHot must be exactly 32 bytes (2 per cacheline)");
+static_assert(std::is_trivially_copyable_v<CompactProcessHot>, "CompactProcessHot must be TriviallyCopyable");
+
+// Implements REF-REQ-004, REF-REQ-011, REF-ARCH-002, REF-ARCH-007 & REF-RES-011
+// TriviallyCopyable POD: 64-byte Hot/Cold cacheline aligned
+struct alignas(64) ProcessSample {
+    // =========================================================================
+    // 1. HOT CACHE-LINE CHUNK (Bytes 0..63): 100% Sequential Access Frequency
+    // Serves inner monitoring, two-pointer delta, and WDI attribution loops.
+    // Exact 64-byte hardware footprint ensures ZERO L1D cache line crossing.
+    // =========================================================================
+    int32_t pid{0};
+    int32_t ppid{0};
+    uint64_t utime_ticks{0};
+    uint64_t stime_ticks{0};
+    uint64_t voluntary_ctxt_switches{0};
+    uint64_t nonvoluntary_ctxt_switches{0};
+    uint32_t rss_kib{0};
+    uint32_t pss_kib{0};
+    uint32_t minflt{0};
+    uint32_t majflt{0};
+
+    // Bit-Packed Metadata Word (8 bytes / 64 bits)
+    int64_t cpu_core : 10 {-1};
+    uint64_t num_threads : 16 {1};
+    int64_t nice : 6 {0};
+    int64_t priority : 8 {0};
+    uint64_t open_sockets : 12 {0};
+    uint64_t has_io_perm : 1 {1};
+    uint64_t is_kthread : 1 {0};
+    uint64_t cross_ccx_migrated : 1 {0};
+    uint64_t reserved_flags : 9 {0};
+
+    // =========================================================================
+    // 2. WARM & COLD CACHE-LINE CHUNK (Bytes 64..191): Conditional / Rare Access
+    // String names, DRM engine telemetry, IO bandwidth, and fd caches.
+    // Separated from Hot Chunk so that steady-state loops never fetch these lines.
+    // =========================================================================
+    ProcessComm comm{};
+    uint32_t uid{0};
+    int32_t pinned_drm_fd{-1}; // REF-RES-006: Cached DRM render node fd
+    uint64_t timerslack_ns{50000};
     uint64_t read_bytes{0};
     uint64_t write_bytes{0};
     uint64_t io_syscalls{0};
@@ -147,22 +237,17 @@ struct ProcessSample {
     uint64_t drm_engine_enc_ns{0};
     uint64_t drm_vram_kib{0};
 
-    // Deep Process Physical Telemetry (REF-REQ-013, REF-REQ-016)
-    int32_t cpu_core{-1};
-    uint32_t num_threads{1};
-    int32_t nice{0};
-    int32_t priority{0};
-    uint64_t minflt{0};
-    uint64_t majflt{0};
-    uint64_t pss_kib{0};
-    uint64_t rss_kib{0};
-    uint64_t timerslack_ns{50000};
-    uint32_t open_sockets{0};
-    int32_t pinned_drm_fd{-1}; // REF-RES-006: Cached DRM render node fd to eliminate thousands of readlinkat calls
-    bool has_io_perm{true};    // REF-RES-006: Cache EACCES failures to suppress redundant /proc/[pid]/io syscalls
+    [[nodiscard]] inline const ProcessHotChunk& hot() const noexcept {
+        return *reinterpret_cast<const ProcessHotChunk*>(this);
+    }
+    [[nodiscard]] inline ProcessHotChunk& hot() noexcept {
+        return *reinterpret_cast<ProcessHotChunk*>(this);
+    }
 };
 
 static_assert(std::is_trivially_copyable_v<ProcessSample>, "ProcessSample must be TriviallyCopyable for SIMD acceleration");
+static_assert(alignof(ProcessSample) == 64, "ProcessSample must be 64-byte cacheline aligned");
+static_assert(sizeof(ProcessSample) == 192, "ProcessSample must span exactly 3 cachelines (1 Hot + 2 Cold)");
 
 
 // Implements REF-REQ-001, REF-REQ-010 & REF-RES-002
