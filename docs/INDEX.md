@@ -55,6 +55,7 @@ All documents follow the Ref-ID naming standard:
 | [`REF-RES-009`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-009-linux-desktop-sleep-and-resource-reclaim.md) | Linux Desktop Sleep Technologies, Resource Reclamation & Window-Aware Power Suppression | Cgroup v2 freeze, memory.reclaim, timer slack, KWin/Wayland state | 2026-09-11 |
 | [`REF-RES-010`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-010-cpp23-vs-rust-empirical-benchmark.md) | C++23 vs Rust Empirical Performance & Hardware PMU Micro-Architecture Audit | 85ns AVX2 parser vs 150ns Rust parser, IPC 2.15 vs 1.48 | 2026-09-11 |
 | [`REF-RES-011`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-011-memory-sequence-probe-and-cache-optimization.md) | Deep Memory Access Sequence Probe, Cache-Line Chunking & Bit-Level Field Packing | Sequence probe, 64B HotChunk, 66% bitfield metadata compaction | 2026-09-12 |
+| [`REF-RES-012`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-012-thinkpower-domain-survey-and-silicon-mechanisms.md) | ThinkPower Hardware Domain Survey, Silicon Telemetry & Zero-Wakeup C++23 Re-Engineering Specification | Complete 7-domain survey, SMU 4W, VRM 12A, KWin shaders, C++23 re-engineering | 2026-09-12 |
 
 ---
 
