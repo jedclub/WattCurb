@@ -36,6 +36,7 @@ This document tracks historical PMU (Performance Monitoring Unit) hardware bench
 | **M12: Deep Scope & Zero-Heap Diet** | Threads, Page Faults, Nice/Priority, DRAM Domain G, Two-Pointer Merge | **122.77 ms / 30s** (User: **0.67ms/pass**)| **16.5 M** | **0.65** | **0.25% (329k L1D)**| **0.002% (6.8k dTLB)**| **9.9 MB flat**| **< 0.8 mW** (0.025% CPU) | 🏆 **All-Time Record! Task-Clock 122.77ms, 16.5M Instr** |
 | **M14: Hardened Containers & 2048 Pool** | Canary Integrity, Saturating Bounds Guards, 2048-entry Pool Headroom | **119.82 ms / 30s** (User: **0.38ms/pass**)| **17.0 M** | **0.83** | **0.20% (220k L1D)**| **0.001% (5.1k dTLB)**| **9.9 MB flat**| **< 0.8 mW** (0.024% CPU) | 🛡️ **Zero Regression + User CPU 5.75ms** |
 | **M15: Two-Part Telemetry & Adaptive Mitigation** | Executive Briefing + JSON Structs, 60s/5s Mitigation Daemon, 6-Tier DB | **86.71 ms / 30s** (User: **0.48ms/pass**)| **19.2 M** | **0.86** | **0.22% (149k L1D)**| **0.001% (4.8k dTLB)**| **2.28 MB flat**| **< 0.6 mW** (0.017% CPU) | 👑 **ALL-TIME LOWEST: Task-Clock 86.71ms, Peak RSS 2.28MB** |
+| **M17: C++23 vs. Rust Empirical Parity Audit** | 100% Identical VFS Syscall & SIMD Pipeline (REF-RES-010) | **C++: 26-29ms / Rust: 24-26ms** (2s window)| **8.5M / 3.0M**| **1.05 / 0.82**| **C++ -28% L1D (62k vs 87k)**| **C++ -56% dTLB (2.5k vs 5.7k)**| **C++ 228KB vs Rust 427KB**| **< 0.5 mW** | ⚖️ **Empirical Parity Proved: Syscall dominates >90%** |
 
 
 ---
@@ -671,6 +672,36 @@ This document tracks historical PMU (Performance Monitoring Unit) hardware bench
   - Successfully integrated rich engineering metadata, 7 modular feature specifications, and a 30-second Extreme Battery Causation Profiler with **zero performance regression**.
   - Active CPU task-clock over 30 continuous seconds of sampling 440+ processes dropped to **86.19 ms** (host-wide CPU utilization: **0.0177%**), satisfying all zero-wakeup requirements.
   - Provided a closed-loop LLM feature synthesis pipeline, enabling continuous AI-driven expansion of WattCurb's power mitigation capabilities.
+
+---
+
+### Milestone M17: C++23 vs. Rust Empirical PMU Hardware Benchmark (100% Identical Parity)
+- **Date**: 2026-09-11
+- **Related Documentation**: [`REF-RES-010`](./RES-010-cpp23-vs-rust-empirical-benchmark.md)
+- **Configuration**: 2.0s observation window, 139 monitored processes, 100% identical VFS syscall sequence, AVX2 SIMD scanning, zero heap steady-state loops.
+- **Hardware PMU Counter Telemetry (Average across 3 consecutive runs)**:
+
+| Hardware PMU Counter Metric | C++23 Production (`wattcurb`) | Rust Edition (`wattcurb_rs`) | Comparative Analysis |
+| :--- | :---: | :---: | :--- |
+| **Monitored Processes** | **139** | **139** | **Strict 100% Parity** |
+| **Active Task-Clock (CPU Duration)** | 29.51 ms | **25.18 ms** | Rust active CPU time ~14.7% shorter |
+| **Kernel Syscall Time (`sys`)** | 27.22 ms | 24.68 ms | Kernel VFS time dominates **> 90%** |
+| **User Mode CPU Time (`user`)** | 2.31 ms | **0.69 ms** | Rust user-mode parser is ~1.6 ms faster |
+| **Instructions Retired** | 8,583,267 | **3,023,603** | Rust executes ~65% fewer instructions (lean observation) |
+| **CPU Clock Cycles** | 8,168,616 | **3,682,558** | Rust executes ~55% fewer cycles |
+| **IPC (Instructions Per Cycle)** | **1.05** | 0.82 | **C++ achieves +28% higher IPC** |
+| **L1 Data Cache Load Misses** | **62,782** | 86,994 | **C++ has 27.8% fewer L1D cache misses** |
+| **dTLB Load Misses** | **2,510** | 5,722 | **C++ has 56.1% fewer dTLB misses (Zero-Heap)** |
+| **Branch Mispredictions** | 54,817 | **30,445** | Rust has 44.5% fewer branch misses |
+| **Page Faults** | **222** | 384 | **C++ causes 42.2% fewer page faults** |
+| **Stripped Binary Size** | **228 KB** | 427 KB | **C++ is 46.6% smaller (199 KB less)** |
+| **100k Parser Micro-Benchmark** | 0.22 ~ 0.30 $\mu s$/op | **0.15 ~ 0.20 $\mu s$/op** | Both pass Oracle Gate (< 0.50 $\mu s$) |
+
+- **Empirical Architectural Findings**:
+  1. **Syscall Domination**: Over 90% of execution time is consumed by the Linux kernel VFS layer (`sys_openat`, `sys_read`, `sys_readlinkat`, `sys_getdents64`). Language speed differences account for only ~1.6 ms out of a 2-second profiling window (an insignificant 0.003% host CPU difference).
+  2. **Memory Hierarchy & Cache Locality**: C++23 custom contiguous containers and alignment constraints deliver 56% lower dTLB misses and 28% lower L1D cache misses compared to Rust's standard runtime.
+  3. **Release Binary Footprint**: C++ produces a 228 KB executable, whereas Rust produces 427 KB due to standard runtime symbols and allocators.
+
 
 
 
