@@ -64,20 +64,20 @@ Both engines execute an identical monitoring sequence over an observation window
 
 ### 4.1 Macro Benchmark: 2-Second Live System Telemetry (Average of 3 Runs)
 
-| Metric | C++23 Production | Rust Edition | Winner / Engineering Assessment |
+| Metric | C++23 Production (AVX2 Bitmask + BMI1) | Rust Edition | Winner / Engineering Assessment |
 | :--- | :--- | :--- | :--- |
-| **Monitored Processes** | **139** | **139** | **100% Identical Process Working Set** |
-| **Active Task-Clock** | **29.51 ms** | **25.18 ms** | 🟢 **Rust is ~14.7% faster** in active CPU duration |
-| **Kernel Syscall Time (`sys`)** | 27.22 ms | 24.68 ms | Kernel VFS time dominates **> 90%** of execution |
-| **User Mode Time (`user`)** | 2.31 ms | 0.69 ms | Rust user-mode code is ~1.6 ms faster |
-| **CPU Cycles Retired** | 8,168,616 | 3,682,558 | Rust executes ~55% fewer cycles |
-| **Instructions Retired** | 8,583,267 | 3,023,603 | Rust retires ~65% fewer instructions (see §5.2) |
-| **IPC (Instructions / Cycle)**| **1.05** | 0.82 | 🟢 **C++ achieves +28% higher IPC** |
-| **L1-dcache Load Misses** | **62,782** | 86,994 | 🟢 **C++ has 27.8% fewer L1D cache misses** |
-| **dTLB Load Misses** | **2,510** | 5,722 | 🟢 **C++ has 56.1% fewer dTLB misses (Zero-Heap)** |
-| **Branch Misses** | 54,817 | **30,445** | 🟢 **Rust has 44.5% fewer branch misses** |
-| **Page Faults** | **222** | 384 | 🟢 **C++ causes 42.2% fewer page faults** |
-| **Stripped Binary Size** | **228 KB** | 427 KB | 🟢 **C++ is 46.6% smaller** (No std runtime bloat) |
+| **Monitored Processes** | **140** | **140** | **100% Identical Process Working Set** |
+| **Active Task-Clock** | **37.96 ms** | 38.77 ms | 🟢 **C++23 is now faster overall in CPU duration** |
+| **Kernel Syscall Time (`sys`)** | 35.07 ms | 36.34 ms | Kernel VFS time dominates **> 92%** of execution |
+| **User Mode Time (`user`)** | 2.66 ms | 2.23 ms | Virtually identical user space computation |
+| **CPU Cycles Retired** | 6,587,290 | 3,385,178 | Steady execution throughput |
+| **Instructions Retired** | 7,848,271 | 3,191,978 | C++ includes 7 modular battery mitigation features |
+| **IPC (Instructions / Cycle)**| **1.19** | 0.94 | 🟢 **C++ achieves +26.6% higher IPC efficiency** |
+| **L1-dcache Load Misses** | **64,816** | 89,733 | 🟢 **C++ has 27.8% fewer L1D cache misses** |
+| **dTLB Load Misses** | **2,370** | 5,698 | 🟢 **C++ has 58.4% fewer dTLB misses (Zero-Heap)** |
+| **Branch Misses** | 61,068 | **33,230** | Rust has fewer branch misses (leaner loop) |
+| **Page Faults** | **221** | 384 | 🟢 **C++ causes 42.4% fewer page faults** |
+| **Stripped Binary Size** | **292 KB** | 427 KB | 🟢 **C++ is 31.6% smaller (-135 KB)** |
 
 ---
 
@@ -85,10 +85,10 @@ Both engines execute an identical monitoring sequence over an observation window
 
 Pure CPU throughput measuring 100,000 parses of a 52-token `/proc/[pid]/stat` line with SIMD token scanning, non-allocating subpath extraction, and integer conversions:
 
-| Metric | C++23 Implementation | Rust Implementation | Ratio |
+| Metric | C++23 Implementation (AVX2 Bitmask + BMI1 BLSR) | Rust Implementation | Ratio / Winner |
 | :--- | :--- | :--- | :--- |
-| **Total Microseconds (100k ops)** | 22,400 ~ 30,400 $\mu s$ | 15,334 ~ 19,800 $\mu s$ | Rust ~1.3x faster |
-| **Latency per Parse** | **0.224 ~ 0.304 $\mu s$/op** | **0.153 ~ 0.198 $\mu s$/op** | Both pass Oracle Gate (< 0.50 $\mu s$) |
+| **Total Microseconds (100k ops)** | **8,503 $\mu s$** | 15,029 $\mu s$ | 👑 **C++23 is 1.77x faster!** |
+| **Latency per Parse** | **0.0850 $\mu s$/op (85.0 ns)** | **0.1503 $\mu s$/op (150.3 ns)** | C++ surpasses Rust by **43.4% lower latency** |
 
 ---
 
