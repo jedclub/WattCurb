@@ -247,14 +247,46 @@ HardwarePowerBreakdown AttributionEngine::compute_hardware_power(
         hw.uncore_and_platform_watts = 1.2;
     }
 
-    // 9. Direct Syscall Hardware Telemetry (REF-REQ-015)
+    // 9. Direct Syscall Hardware Telemetry (REF-REQ-015, REF-REQ-024)
     hw.pmu_instructions = hw2.pmu_instructions;
     hw.pmu_cycles = hw2.pmu_cycles;
     hw.pmu_ipc = hw2.pmu_ipc;
     hw.pmu_llc_misses = hw2.pmu_llc_misses;
+    hw.pmu_branch_misses = hw2.pmu_branch_misses;
     hw.cpu_core_vid_mv = hw2.cpu_core_vid_mv;
     hw.pcie_link_speed_gen = hw2.pcie_link_speed_gen;
     hw.pcie_link_width_lanes = hw2.pcie_link_width_lanes;
+
+    // PMU Micro-Energy & Power Proxy Models (REF-REQ-024)
+    uint64_t d_inst = (hw2.pmu_instructions >= hw1.pmu_instructions && hw1.pmu_instructions > 0)
+        ? (hw2.pmu_instructions - hw1.pmu_instructions) : hw2.pmu_instructions;
+    uint64_t d_cyc = (hw2.pmu_cycles >= hw1.pmu_cycles && hw1.pmu_cycles > 0)
+        ? (hw2.pmu_cycles - hw1.pmu_cycles) : hw2.pmu_cycles;
+    uint64_t d_llc = (hw2.pmu_llc_misses >= hw1.pmu_llc_misses && hw1.pmu_llc_misses > 0)
+        ? (hw2.pmu_llc_misses - hw1.pmu_llc_misses) : hw2.pmu_llc_misses;
+    uint64_t d_bm = (hw2.pmu_branch_misses >= hw1.pmu_branch_misses && hw1.pmu_branch_misses > 0)
+        ? (hw2.pmu_branch_misses - hw1.pmu_branch_misses) : hw2.pmu_branch_misses;
+
+    double interval_ipc = (d_cyc > 0 && d_inst > 0) ? (static_cast<double>(d_inst) / static_cast<double>(d_cyc)) : hw2.pmu_ipc;
+
+    double epi = (static_cast<double>(d_inst) * interval_ipc) +
+                 (200.0 * static_cast<double>(d_llc)) +
+                 (30.0 * static_cast<double>(d_bm));
+    hw.pmu_energy_proxy_index = epi;
+
+    double waste = (200.0 * static_cast<double>(d_llc)) + (30.0 * static_cast<double>(d_bm));
+    hw.pmu_energy_waste_ratio = epi > 0.0 ? std::clamp((waste / epi) * 100.0, 0.0, 100.0) : 0.0;
+
+    if (delta_sec > 0.0 && d_inst > 0) {
+        // Physical silicon power estimation (REF-REQ-024):
+        // Base idle ~500mW + dynamic core + DRAM bus + branch recovery tax
+        double p_dyn_mw = (static_cast<double>(d_inst) * interval_ipc * 0.015) / (delta_sec * 1'000'000.0);
+        double p_dram_mw = (static_cast<double>(d_llc) * 3.0) / (delta_sec * 1'000'000.0);
+        double p_branch_mw = (static_cast<double>(d_bm) * 0.20) / (delta_sec * 1'000'000.0);
+        hw.pmu_estimated_power_mw = 500.0 + p_dyn_mw + p_dram_mw + p_branch_mw;
+    } else {
+        hw.pmu_estimated_power_mw = 0.0;
+    }
 
     return hw;
 }

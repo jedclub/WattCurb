@@ -194,7 +194,12 @@ void ReportGenerator::render_executive_briefing(const AnalysisReportData& r, std
         out << "    └─ " << DIM << "Direct PMU Telemetry    : " << RESET
             << "IPC: " << BOLD << std::fixed << std::setprecision(2) << r.hardware.pmu_ipc << RESET
             << " | Cycles: " << r.hardware.pmu_cycles
-            << " | LLC Misses: " << r.hardware.pmu_llc_misses << "\n";
+            << " | LLC Miss: " << r.hardware.pmu_llc_misses
+            << " | Branch Miss: " << r.hardware.pmu_branch_misses << "\n"
+            << "       " << DIM << "PMU Power Proxy (REF-REQ-024): " << RESET
+            << "EPI: " << BOLD << CYAN << std::fixed << std::setprecision(1) << (r.hardware.pmu_energy_proxy_index / 1'000'000.0) << "M" << RESET
+            << " | EWR: " << BOLD << (r.hardware.pmu_energy_waste_ratio > 30.0 ? RED : GREEN) << std::fixed << std::setprecision(1) << r.hardware.pmu_energy_waste_ratio << "%" << RESET
+            << " | Est. Power: " << BOLD << std::fixed << std::setprecision(1) << r.hardware.pmu_estimated_power_mw << " mW" << RESET << "\n";
     }
 
     // GPU Telemetry Line
@@ -401,7 +406,12 @@ void ReportGenerator::render_terminal(const AnalysisReportData& r, std::ostream&
         << "PMU Instr: " << BOLD << r.hardware.pmu_instructions << RESET
         << " | Cycles: " << r.hardware.pmu_cycles
         << " | IPC: " << BOLD << GREEN << std::fixed << std::setprecision(2) << r.hardware.pmu_ipc << RESET
-        << " | LLC Miss: " << r.hardware.pmu_llc_misses;
+        << " | LLC Miss: " << r.hardware.pmu_llc_misses
+        << " | Branch Miss: " << r.hardware.pmu_branch_misses << "\n";
+    out << DIM << " [PMU Power Proxy]" << RESET
+        << " EPI: " << BOLD << CYAN << std::fixed << std::setprecision(1) << (r.hardware.pmu_energy_proxy_index / 1'000'000.0) << "M" << RESET
+        << " | EWR: " << BOLD << (r.hardware.pmu_energy_waste_ratio > 30.0 ? RED : GREEN) << std::fixed << std::setprecision(1) << r.hardware.pmu_energy_waste_ratio << "%" << RESET
+        << " | Est. Power: " << BOLD << std::fixed << std::setprecision(1) << r.hardware.pmu_estimated_power_mw << " mW" << RESET;
     if (r.hardware.cpu_core_vid_mv.has_value()) {
         out << " | VID: " << BOLD << *r.hardware.cpu_core_vid_mv << "mV" << RESET;
     }
@@ -633,6 +643,10 @@ void ReportGenerator::render_json(const AnalysisReportData& r, std::ostream& out
     out << "    \"pmu_cycles\": " << r.hardware.pmu_cycles << ",\n";
     out << "    \"pmu_ipc\": " << r.hardware.pmu_ipc << ",\n";
     out << "    \"pmu_llc_misses\": " << r.hardware.pmu_llc_misses << ",\n";
+    out << "    \"pmu_branch_misses\": " << r.hardware.pmu_branch_misses << ",\n";
+    out << "    \"pmu_energy_proxy_index\": " << r.hardware.pmu_energy_proxy_index << ",\n";
+    out << "    \"pmu_energy_waste_ratio\": " << r.hardware.pmu_energy_waste_ratio << ",\n";
+    out << "    \"pmu_estimated_power_mw\": " << r.hardware.pmu_estimated_power_mw << ",\n";
     out << "    \"cpu_core_vid_mv\": " << (r.hardware.cpu_core_vid_mv ? std::to_string(*r.hardware.cpu_core_vid_mv) : "null") << ",\n";
     out << "    \"pcie_link_speed_gen\": " << static_cast<int>(r.hardware.pcie_link_speed_gen) << ",\n";
     out << "    \"pcie_link_width_lanes\": " << static_cast<int>(r.hardware.pcie_link_width_lanes) << "\n";
@@ -846,7 +860,11 @@ void ReportGenerator::render_extreme_profile(const AnalysisReportData& r, std::o
     out << "  • Direct PMU    : Instructions: " << BOLD << r.hardware.pmu_instructions << RESET
         << " | Cycles: " << r.hardware.pmu_cycles
         << " | IPC: " << BOLD << (r.hardware.pmu_ipc > 1.0 ? GREEN : YELLOW) << std::fixed << std::setprecision(2) << r.hardware.pmu_ipc << RESET
-        << " | LLC Misses: " << (r.hardware.pmu_llc_misses > 500'000 ? RED : GREEN) << r.hardware.pmu_llc_misses << RESET;
+        << " | LLC Miss: " << (r.hardware.pmu_llc_misses > 500'000 ? RED : GREEN) << r.hardware.pmu_llc_misses << RESET
+        << " | Branch Miss: " << r.hardware.pmu_branch_misses << "\n"
+        << "  • PMU Power Proxy: EPI: " << BOLD << CYAN << std::fixed << std::setprecision(1) << (r.hardware.pmu_energy_proxy_index / 1'000'000.0) << "M" << RESET
+        << " | EWR: " << BOLD << (r.hardware.pmu_energy_waste_ratio > 30.0 ? RED : GREEN) << std::fixed << std::setprecision(1) << r.hardware.pmu_energy_waste_ratio << "%" << RESET
+        << " | Est. Power: " << BOLD << std::fixed << std::setprecision(1) << r.hardware.pmu_estimated_power_mw << " mW" << RESET;
     if (r.hardware.cpu_core_vid_mv.has_value()) {
         out << " | Core VID: " << *r.hardware.cpu_core_vid_mv << "mV";
     }

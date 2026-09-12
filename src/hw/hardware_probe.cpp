@@ -266,6 +266,7 @@ HardwareProbe::HardwareProbe(HardwareProbe&& other) noexcept
       pmu_instructions_fd_(std::exchange(other.pmu_instructions_fd_, -1)),
       pmu_cycles_fd_(std::exchange(other.pmu_cycles_fd_, -1)),
       pmu_llc_misses_fd_(std::exchange(other.pmu_llc_misses_fd_, -1)),
+      pmu_branch_misses_fd_(std::exchange(other.pmu_branch_misses_fd_, -1)),
       pcie_gpu_config_fd_(std::exchange(other.pcie_gpu_config_fd_, -1)),
       pcie_nvme_config_fd_(std::exchange(other.pcie_nvme_config_fd_, -1)),
       cpu0_msr_fd_(std::exchange(other.cpu0_msr_fd_, -1)) {}
@@ -365,6 +366,7 @@ HardwareProbe& HardwareProbe::operator=(HardwareProbe&& other) noexcept {
         pmu_instructions_fd_ = std::exchange(other.pmu_instructions_fd_, -1);
         pmu_cycles_fd_ = std::exchange(other.pmu_cycles_fd_, -1);
         pmu_llc_misses_fd_ = std::exchange(other.pmu_llc_misses_fd_, -1);
+        pmu_branch_misses_fd_ = std::exchange(other.pmu_branch_misses_fd_, -1);
         pcie_gpu_config_fd_ = std::exchange(other.pcie_gpu_config_fd_, -1);
         pcie_nvme_config_fd_ = std::exchange(other.pcie_nvme_config_fd_, -1);
         cpu0_msr_fd_ = std::exchange(other.cpu0_msr_fd_, -1);
@@ -450,6 +452,7 @@ void HardwareProbe::close_fds() noexcept {
     safe_close(pmu_instructions_fd_);
     safe_close(pmu_cycles_fd_);
     safe_close(pmu_llc_misses_fd_);
+    safe_close(pmu_branch_misses_fd_);
     safe_close(pcie_gpu_config_fd_);
     safe_close(pcie_nvme_config_fd_);
     safe_close(cpu0_msr_fd_);
@@ -591,6 +594,9 @@ void HardwareProbe::init_pmu_counters() {
 
     pe.config = PERF_COUNT_HW_CACHE_MISSES;
     pmu_llc_misses_fd_ = static_cast<int>(::syscall(__NR_perf_event_open, &pe, 0, -1, -1, 0));
+
+    pe.config = PERF_COUNT_HW_BRANCH_MISSES;
+    pmu_branch_misses_fd_ = static_cast<int>(::syscall(__NR_perf_event_open, &pe, 0, -1, -1, 0));
 }
 
 void HardwareProbe::init_pcie_binary_configs() {
@@ -961,12 +967,14 @@ HardwareSample HardwareProbe::capture_sample() const {
             sample.battery_cycle_count = cached_cycle_count_;
         }
 
-        // ThinkPad Charge Thresholds & Behavior (REF-REQ-022, REF-REQ-023)
+        // ThinkPad Charge Thresholds & Behavior (REF-REQ-022, REF-REQ-023, REF-REQ-024)
         // Subsample slow ACPI EC transactions: threshold registers rarely change.
-        // Polling EC every tick blocks on SMBus (~60ms). Sample on initial pass & every 30 turns (~60s).
+        // Eliminate periodic EC SMBus wakeups completely: only sample on initial pass or AC plug/unplug transition.
         {
             WATTCURB_PROFILE_SCOPE("hw.battery.thresholds");
-            bool poll_thresholds = (sample_counter_ % 30 == 1) || !cached_battery_static_initialized_;
+            bool ac_transition = (sample.is_ac_online != cached_ac_online_);
+            cached_ac_online_ = sample.is_ac_online;
+            bool poll_thresholds = !cached_battery_static_initialized_ || ac_transition;
             if (poll_thresholds) {
                 WATTCURB_PROFILE_SCOPE("hw.battery.threshold_io");
                 if (battery_threshold_start_fd_ >= 0) {
@@ -1267,6 +1275,23 @@ HardwareSample HardwareProbe::capture_sample() const {
             if (::read(pmu_llc_misses_fd_, &llc, sizeof(llc)) == sizeof(llc)) {
                 sample.pmu_llc_misses = llc;
             }
+        }
+        if (pmu_branch_misses_fd_ >= 0) {
+            uint64_t bm = 0;
+            if (::read(pmu_branch_misses_fd_, &bm, sizeof(bm)) == sizeof(bm)) {
+                sample.pmu_branch_misses = bm;
+            }
+        }
+
+        // Standalone Sample PMU Energy Proxy (REF-REQ-024)
+        if (sample.pmu_instructions > 0) {
+            double epi = (static_cast<double>(sample.pmu_instructions) * sample.pmu_ipc) +
+                         (200.0 * static_cast<double>(sample.pmu_llc_misses)) +
+                         (30.0 * static_cast<double>(sample.pmu_branch_misses));
+            sample.pmu_energy_proxy_index = epi;
+            double waste = (200.0 * static_cast<double>(sample.pmu_llc_misses)) +
+                           (30.0 * static_cast<double>(sample.pmu_branch_misses));
+            sample.pmu_energy_waste_ratio = epi > 0.0 ? std::clamp((waste / epi) * 100.0, 0.0, 100.0) : 0.0;
         }
 
         // Direct PCIe Binary Config Space Decoding

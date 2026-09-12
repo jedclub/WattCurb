@@ -415,6 +415,53 @@ void test_pmu_perf_event_telemetry() {
     std::cout << " [PASS] test_pmu_perf_event_telemetry (Instructions counted: " << (count2 - count1) << ")\n";
 }
 
+// Implements REF-TEST-010: PMU Power Proxy & Energy Waste Ratio Verification (REF-REQ-024)
+void test_pmu_energy_proxy_metrics() {
+    wattcurb::policy::AttributionEngine engine;
+
+    wattcurb::HardwareSample hw1{};
+    hw1.timestamp = std::chrono::steady_clock::now();
+    hw1.pmu_instructions = 10'000'000ULL;
+    hw1.pmu_cycles = 10'000'000ULL;
+    hw1.pmu_ipc = 1.0;
+    hw1.pmu_llc_misses = 20'000ULL;
+    hw1.pmu_branch_misses = 5'000ULL;
+
+    wattcurb::HardwareSample hw2{};
+    hw2.timestamp = hw1.timestamp + std::chrono::seconds(1); // delta_sec = 1.0s
+    hw2.pmu_instructions = 20'000'000ULL; // d_inst = 10,000,000
+    hw2.pmu_cycles = 15'000'000ULL;       // d_cyc = 5,000,000 -> interval_ipc = 2.0
+    hw2.pmu_ipc = 2.0;
+    hw2.pmu_llc_misses = 30'000ULL;       // d_llc = 10,000
+    hw2.pmu_branch_misses = 7'000ULL;     // d_bm = 2,000
+
+    auto snap = engine.compute_hardware_power(hw1, hw2, 1.0);
+
+    // Expected calculations:
+    // d_inst = 10,000,000, interval_ipc = 2.0 -> core_term = 20,000,000
+    // d_llc = 10,000 * 200.0 = 2,000,000
+    // d_bm = 2,000 * 30.0 = 60,000
+    // Expected EPI = 20,000,000 + 2,000,000 + 60,000 = 22,060,000
+    assert(std::abs(snap.pmu_energy_proxy_index - 22'060'000.0) < 1.0 && "EPI calculation mismatch");
+
+    // Expected waste = 2,000,000 + 60,000 = 2,060,000
+    // Expected EWR = (2,060,000 / 22,060,000) * 100% ~= 9.338%
+    double expected_ewr = (2'060'000.0 / 22'060'000.0) * 100.0;
+    assert(std::abs(snap.pmu_energy_waste_ratio - expected_ewr) < 0.01 && "EWR calculation mismatch");
+
+    // Expected P_est >= 500.0 mW
+    assert(snap.pmu_estimated_power_mw >= 500.0 && snap.pmu_estimated_power_mw <= 600.0);
+
+    // Edge case: zero instructions, zero delta_sec
+    auto snap_zero = engine.compute_hardware_power(wattcurb::HardwareSample{}, wattcurb::HardwareSample{}, 0.0);
+    assert(snap_zero.pmu_energy_proxy_index == 0.0);
+    assert(snap_zero.pmu_energy_waste_ratio == 0.0);
+    assert(snap_zero.pmu_estimated_power_mw == 0.0);
+
+    std::cout << " [PASS] test_pmu_energy_proxy_metrics (EPI: " << (snap.pmu_energy_proxy_index / 1'000'000.0)
+              << "M, EWR: " << snap.pmu_energy_waste_ratio << "%, P_est: " << snap.pmu_estimated_power_mw << " mW)\n";
+}
+
 // Implements REF-TEST-006: PCIe Binary Config Space Decoding Verification
 void test_pcie_binary_config_decoder() {
     std::array<uint8_t, 256> mock_cfg{};
@@ -1136,6 +1183,7 @@ int main() {
     test::test_singleton_lock();
     test::test_persistent_hw_probe();
     test::test_pmu_perf_event_telemetry();
+    test::test_pmu_energy_proxy_metrics();
     test::test_pcie_binary_config_decoder();
     test::test_scoped_profiler();
     test::test_oracle_gate_performance_benchmark();

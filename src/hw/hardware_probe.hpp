@@ -181,16 +181,18 @@ private:
     int wifi_temp_fd_{-1};
     int aspm_policy_fd_{-1};
 
-    // 8. Syscall-Level Direct Hardware Telemetry (REF-REQ-015)
+    // 8. Syscall-Level Direct Hardware Telemetry (REF-REQ-015, REF-REQ-024)
     int pmu_instructions_fd_{-1};
     int pmu_cycles_fd_{-1};
     int pmu_llc_misses_fd_{-1};
+    int pmu_branch_misses_fd_{-1};
     int pcie_gpu_config_fd_{-1};
     int pcie_nvme_config_fd_{-1};
     int cpu0_msr_fd_{-1};
 
     // Sub-sampling caches to eliminate ACPI EC & NVMe wake latency
     mutable uint64_t sample_counter_{0};
+    mutable bool cached_ac_online_{false};
     mutable bool cached_kbdlight_initialized_{false};
     mutable uint32_t cached_kbdlight_level_{0};
     mutable bool cached_bluetooth_enabled_{false};

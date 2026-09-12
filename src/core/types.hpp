@@ -102,11 +102,15 @@ struct HardwareSample {
     std::optional<int32_t> wifi_temp_mdeg;
     std::array<char, 32> aspm_policy{};
 
-    // 8. Syscall-Level Direct Hardware Telemetry (REF-REQ-015)
+    // 8. Syscall-Level Direct Hardware Telemetry (REF-REQ-015, REF-REQ-024)
     uint64_t pmu_instructions{0};
     uint64_t pmu_cycles{0};
     double pmu_ipc{0.0};
     uint64_t pmu_llc_misses{0};
+    uint64_t pmu_branch_misses{0};
+    double pmu_energy_proxy_index{0.0};  // EPI: Instructions * IPC + 200 * LLC_Miss + 30 * Branch_Miss (REF-REQ-024)
+    double pmu_estimated_power_mw{0.0};  // P_est: Micro-power estimate in mW (REF-REQ-024)
+    double pmu_energy_waste_ratio{0.0};  // EWR: Percentage of energy wasted on cache/branch stalls (0-100%) (REF-REQ-024)
     std::optional<uint32_t> cpu_core_vid_mv; // Silicon Core Voltage (mV) via MSR / hwmon
     uint8_t pcie_link_speed_gen{0};          // Binary Config Space: PCIe Gen (1-5)
     uint8_t pcie_link_width_lanes{0};        // Binary Config Space: Negotiated Width (1-16)
@@ -363,11 +367,15 @@ struct HardwarePowerBreakdown {
     double wifi_temp_c{0.0};
     std::string aspm_policy;
 
-    // Direct Syscall Hardware Telemetry (REF-REQ-015)
+    // Direct Syscall Hardware Telemetry (REF-REQ-015, REF-REQ-024)
     uint64_t pmu_instructions{0};
     uint64_t pmu_cycles{0};
     double pmu_ipc{0.0};
     uint64_t pmu_llc_misses{0};
+    uint64_t pmu_branch_misses{0};
+    double pmu_energy_proxy_index{0.0};
+    double pmu_estimated_power_mw{0.0};
+    double pmu_energy_waste_ratio{0.0};
     std::optional<uint32_t> cpu_core_vid_mv;
     uint8_t pcie_link_speed_gen{0};
     uint8_t pcie_link_width_lanes{0};
