@@ -1049,23 +1049,65 @@ void test_battery_telemetry_profiling_scopes() {
     auto total_attr_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t_attr1 - t_attr0).count();
     double avg_attr_us_op = (static_cast<double>(total_attr_ns) / static_cast<double>(BENCH_ITERS)) / 1000.0;
 
-    std::cout << " [ORACLE GATE] Battery Telemetry Profiling Benchmark (" << BENCH_ITERS << " iters):\n"
-              << "   * SIMD uevent parse: " << std::fixed << std::setprecision(4) << avg_us_op << " us/op ("
+    // Full-Scope Pipeline Benchmark (Simulating entire battery telemetry + physics pipeline)
+    auto t_full0 = std::chrono::steady_clock::now();
+    uint64_t tsc_full0 = wattcurb::core::hw_isa::read_tsc();
+
+    for (size_t i = 0; i < BENCH_ITERS; ++i) {
+        wattcurb::HardwareSample pipe_sample;
+        pipe_sample.is_ac_online = false;
+        wattcurb::hw::HardwareProbe::parse_battery_uevent_buf(uevent_mock, pipe_sample);
+        pipe_sample.battery_charge_start_threshold = 0;
+        pipe_sample.battery_charge_end_threshold = 80;
+        pipe_sample.battery_charge_behaviour = "auto";
+        pipe_sample.usbc_pd_online = false;
+
+        wattcurb::HardwareSample::PeripheralBattery pb;
+        pb.name = "hid-mouse";
+        pb.capacity_percent = 90;
+        pb.is_charging = false;
+        pipe_sample.peripheral_batteries.push_back(pb);
+
+        auto bd = engine.compute_hardware_power(pipe_sample, pipe_sample, 1.0);
+        (void)bd;
+    }
+
+    auto t_full1 = std::chrono::steady_clock::now();
+    uint64_t tsc_full1 = wattcurb::core::hw_isa::read_tsc();
+
+    auto total_full_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t_full1 - t_full0).count();
+    double avg_full_us_op = (static_cast<double>(total_full_ns) / static_cast<double>(BENCH_ITERS)) / 1000.0;
+    double cycles_full_op = static_cast<double>(tsc_full1 - tsc_full0) / static_cast<double>(BENCH_ITERS);
+
+    std::cout << " [ORACLE GATE] Dense Battery Telemetry Profiling Benchmark (" << BENCH_ITERS << " iters):\n"
+              << "   * SIMD uevent parse      : " << std::fixed << std::setprecision(4) << avg_us_op << " us/op ("
               << std::setprecision(1) << cycles_op << " cycles/op)\n"
-              << "   * Battery physics calc: " << std::setprecision(4) << avg_attr_us_op << " us/op\n";
+              << "   * Battery physics calc   : " << std::setprecision(4) << avg_attr_us_op << " us/op\n"
+              << "   * Full-scope E2E pipeline: " << std::setprecision(4) << avg_full_us_op << " us/op ("
+              << std::setprecision(1) << cycles_full_op << " cycles/op)\n";
 
-    // Oracle Gate Assertion: SIMD parser must complete in < 0.35 us/op (target: sub-0.3 us)
-    assert(avg_us_op < 0.35 && "Battery SIMD uevent parser exceeded Oracle Gate threshold (< 0.35 us/op)!");
-
+    // Oracle Gate Assertions (accounting for ScopedProfiler recording in dev mode)
 #if defined(WATTCURB_DEV_PROFILE)
+    assert(avg_us_op < 0.45 && "Battery SIMD uevent parser exceeded Dev Oracle Gate threshold (< 0.45 us/op)!");
+    assert(avg_attr_us_op < 1.20 && "Battery physics calc exceeded Dev Oracle Gate threshold (< 1.20 us/op)!");
+    assert(avg_full_us_op < 2.50 && "Full-scope battery pipeline exceeded Dev Oracle Gate threshold (< 2.50 us/op)!");
+
     std::ostringstream oss;
     wattcurb::core::ScopedProfilerRegistry::instance().print_summary(oss);
     std::string summary = oss.str();
     assert(summary.find("hw.battery.uevent_simd_parse") != std::string::npos && "SIMD parse scope must be profiled");
     assert(summary.find("attr.battery_physics") != std::string::npos && "Battery physics scope must be profiled");
+    assert(summary.find("attr.battery.system_watts") != std::string::npos && "System watts scope must be profiled");
+    assert(summary.find("attr.battery.wear_and_health") != std::string::npos && "Wear and health scope must be profiled");
+    assert(summary.find("attr.battery.runtime_projection") != std::string::npos && "Runtime projection scope must be profiled");
+    assert(summary.find("attr.battery.passthrough_detect") != std::string::npos && "Pass-through detect scope must be profiled");
+#else
+    assert(avg_us_op < 0.35 && "Battery SIMD uevent parser exceeded Release Oracle Gate threshold (< 0.35 us/op)!");
+    assert(avg_attr_us_op < 0.15 && "Battery physics calc exceeded Release Oracle Gate threshold (< 0.15 us/op)!");
+    assert(avg_full_us_op < 0.60 && "Full-scope battery pipeline exceeded Release Oracle Gate threshold (< 0.60 us/op)!");
 #endif
 
-    std::cout << " [PASS] test_battery_telemetry_profiling_scopes (REF-TEST-009)\n";
+    std::cout << " [PASS] test_battery_telemetry_profiling_scopes (Dense Full-Scope REF-TEST-009)\n";
 }
 
 } // namespace test

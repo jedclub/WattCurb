@@ -21,102 +21,116 @@ HardwarePowerBreakdown AttributionEngine::compute_hardware_power(
     // 1. Battery Gas Gauge, Chemistry, Health & Flow (REF-REQ-010 Sec 2.1, REF-REQ-022, REF-ARCH-012, REF-REQ-023)
     {
         WATTCURB_PROFILE_SCOPE("attr.battery_physics");
-        if (hw2.battery_power_uw.has_value()) {
-            uint64_t p1 = hw1.battery_power_uw.value_or(*hw2.battery_power_uw);
-            uint64_t p2 = *hw2.battery_power_uw;
-            hw.total_system_watts = static_cast<double>(p1 + p2) / 2.0 / 1'000'000.0;
-        } else {
-            hw.total_system_watts = 0.0;
-        }
-
-    if (hw2.battery_energy_full_uwh.has_value() && hw2.battery_energy_full_design_uwh.has_value() &&
-        *hw2.battery_energy_full_design_uwh > 0) {
-        hw.battery_health_percent = (static_cast<double>(*hw2.battery_energy_full_uwh) * 100.0) /
-                                    static_cast<double>(*hw2.battery_energy_full_design_uwh);
-        hw.battery_degradation_percent = std::max(0.0, 100.0 - hw.battery_health_percent);
-        hw.battery_lost_capacity_wh = (*hw2.battery_energy_full_design_uwh >= *hw2.battery_energy_full_uwh) ?
-            (static_cast<double>(*hw2.battery_energy_full_design_uwh - *hw2.battery_energy_full_uwh) / 1'000'000.0) : 0.0;
-        hw.battery_energy_design_wh = static_cast<double>(*hw2.battery_energy_full_design_uwh) / 1'000'000.0;
-        hw.battery_energy_full_wh = static_cast<double>(*hw2.battery_energy_full_uwh) / 1'000'000.0;
-    } else {
-        hw.battery_health_percent = 100.0;
-        hw.battery_degradation_percent = 0.0;
-        hw.battery_lost_capacity_wh = 0.0;
-    }
-
-    if (hw2.battery_energy_now_uwh.has_value()) {
-        hw.battery_energy_now_wh = static_cast<double>(*hw2.battery_energy_now_uwh) / 1'000'000.0;
-    }
-    if (hw2.battery_voltage_uv.has_value()) {
-        hw.battery_voltage_now_v = static_cast<double>(*hw2.battery_voltage_uv) / 1'000'000.0;
-    }
-    if (hw2.battery_voltage_min_design_uv.has_value()) {
-        hw.battery_voltage_min_design_v = static_cast<double>(*hw2.battery_voltage_min_design_uv) / 1'000'000.0;
-    }
-    if (hw2.battery_current_ua.has_value()) {
-        hw.battery_current_now_a = static_cast<double>(*hw2.battery_current_ua) / 1'000'000.0;
-    }
-
-    hw.battery_cycle_count = hw2.battery_cycle_count.value_or(0);
-    hw.battery_capacity_percent = hw2.battery_capacity_percent.value_or(0);
-    hw.battery_technology = hw2.battery_technology;
-    hw.battery_capacity_level = hw2.battery_capacity_level;
-    hw.battery_model_name = hw2.battery_model_name;
-    hw.battery_manufacturer = hw2.battery_manufacturer;
-    hw.battery_serial_number = hw2.battery_serial_number;
-    hw.battery_charge_start_threshold = hw2.battery_charge_start_threshold;
-    hw.battery_charge_end_threshold = hw2.battery_charge_end_threshold;
-    hw.battery_charge_behaviour = hw2.battery_charge_behaviour;
-
-    if (hw.battery_charge_end_threshold.has_value() && *hw.battery_charge_end_threshold <= 85) {
-        hw.is_conservation_mode_active = true;
-    }
-
-    // Time-to-Empty (Discharge) & Time-to-Full / Time-to-Threshold (Charge)
-    if (hw2.is_discharging) {
-        if (hw.total_system_watts > 0.1 && hw.battery_energy_now_wh > 0.0) {
-            hw.battery_remaining_hours_to_empty = hw.battery_energy_now_wh / hw.total_system_watts;
-            hw.battery_remaining_hours = hw.battery_remaining_hours_to_empty;
-        }
-    } else {
-        // Charging / AC Connected
-        double charge_inflow_w = 0.0;
-        if (hw2.battery_power_uw.has_value() && *hw2.battery_power_uw > 100'000) {
-            charge_inflow_w = static_cast<double>(*hw2.battery_power_uw) / 1'000'000.0;
-        } else if (hw2.battery_current_ua.has_value() && *hw2.battery_current_ua != 0 && hw2.battery_voltage_uv.has_value()) {
-            int64_t cur = *hw2.battery_current_ua < 0 ? -*hw2.battery_current_ua : *hw2.battery_current_ua;
-            charge_inflow_w = (static_cast<double>(cur) * static_cast<double>(*hw2.battery_voltage_uv)) / 1e12;
-        }
-
-        if (charge_inflow_w > 0.5 && hw.battery_energy_full_wh > 0.0) {
-            double target_thresh_pct = hw.battery_charge_end_threshold.has_value() ?
-                static_cast<double>(*hw.battery_charge_end_threshold) : 100.0;
-            double target_thresh_wh = hw.battery_energy_full_wh * (target_thresh_pct / 100.0);
-            if (target_thresh_wh > hw.battery_energy_now_wh) {
-                hw.battery_remaining_hours_to_threshold = (target_thresh_wh - hw.battery_energy_now_wh) / charge_inflow_w;
-            }
-            if (hw.battery_energy_full_wh > hw.battery_energy_now_wh) {
-                hw.battery_remaining_hours_to_full = (hw.battery_energy_full_wh - hw.battery_energy_now_wh) / charge_inflow_w;
+        {
+            WATTCURB_PROFILE_SCOPE("attr.battery.system_watts");
+            if (hw2.battery_power_uw.has_value()) {
+                uint64_t p1 = hw1.battery_power_uw.value_or(*hw2.battery_power_uw);
+                uint64_t p2 = *hw2.battery_power_uw;
+                hw.total_system_watts = static_cast<double>(p1 + p2) / 2.0 / 1'000'000.0;
+            } else {
+                hw.total_system_watts = 0.0;
             }
         }
 
-        // AC Hardware Direct Pass-Through Detection:
-        // When plugged into AC and battery is near full/threshold with cell draw < 0.2W
-        if (hw.is_ac_online && !hw.is_battery_discharging) {
-            uint32_t thresh = hw.battery_charge_end_threshold.value_or(100);
-            if (hw.battery_capacity_percent >= thresh || hw.total_system_watts < 0.2) {
-                hw.is_ac_passthrough = true;
+        {
+            WATTCURB_PROFILE_SCOPE("attr.battery.wear_and_health");
+            if (hw2.battery_energy_full_uwh.has_value() && hw2.battery_energy_full_design_uwh.has_value() &&
+                *hw2.battery_energy_full_design_uwh > 0) {
+                hw.battery_health_percent = (static_cast<double>(*hw2.battery_energy_full_uwh) * 100.0) /
+                                            static_cast<double>(*hw2.battery_energy_full_design_uwh);
+                hw.battery_degradation_percent = std::max(0.0, 100.0 - hw.battery_health_percent);
+                hw.battery_lost_capacity_wh = (*hw2.battery_energy_full_design_uwh >= *hw2.battery_energy_full_uwh) ?
+                    (static_cast<double>(*hw2.battery_energy_full_design_uwh - *hw2.battery_energy_full_uwh) / 1'000'000.0) : 0.0;
+                hw.battery_energy_design_wh = static_cast<double>(*hw2.battery_energy_full_design_uwh) / 1'000'000.0;
+                hw.battery_energy_full_wh = static_cast<double>(*hw2.battery_energy_full_uwh) / 1'000'000.0;
+            } else {
+                hw.battery_health_percent = 100.0;
+                hw.battery_degradation_percent = 0.0;
+                hw.battery_lost_capacity_wh = 0.0;
+            }
+
+            if (hw2.battery_energy_now_uwh.has_value()) {
+                hw.battery_energy_now_wh = static_cast<double>(*hw2.battery_energy_now_uwh) / 1'000'000.0;
+            }
+            if (hw2.battery_voltage_uv.has_value()) {
+                hw.battery_voltage_now_v = static_cast<double>(*hw2.battery_voltage_uv) / 1'000'000.0;
+            }
+            if (hw2.battery_voltage_min_design_uv.has_value()) {
+                hw.battery_voltage_min_design_v = static_cast<double>(*hw2.battery_voltage_min_design_uv) / 1'000'000.0;
+            }
+            if (hw2.battery_current_ua.has_value()) {
+                hw.battery_current_now_a = static_cast<double>(*hw2.battery_current_ua) / 1'000'000.0;
+            }
+
+            hw.battery_cycle_count = hw2.battery_cycle_count.value_or(0);
+            hw.battery_capacity_percent = hw2.battery_capacity_percent.value_or(0);
+            hw.battery_technology = hw2.battery_technology;
+            hw.battery_capacity_level = hw2.battery_capacity_level;
+            hw.battery_model_name = hw2.battery_model_name;
+            hw.battery_manufacturer = hw2.battery_manufacturer;
+            hw.battery_serial_number = hw2.battery_serial_number;
+            hw.battery_charge_start_threshold = hw2.battery_charge_start_threshold;
+            hw.battery_charge_end_threshold = hw2.battery_charge_end_threshold;
+            hw.battery_charge_behaviour = hw2.battery_charge_behaviour;
+
+            if (hw.battery_charge_end_threshold.has_value() && *hw.battery_charge_end_threshold <= 85) {
+                hw.is_conservation_mode_active = true;
             }
         }
-    }
 
-    if (hw2.usbc_pd_voltage_uv.has_value() && hw2.usbc_pd_current_ua.has_value()) {
-        hw.usbc_input_watts = (static_cast<double>(*hw2.usbc_pd_voltage_uv) *
-                               static_cast<double>(*hw2.usbc_pd_current_ua)) / 1e12;
-    }
-    hw.usbc_online = hw2.usbc_pd_online;
-    hw.usbc_pd_type = hw2.usbc_pd_type;
-    hw.peripheral_batteries = hw2.peripheral_batteries;
+        // Time-to-Empty (Discharge) & Time-to-Full / Time-to-Threshold (Charge)
+        {
+            WATTCURB_PROFILE_SCOPE("attr.battery.runtime_projection");
+            if (hw2.is_discharging) {
+                if (hw.total_system_watts > 0.1 && hw.battery_energy_now_wh > 0.0) {
+                    hw.battery_remaining_hours_to_empty = hw.battery_energy_now_wh / hw.total_system_watts;
+                    hw.battery_remaining_hours = hw.battery_remaining_hours_to_empty;
+                }
+            } else {
+                // Charging / AC Connected
+                double charge_inflow_w = 0.0;
+                if (hw2.battery_power_uw.has_value() && *hw2.battery_power_uw > 100'000) {
+                    charge_inflow_w = static_cast<double>(*hw2.battery_power_uw) / 1'000'000.0;
+                } else if (hw2.battery_current_ua.has_value() && *hw2.battery_current_ua != 0 && hw2.battery_voltage_uv.has_value()) {
+                    int64_t cur = *hw2.battery_current_ua < 0 ? -*hw2.battery_current_ua : *hw2.battery_current_ua;
+                    charge_inflow_w = (static_cast<double>(cur) * static_cast<double>(*hw2.battery_voltage_uv)) / 1e12;
+                }
+
+                if (charge_inflow_w > 0.5 && hw.battery_energy_full_wh > 0.0) {
+                    double target_thresh_pct = hw.battery_charge_end_threshold.has_value() ?
+                        static_cast<double>(*hw.battery_charge_end_threshold) : 100.0;
+                    double target_thresh_wh = hw.battery_energy_full_wh * (target_thresh_pct / 100.0);
+                    if (target_thresh_wh > hw.battery_energy_now_wh) {
+                        hw.battery_remaining_hours_to_threshold = (target_thresh_wh - hw.battery_energy_now_wh) / charge_inflow_w;
+                    }
+                    if (hw.battery_energy_full_wh > hw.battery_energy_now_wh) {
+                        hw.battery_remaining_hours_to_full = (hw.battery_energy_full_wh - hw.battery_energy_now_wh) / charge_inflow_w;
+                    }
+                }
+            }
+        }
+
+        // AC Hardware Direct Pass-Through Detection
+        {
+            WATTCURB_PROFILE_SCOPE("attr.battery.passthrough_detect");
+            if (hw.is_ac_online && !hw.is_battery_discharging) {
+                uint32_t thresh = hw.battery_charge_end_threshold.value_or(100);
+                if (hw.battery_capacity_percent >= thresh || hw.total_system_watts < 0.2) {
+                    hw.is_ac_passthrough = true;
+                }
+            }
+        }
+
+        {
+            WATTCURB_PROFILE_SCOPE("attr.battery.usbc_flow");
+            if (hw2.usbc_pd_voltage_uv.has_value() && hw2.usbc_pd_current_ua.has_value()) {
+                hw.usbc_input_watts = (static_cast<double>(*hw2.usbc_pd_voltage_uv) *
+                                       static_cast<double>(*hw2.usbc_pd_current_ua)) / 1e12;
+            }
+            hw.usbc_online = hw2.usbc_pd_online;
+            hw.usbc_pd_type = hw2.usbc_pd_type;
+            hw.peripheral_batteries = hw2.peripheral_batteries;
+        }
     }
 
     // 2. GPU Subsystem Telemetry & PPT (REF-REQ-010 Sec 2.3)

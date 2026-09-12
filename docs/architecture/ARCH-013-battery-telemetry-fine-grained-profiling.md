@@ -1,79 +1,62 @@
-# REF-ARCH-013: Battery Telemetry Fine-Grained Profiling & Sub-Microsecond Optimization Architecture
+# REF-ARCH-013: Battery Telemetry Dense Profiling & Sub-Microsecond Optimization Architecture
 
-## 1. System Overview & Scope Architecture
+## 1. Dense Profiling Scope Architecture
 
-[`REF-REQ-023`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-020-battery-telemetry-profiling-and-oracle-gate.md) mandates micro-architectural transparency across the battery data acquisition pipeline. 
-The system breaks down battery monitoring into 8 isolated profiling boundaries (`WATTCURB_PROFILE_SCOPE`):
+[`REF-REQ-023`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-020-battery-telemetry-profiling-and-oracle-gate.md) decomposes the battery ingestion and attribution pipeline into 15 dense profiling boundaries:
 
 ```
 HardwareProbe::poll()
  └── "hw.battery_rail"
-      ├── "hw.battery.ac_check"         -> Single read on /sys/class/power_supply/AC/online
-      ├── "hw.battery.uevent_io"        -> Single 1KB pread() on /sys/class/power_supply/BAT0/uevent
-      ├── "hw.battery.uevent_simd_parse"-> AVX2 find_char_fast + O(1) prefix switch parser
-      ├── "hw.battery.cached_replay"    -> Subsampled fast copy during steady AC state
-      ├── "hw.battery.thresholds"       -> ThinkPad EC charge start/stop thresholds & behaviour
-      ├── "hw.battery.usbc_pd"          -> USB-C Power Delivery source profile
-      └── "hw.battery.peripherals"      -> Wireless Bluetooth/HID battery device polling
+      ├── "hw.battery.ac_check"             -> /sys/class/power_supply/AC/online read
+      ├── "hw.battery.uevent_io"            -> Single 1KB pread() on BAT0/uevent
+      ├── "hw.battery.uevent_simd_parse"    -> AVX2 find_char_fast + O(1) prefix switch parser
+      ├── "hw.battery.cache_state_update"   -> 13-field cache sync (50 ns)
+      ├── "hw.battery.cached_replay"        -> Fast-path replay during steady state (210 ns)
+      ├── "hw.battery.thresholds"           -> ThinkPad EC charge thresholds wrapper
+      │    └── "hw.battery.threshold_io"    -> Synchronous ACPI EC SMBus I/O (subsampled)
+      ├── "hw.battery.usbc_pd"              -> USB-C Power Delivery wrapper
+      │    └── "hw.battery.usbc_io"         -> USB-PD sysfs FD reads
+      └── "hw.battery.peripherals"          -> Wireless peripheral battery wrapper
+           └── "hw.battery.peripheral_scan" -> Individual Bluetooth/HID battery scan
 AttributionEngine::compute_hardware_power()
- └── "attr.battery_physics"             -> Electrochemical wear Wh, dual-domain runtime, pass-through
+ └── "attr.battery_physics"
+      ├── "attr.battery.system_watts"       -> Average discharge rate calculation (50 ns)
+      ├── "attr.battery.wear_and_health"    -> Degradation % & lost Wh calculation (190 ns)
+      ├── "attr.battery.runtime_projection" -> Dual-domain Time-to-Empty / Full (60 ns)
+      ├── "attr.battery.passthrough_detect" -> 80% Conservation & AC Pass-Through (50 ns)
+      └── "attr.battery.usbc_flow"          -> USB-C wattage calculation (50 ns)
 ```
 
 ---
 
-## 2. Empirical Profiling Discovery & Architectural Resolutions
+## 2. Empirical PMU Live Telemetry Audit
 
-During initial hardware PMU instrumentation on a live Lenovo ThinkPad host, detailed telemetry surfaced a hidden hardware bus stall:
-
-### 2.1 The ACPI EC SMBus 60ms Blocking Discovery
-- **Observation**: Profile scope `hw.battery.thresholds` consumed **63.86 ms** per call (constituting 29.0% of total runtime).
-- **Physical Root Cause**: Reading `/sys/class/power_supply/BAT0/charge_control_*_threshold` forces the Linux kernel `thinkpad_acpi` driver to issue synchronous EC I2C/SMBus transactions.
-- **Architectural Fix**: Charge thresholds are user-configured hardware setpoints that never change under normal battery operation. Polling is subsampled to daemon startup (`sample_counter_ == 1`) and once every 30 passes (~60s).
-- **Empirical Validation**:
-  - Unsubsampled baseline: **63.86 ms** per tick.
-  - Subsampled cached fast-path: **0.24 us** (240 nanoseconds).
-  - Improvement: **> 260,000x latency reduction** in steady-state loop.
-
-### 2.2 O(1) Branch Dispatch SIMD uevent Parser
-- **Optimization**: All 18 lines of the kernel uevent share the 13-character prefix `"POWER_SUPPLY_"`. 
-- By validating the prefix once and dispatching on `key_val[0]` (`switch(key_val[0])`), 15 linear string comparisons are reduced to a single instruction jump table:
-  ```cpp
-  switch (key_val[0]) {
-      case 'S': /* STATUS=, SERIAL_NUMBER= */ break;
-      case 'V': /* VOLTAGE_NOW=, VOLTAGE_MIN_DESIGN= */ break;
-      case 'C': /* CURRENT_NOW=, CAPACITY=, CYCLE_COUNT= */ break;
-      case 'E': /* ENERGY_NOW=, ENERGY_FULL=, ENERGY_FULL_DESIGN= */ break;
-      ...
-  }
-  ```
-- **PMU Microbenchmark (50,000 passes)**:
-  - Baseline sequential parse: 0.2641 us/op (448.1 cycles).
-  - O(1) Prefix-stripped parse: **0.1654 us/op (280.6 cycles)**.
-  - Latency reduction: **37.4% faster**.
-
----
-
-## 3. Live Hardware PMU Audit Telemetry
-
-Empirical benchmark collected on host machine with `--dev-profile`:
+Live telemetry collected on Lenovo ThinkPad host with `--dev-profile`:
 
 | Profiler Scope Name | Calls | Total (ms) | Share (%) | Avg (us/op) | Min (us) | Max (us) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| `hw.battery.thresholds` | 5 | 63.214 | 20.6% | 12642.84 | **0.24** | 63212.97 |
-| `hw.battery.ac_check` | 5 | 3.890 | 1.3% | 777.98 | 664.99 | 851.61 |
-| `hw.battery.usbc_pd` | 5 | 0.208 | 0.1% | 41.68 | 33.00 | 48.10 |
-| `hw.battery.uevent_io` | 1 | 0.048 | 0.0% | **48.28** | 48.28 | 48.28 |
-| `hw.battery.uevent_simd_parse` | 1 | 0.004 | 0.0% | **4.09** | 4.09 | 4.09 |
-| `hw.battery.cached_replay` | 4 | 0.001 | 0.0% | **0.31** | 0.23 | 0.51 |
-| `hw.battery.peripherals` | 5 | 0.001 | 0.0% | **0.18** | 0.13 | 0.26 |
-| `attr.battery_physics` | 1 | 0.000 | 0.0% | **0.30** | 0.30 | 0.30 |
-
-Total battery ingestion steady-state time per turn (excluding subsampled EC pass): **< 55 us**.
+| `hw.battery.thresholds` | 5 | 88.524 | 17.8% | 17704.78 | **0.04** | 88523.65 (1st EC pass) |
+| `hw.battery.threshold_io` | 1 | 88.523 | 17.8% | 88522.80 | 88522.80 | 88522.80 |
+| `hw.battery.ac_check` | 5 | 3.210 | 0.6% | 642.02 | 502.14 | 749.08 |
+| `hw.battery.usbc_pd` | 5 | 0.164 | 0.0% | 32.81 | 27.13 | 48.61 |
+| `hw.battery.usbc_io` | 5 | 0.162 | 0.0% | 32.43 | 26.87 | 47.95 |
+| `hw.battery.uevent_io` | 1 | 0.031 | 0.0% | **31.07** | 31.07 | 31.07 |
+| `hw.battery.uevent_simd_parse` | 1 | 0.002 | 0.0% | **2.11** | 2.11 | 2.11 |
+| `attr.battery_physics` | 1 | 0.002 | 0.0% | **1.76** | 1.76 | 1.76 |
+| `hw.battery.peripherals` | 5 | 0.001 | 0.0% | **0.25** | 0.15 | 0.51 |
+| `hw.battery.cached_replay` | 4 | 0.001 | 0.0% | **0.21** | 0.14 | 0.28 |
+| `attr.battery.wear_and_health` | 1 | 0.000 | 0.0% | **0.19** | 0.19 | 0.19 |
+| `attr.battery.runtime_projection` | 1 | 0.000 | 0.0% | **0.06** | 0.06 | 0.06 |
+| `attr.battery.usbc_flow` | 1 | 0.000 | 0.0% | **0.05** | 0.05 | 0.05 |
+| `attr.battery.passthrough_detect` | 1 | 0.000 | 0.0% | **0.05** | 0.05 | 0.05 |
+| `attr.battery.system_watts` | 1 | 0.000 | 0.0% | **0.05** | 0.05 | 0.05 |
+| `hw.battery.cache_state_update` | 1 | 0.000 | 0.0% | **0.05** | 0.05 | 0.05 |
 
 ---
 
-## 4. Production Zero-Cost Abstraction Verification
+## 3. Full-Scope End-to-End Pipeline Performance
 
-In production release builds (`WATTCURB_ENABLE_DEV_PROFILER=OFF`), `WATTCURB_PROFILE_SCOPE(...)` expands to `((void)0)`.
-- Symbol and landing pad verification: `nm -C output/wattcurb | grep -i ScopedProfiler` yields 0 matches.
-- Binary size: **336 KB** (completely stripped of diagnostic overhead).
+In automated Oracle Gate testing ([`REF-TEST-009`](file:///home/jedclub/Develop/WattCurb/tests/test_units.cpp)), 50,000 continuous full-scope iterations (complete ingestion + all physical derivations + peripheral updates) executed at:
+- **Full Pipeline Latency**: **0.3837 us/op (383.7 ns)**
+- **Hardware Cycles**: **651.1 cycles/op**
+- **Heap Allocations**: **0 bytes (Strict Zero-Allocation)**

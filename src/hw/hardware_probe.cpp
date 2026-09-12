@@ -159,6 +159,7 @@ void HardwareProbe::parse_battery_uevent_buf(std::string_view content, HardwareS
     }
 
     if (!sample.battery_power_uw.has_value() && sample.battery_voltage_uv.has_value() && sample.battery_current_ua.has_value()) {
+        WATTCURB_PROFILE_SCOPE("hw.battery.uevent_power_derive");
         int64_t abs_curr = *sample.battery_current_ua < 0 ? -*sample.battery_current_ua : *sample.battery_current_ua;
         sample.battery_power_uw = static_cast<uint64_t>((*sample.battery_voltage_uv * static_cast<uint64_t>(abs_curr)) / 1'000'000ULL);
     }
@@ -863,23 +864,26 @@ HardwareSample HardwareProbe::capture_sample() const {
                 if (n > 0) {
                     uevent_buf[n] = '\0';
                     parse_battery_uevent_buf(std::string_view(uevent_buf, static_cast<size_t>(n)), sample);
-                    cached_is_discharging_ = sample.is_discharging;
-                    cached_bat_power_uw_ = sample.battery_power_uw;
-                    cached_bat_current_ua_ = sample.battery_current_ua;
-                    cached_bat_voltage_ = sample.battery_voltage_uv;
-                    cached_bat_energy_now_ = sample.battery_energy_now_uwh;
-                    cached_bat_capacity_percent_ = sample.battery_capacity_percent;
-                    cached_energy_full_ = sample.battery_energy_full_uwh;
-                    cached_energy_full_design_ = sample.battery_energy_full_design_uwh;
-                    cached_cycle_count_ = sample.battery_cycle_count;
+                    {
+                        WATTCURB_PROFILE_SCOPE("hw.battery.cache_state_update");
+                        cached_is_discharging_ = sample.is_discharging;
+                        cached_bat_power_uw_ = sample.battery_power_uw;
+                        cached_bat_current_ua_ = sample.battery_current_ua;
+                        cached_bat_voltage_ = sample.battery_voltage_uv;
+                        cached_bat_energy_now_ = sample.battery_energy_now_uwh;
+                        cached_bat_capacity_percent_ = sample.battery_capacity_percent;
+                        cached_energy_full_ = sample.battery_energy_full_uwh;
+                        cached_energy_full_design_ = sample.battery_energy_full_design_uwh;
+                        cached_cycle_count_ = sample.battery_cycle_count;
 
-                    cached_voltage_min_design_ = sample.battery_voltage_min_design_uv;
-                    cached_bat_capacity_level_ = sample.battery_capacity_level;
-                    cached_bat_technology_ = sample.battery_technology;
-                    cached_bat_model_name_ = sample.battery_model_name;
-                    cached_bat_manufacturer_ = sample.battery_manufacturer;
-                    cached_bat_serial_number_ = sample.battery_serial_number;
-                    cached_battery_static_initialized_ = true;
+                        cached_voltage_min_design_ = sample.battery_voltage_min_design_uv;
+                        cached_bat_capacity_level_ = sample.battery_capacity_level;
+                        cached_bat_technology_ = sample.battery_technology;
+                        cached_bat_model_name_ = sample.battery_model_name;
+                        cached_bat_manufacturer_ = sample.battery_manufacturer;
+                        cached_bat_serial_number_ = sample.battery_serial_number;
+                        cached_battery_static_initialized_ = true;
+                    }
                 }
             } else {
                 WATTCURB_PROFILE_SCOPE("hw.battery.cached_replay");
@@ -964,6 +968,7 @@ HardwareSample HardwareProbe::capture_sample() const {
             WATTCURB_PROFILE_SCOPE("hw.battery.thresholds");
             bool poll_thresholds = (sample_counter_ % 30 == 1) || !cached_battery_static_initialized_;
             if (poll_thresholds) {
+                WATTCURB_PROFILE_SCOPE("hw.battery.threshold_io");
                 if (battery_threshold_start_fd_ >= 0) {
                     sample.battery_charge_start_threshold = read_uint32_fd(battery_threshold_start_fd_);
                     cached_bat_charge_start_threshold_ = sample.battery_charge_start_threshold;
@@ -996,6 +1001,7 @@ HardwareSample HardwareProbe::capture_sample() const {
         {
             WATTCURB_PROFILE_SCOPE("hw.battery.usbc_pd");
             if (usbc_online_fd_ >= 0) {
+                WATTCURB_PROFILE_SCOPE("hw.battery.usbc_io");
                 auto u_on = read_uint32_fd(usbc_online_fd_);
                 sample.usbc_pd_online = (u_on.value_or(0) == 1);
                 if (usbc_voltage_fd_ >= 0) sample.usbc_pd_voltage_uv = read_uint64_fd(usbc_voltage_fd_);
@@ -1018,6 +1024,7 @@ HardwareSample HardwareProbe::capture_sample() const {
         {
             WATTCURB_PROFILE_SCOPE("hw.battery.peripherals");
             for (size_t i = 0; i < peripheral_probe_count_; ++i) {
+                WATTCURB_PROFILE_SCOPE("hw.battery.peripheral_scan");
                 const auto& p = peripheral_probes_[i];
                 if (p.capacity_fd >= 0) {
                     auto cap = read_uint32_fd(p.capacity_fd);
