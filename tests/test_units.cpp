@@ -872,6 +872,121 @@ void test_memory_sequence_probe_and_cache_chunking() {
     std::cout << " [PASS] test_memory_sequence_probe_and_cache_chunking (64B HotChunk, 32B CompactHot, 0-crossing Hot loop)\n";
 }
 
+void test_deep_battery_telemetry() {
+    using namespace wattcurb;
+
+    // 1. Single-read BAT0/uevent parser test (REF-REQ-022, REF-RES-007, REF-TEST-008)
+    std::string_view mock_uevent =
+        "DEVTYPE=power_supply\n"
+        "POWER_SUPPLY_NAME=BAT0\n"
+        "POWER_SUPPLY_TYPE=Battery\n"
+        "POWER_SUPPLY_STATUS=Discharging\n"
+        "POWER_SUPPLY_PRESENT=1\n"
+        "POWER_SUPPLY_TECHNOLOGY=Li-poly\n"
+        "POWER_SUPPLY_CYCLE_COUNT=95\n"
+        "POWER_SUPPLY_VOLTAGE_MIN_DESIGN=11100000\n"
+        "POWER_SUPPLY_VOLTAGE_NOW=11206000\n"
+        "POWER_SUPPLY_POWER_NOW=19195000\n"
+        "POWER_SUPPLY_ENERGY_FULL_DESIGN=45280000\n"
+        "POWER_SUPPLY_ENERGY_FULL=42650000\n"
+        "POWER_SUPPLY_ENERGY_NOW=32940000\n"
+        "POWER_SUPPLY_CAPACITY=77\n"
+        "POWER_SUPPLY_CAPACITY_LEVEL=Normal\n"
+        "POWER_SUPPLY_MODEL_NAME=LNV-5B10W13895\n"
+        "POWER_SUPPLY_MANUFACTURER=SMP\n"
+        "POWER_SUPPLY_SERIAL_NUMBER= 3502\n";
+
+    HardwareSample sample;
+    hw::HardwareProbe::parse_battery_uevent_buf(mock_uevent, sample);
+
+    assert(sample.is_discharging == true);
+    assert(sample.battery_power_uw.value_or(0) == 19195000);
+    assert(sample.battery_voltage_uv.value_or(0) == 11206000);
+    assert(sample.battery_voltage_min_design_uv.value_or(0) == 11100000);
+    assert(sample.battery_energy_now_uwh.value_or(0) == 32940000);
+    assert(sample.battery_energy_full_uwh.value_or(0) == 42650000);
+    assert(sample.battery_energy_full_design_uwh.value_or(0) == 45280000);
+    assert(sample.battery_cycle_count.value_or(0) == 95);
+    assert(sample.battery_capacity_percent.value_or(0) == 77);
+    assert(sample.battery_capacity_level == "Normal");
+    assert(sample.battery_technology == "Li-poly");
+    assert(sample.battery_model_name == "LNV-5B10W13895");
+    assert(sample.battery_manufacturer == "SMP");
+    assert(sample.battery_serial_number == "3502"); // Verify leading whitespace trimmed
+
+    // 2. ThinkPad Thresholds & Attribution Engine Health/Degradation computation
+    sample.battery_charge_start_threshold = 0;
+    sample.battery_charge_end_threshold = 80;
+    sample.battery_charge_behaviour = "[auto] inhibit-charge force-discharge";
+    sample.usbc_pd_type = "[C] PD PD_PPS";
+    sample.usbc_pd_voltage_uv = 20000000;
+    sample.usbc_pd_current_ua = 3250000;
+    sample.usbc_pd_online = true;
+
+    HardwareSample::PeripheralBattery mouse;
+    mouse.name = "hid-mouse-battery";
+    mouse.capacity_percent = 88;
+    mouse.is_charging = false;
+    sample.peripheral_batteries.push_back(mouse);
+
+    policy::AttributionEngine engine;
+    auto hw_breakdown = engine.compute_hardware_power(sample, sample, 1.0);
+
+    // Verify Degradation %, Lost Capacity Wh, Voltage conversions
+    assert(hw_breakdown.battery_health_percent > 94.0 && hw_breakdown.battery_health_percent < 94.5);
+    assert(hw_breakdown.battery_degradation_percent > 5.5 && hw_breakdown.battery_degradation_percent < 6.0);
+    assert(hw_breakdown.battery_lost_capacity_wh > 2.6 && hw_breakdown.battery_lost_capacity_wh < 2.7);
+    assert(hw_breakdown.battery_energy_now_wh > 32.9 && hw_breakdown.battery_energy_now_wh < 33.0);
+    assert(hw_breakdown.battery_energy_full_wh > 42.6 && hw_breakdown.battery_energy_full_wh < 42.7);
+    assert(hw_breakdown.battery_voltage_now_v > 11.2 && hw_breakdown.battery_voltage_now_v < 11.3);
+    assert(hw_breakdown.battery_voltage_min_design_v > 11.0 && hw_breakdown.battery_voltage_min_design_v < 11.2);
+    assert(hw_breakdown.is_conservation_mode_active == true); // 80% <= 85%
+    assert(hw_breakdown.battery_technology == "Li-poly");
+    assert(hw_breakdown.battery_model_name == "LNV-5B10W13895");
+    assert(hw_breakdown.battery_manufacturer == "SMP");
+    assert(hw_breakdown.battery_serial_number == "3502");
+    assert(hw_breakdown.peripheral_batteries.size() == 1);
+    assert(hw_breakdown.peripheral_batteries[0].name == "hid-mouse-battery");
+    assert(hw_breakdown.peripheral_batteries[0].capacity_percent == 88);
+
+    // 3. Test AC Direct Pass-Through Simulation
+    HardwareSample ac_sample = sample;
+    ac_sample.is_discharging = false;
+    ac_sample.is_ac_online = true;
+    ac_sample.battery_power_uw = 50000; // 0.05W idle leakage
+    ac_sample.battery_capacity_percent = 80;
+    auto ac_breakdown = engine.compute_hardware_power(ac_sample, ac_sample, 1.0);
+    assert(ac_breakdown.is_ac_passthrough == true && "AC with full threshold and negligible cell draw must report pass-through!");
+
+    // 4. Report Rendering Test
+    AnalysisReportData report;
+    report.sample_duration = std::chrono::milliseconds(1000);
+    report.hardware = hw_breakdown;
+
+    std::ostringstream ss_briefing;
+    report::ReportGenerator::render_executive_briefing(report, ss_briefing);
+    std::string text = ss_briefing.str();
+    assert(text.find("SMP LNV-5B10W13895") != std::string::npos);
+    assert(text.find("S/N: 3502") != std::string::npos);
+    assert(text.find("Li-poly") != std::string::npos);
+    assert(text.find("Design Nominal: 11.10 V") != std::string::npos);
+    assert(text.find("CONSERVATION ACTIVE") != std::string::npos);
+    assert(text.find("hid-mouse-battery") != std::string::npos);
+    assert(text.find("88%") != std::string::npos);
+
+    std::ostringstream ss_json;
+    report::ReportGenerator::render_json(report, ss_json);
+    std::string json = ss_json.str();
+    assert(json.find("\"battery_degradation_percent\":") != std::string::npos);
+    assert(json.find("\"battery_model_name\": \"LNV-5B10W13895\"") != std::string::npos);
+    assert(json.find("\"battery_manufacturer\": \"SMP\"") != std::string::npos);
+    assert(json.find("\"battery_serial_number\": \"3502\"") != std::string::npos);
+    assert(json.find("\"is_conservation_mode_active\": true") != std::string::npos);
+    assert(json.find("\"hid-mouse-battery\"") != std::string::npos);
+
+    std::cout << " [PASS] test_deep_battery_telemetry (ThinkPad BAT0 uevent, Degradation, Thresholds & Peripherals verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -882,6 +997,7 @@ int main() {
     test::test_simd_scanner();
     test::test_custom_containers();
     test::test_memory_sequence_probe_and_cache_chunking();
+    test::test_deep_battery_telemetry();
     test::test_process_classifier();
     test::test_mitigation_engine();
     test::test_modular_battery_features();

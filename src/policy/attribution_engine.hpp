@@ -33,7 +33,7 @@ public:
     ) const;
 
 
-private:
+    // Implements REF-REQ-001, REF-REQ-010, REF-REQ-022
     [[nodiscard]] HardwarePowerBreakdown compute_hardware_power(
         const HardwareSample& hw1,
         const HardwareSample& hw2,

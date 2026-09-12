@@ -15,9 +15,10 @@ namespace wattcurb {
 struct HardwareSample {
     std::chrono::steady_clock::time_point timestamp{};
 
-    // 1. Power Supply & Battery Gas Gauge (REF-REQ-010 Sec 2.1)
+    // 1. Power Supply & Battery Gas Gauge (REF-REQ-010 Sec 2.1, REF-REQ-022)
     std::optional<uint64_t> battery_power_uw;
     std::optional<uint64_t> battery_voltage_uv;
+    std::optional<uint64_t> battery_voltage_min_design_uv;
     std::optional<int64_t> battery_current_ua;
     std::optional<uint64_t> battery_energy_now_uwh;
     std::optional<uint64_t> battery_energy_full_uwh;
@@ -27,10 +28,31 @@ struct HardwareSample {
     bool is_discharging{false};
     bool is_ac_online{false};
 
-    // USB-C Power Delivery Input
+    // Deep Battery Chemistry & ThinkPad Hardware Thresholds (REF-REQ-022)
+    core::FixedString<16> battery_capacity_level{};
+    core::FixedString<16> battery_technology{};
+    core::FixedString<32> battery_model_name{};
+    core::FixedString<24> battery_manufacturer{};
+    core::FixedString<24> battery_serial_number{};
+    std::optional<uint32_t> battery_charge_start_threshold;
+    std::optional<uint32_t> battery_charge_end_threshold;
+    core::FixedString<32> battery_charge_behaviour{};
+
+    // USB-C Power Delivery Input & Type
     std::optional<uint64_t> usbc_pd_voltage_uv;
     std::optional<uint64_t> usbc_pd_current_ua;
+    std::optional<uint64_t> usbc_pd_voltage_max_uv;
+    std::optional<uint64_t> usbc_pd_current_max_ua;
+    core::FixedString<32> usbc_pd_type{};
     bool usbc_pd_online{false};
+
+    // Connected Peripheral Batteries (Bluetooth/HID/Stylus) (REF-REQ-022)
+    struct PeripheralBattery {
+        core::FixedString<32> name{};
+        uint32_t capacity_percent{0};
+        bool is_charging{false};
+    };
+    core::FixedVector<PeripheralBattery, 4> peripheral_batteries{};
 
     // 2. CPU & Platform Subsystem (REF-REQ-010 Sec 2.2)
     std::optional<uint64_t> rapl_package_uj;
@@ -266,13 +288,42 @@ struct HardwarePowerBreakdown {
     bool is_ac_online{false};
     bool has_direct_rapl{false};
 
-    // Battery Health & Charging
+    // Battery Health, Chemistry & Degradation (REF-REQ-022)
     double battery_health_percent{0.0};
-    double battery_remaining_hours{0.0};
+    double battery_degradation_percent{0.0};
+    double battery_lost_capacity_wh{0.0};
+    double battery_energy_now_wh{0.0};
+    double battery_energy_full_wh{0.0};
+    double battery_energy_design_wh{0.0};
+    double battery_voltage_now_v{0.0};
+    double battery_voltage_min_design_v{0.0};
+    double battery_current_now_a{0.0};
+    double battery_remaining_hours{0.0}; // Discharge: time to empty
+    double battery_remaining_hours_to_empty{0.0};
+    double battery_remaining_hours_to_threshold{0.0}; // Charge: time to threshold (e.g. 80%)
+    double battery_remaining_hours_to_full{0.0};      // Charge: time to 100% full
     uint32_t battery_cycle_count{0};
     uint32_t battery_capacity_percent{0};
+    bool is_conservation_mode_active{false};
+    bool is_ac_passthrough{false};
+
+    // Deep Identity & Thresholds
+    core::FixedString<16> battery_technology{};
+    core::FixedString<16> battery_capacity_level{};
+    core::FixedString<32> battery_model_name{};
+    core::FixedString<24> battery_manufacturer{};
+    core::FixedString<24> battery_serial_number{};
+    std::optional<uint32_t> battery_charge_start_threshold;
+    std::optional<uint32_t> battery_charge_end_threshold;
+    core::FixedString<32> battery_charge_behaviour{};
+
+    // USB-PD Power & Type
     double usbc_input_watts{0.0};
+    core::FixedString<32> usbc_pd_type{};
     bool usbc_online{false};
+
+    // Connected Peripherals (Bluetooth mouse/keyboard/etc.)
+    core::FixedVector<HardwareSample::PeripheralBattery, 4> peripheral_batteries{};
 
     // CPU & Platform Telemetry
     double cpu_temp_c{0.0};

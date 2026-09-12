@@ -66,25 +66,104 @@ void ReportGenerator::render_executive_briefing(const AnalysisReportData& r, std
     out << DIM << " | Monitored Processes: " << RESET << BOLD << r.total_monitored_processes << RESET;
     out << DIM << " | Wakeups: " << RESET << BOLD << r.total_system_wakeups_per_sec << " /sec" << RESET << "\n\n";
 
-    // 1. System Battery & Power Overview
+    // 1. System Battery & Power Overview (REF-REQ-022)
     out << BOLD << " [1] System Battery & Power Supply Deep Telemetry" << RESET << "\n";
     out << "  - Total System Drain      : " << BOLD << (total_sys > 25.0 ? RED : (total_sys > 12.0 ? YELLOW : GREEN))
-        << std::fixed << std::setprecision(2) << total_sys << " Watts" << RESET << "\n";
+        << std::fixed << std::setprecision(2) << total_sys << " Watts" << RESET;
+    if (r.hardware.is_ac_passthrough) {
+        out << BOLD << GREEN << " [AC Hardware Pass-Through Active: Zero Battery Wear]" << RESET;
+    }
+    out << "\n";
+
     out << "  - Power Supply State      : "
         << (r.hardware.is_battery_discharging ? (RED + std::string("Discharging (On Battery)")) : (GREEN + std::string("AC Connected (Line Power / Charging)")))
         << RESET;
     if (r.hardware.usbc_online) {
-        out << DIM << " [USB-PD: " << std::fixed << std::setprecision(1) << r.hardware.usbc_input_watts << "W]" << RESET;
+        out << DIM << " [USB-PD Input: " << std::fixed << std::setprecision(1) << r.hardware.usbc_input_watts << "W";
+        if (!r.hardware.usbc_pd_type.empty()) {
+            out << " (" << r.hardware.usbc_pd_type << ")";
+        }
+        out << "]" << RESET;
     }
     out << "\n";
 
     if (r.hardware.is_battery_discharging || r.hardware.battery_capacity_percent > 0) {
         out << "  - Battery Capacity        : " << BOLD << r.hardware.battery_capacity_percent << "%" << RESET;
-        if (r.hardware.battery_remaining_hours > 0.0) {
-            out << " (" << BOLD << std::fixed << std::setprecision(1) << r.hardware.battery_remaining_hours << " hours remaining" << RESET << ")";
+        if (!r.hardware.battery_capacity_level.empty()) {
+            out << " [" << r.hardware.battery_capacity_level << "]";
+        }
+        if (r.hardware.is_battery_discharging) {
+            if (r.hardware.battery_remaining_hours_to_empty > 0.0) {
+                out << " (" << BOLD << std::fixed << std::setprecision(1) << r.hardware.battery_remaining_hours_to_empty << "h to empty" << RESET << ")";
+            }
+        } else {
+            if (r.hardware.battery_remaining_hours_to_threshold > 0.0) {
+                out << " (" << BOLD << std::fixed << std::setprecision(1) << r.hardware.battery_remaining_hours_to_threshold << "h to limit" << RESET << ")";
+            } else if (r.hardware.battery_remaining_hours_to_full > 0.0) {
+                out << " (" << BOLD << std::fixed << std::setprecision(1) << r.hardware.battery_remaining_hours_to_full << "h to full" << RESET << ")";
+            }
         }
         out << " | Health: " << std::fixed << std::setprecision(1) << r.hardware.battery_health_percent << "%"
             << " (" << r.hardware.battery_cycle_count << " cycles)\n";
+
+        // Battery ID, Vendor, Model, Chemistry & Serial
+        if (!r.hardware.battery_model_name.empty() || !r.hardware.battery_manufacturer.empty()) {
+            out << "  - Battery Hardware ID     : " << BOLD << r.hardware.battery_manufacturer << " " << r.hardware.battery_model_name << RESET;
+            if (!r.hardware.battery_serial_number.empty()) {
+                out << " (S/N: " << r.hardware.battery_serial_number << ")";
+            }
+            if (!r.hardware.battery_technology.empty()) {
+                out << " [" << r.hardware.battery_technology << "]";
+            }
+            out << "\n";
+        }
+
+        // Voltage, Current Flow & Energy Breakdown
+        if (r.hardware.battery_voltage_now_v > 0.0) {
+            out << "  - Voltage & Current Flow  : " << std::fixed << std::setprecision(3) << r.hardware.battery_voltage_now_v << " V";
+            if (r.hardware.battery_voltage_min_design_v > 0.0) {
+                out << " (Design Nominal: " << std::fixed << std::setprecision(2) << r.hardware.battery_voltage_min_design_v << " V)";
+            }
+            out << " | Flow: " << (r.hardware.battery_current_now_a < 0 ? RED : (r.hardware.battery_current_now_a > 0.05 ? GREEN : RESET))
+                << std::fixed << std::setprecision(3) << r.hardware.battery_current_now_a << " A" << RESET << "\n";
+        }
+
+        // Energy Degradation & Wear Telemetry
+        if (r.hardware.battery_energy_full_wh > 0.0) {
+            out << "  - Energy & Degradation    : " << std::fixed << std::setprecision(2) << r.hardware.battery_energy_now_wh << " Wh now / "
+                << r.hardware.battery_energy_full_wh << " Wh full (Design: " << r.hardware.battery_energy_design_wh << " Wh) | "
+                << BOLD << (r.hardware.battery_degradation_percent > 20.0 ? RED : (r.hardware.battery_degradation_percent > 10.0 ? YELLOW : GREEN))
+                << std::fixed << std::setprecision(1) << r.hardware.battery_degradation_percent << "% wear ("
+                << std::fixed << std::setprecision(2) << r.hardware.battery_lost_capacity_wh << " Wh lost)" << RESET << "\n";
+        }
+
+        // ThinkPad Charge Thresholds & Conservation Mode
+        if (r.hardware.battery_charge_end_threshold.has_value() || r.hardware.battery_charge_start_threshold.has_value()) {
+            out << "  - ThinkPad Charge Guard   : ";
+            if (r.hardware.is_conservation_mode_active) {
+                out << BOLD << GREEN << "CONSERVATION ACTIVE" << RESET;
+            } else {
+                out << "STANDARD";
+            }
+            out << " (Stop: " << r.hardware.battery_charge_end_threshold.value_or(100) << "%, Start: "
+                << r.hardware.battery_charge_start_threshold.value_or(0) << "%)";
+            if (!r.hardware.battery_charge_behaviour.empty()) {
+                out << " [" << r.hardware.battery_charge_behaviour << "]";
+            }
+            out << "\n";
+        }
+
+        // Connected Wireless / External Peripheral Batteries
+        if (!r.hardware.peripheral_batteries.empty()) {
+            out << "  - Connected Peripherals   : ";
+            for (size_t k = 0; k < r.hardware.peripheral_batteries.size(); ++k) {
+                const auto& pb = r.hardware.peripheral_batteries[k];
+                out << pb.name << ": " << BOLD << pb.capacity_percent << "%" << RESET;
+                if (pb.is_charging) out << " [Charging]";
+                if (k + 1 < r.hardware.peripheral_batteries.size()) out << ", ";
+            }
+            out << "\n";
+        }
     }
 
     // 2. Hardware Subsystem & Domain Power Breakdown
@@ -492,10 +571,40 @@ void ReportGenerator::render_json(const AnalysisReportData& r, std::ostream& out
     out << "    \"is_ac_online\": " << (r.hardware.is_ac_online ? "true" : "false") << ",\n";
     out << "    \"has_direct_rapl\": " << (r.hardware.has_direct_rapl ? "true" : "false") << ",\n";
     out << "    \"battery_health_percent\": " << r.hardware.battery_health_percent << ",\n";
+    out << "    \"battery_degradation_percent\": " << r.hardware.battery_degradation_percent << ",\n";
+    out << "    \"battery_lost_capacity_wh\": " << r.hardware.battery_lost_capacity_wh << ",\n";
+    out << "    \"battery_energy_now_wh\": " << r.hardware.battery_energy_now_wh << ",\n";
+    out << "    \"battery_energy_full_wh\": " << r.hardware.battery_energy_full_wh << ",\n";
+    out << "    \"battery_energy_design_wh\": " << r.hardware.battery_energy_design_wh << ",\n";
+    out << "    \"battery_voltage_now_v\": " << r.hardware.battery_voltage_now_v << ",\n";
+    out << "    \"battery_voltage_min_design_v\": " << r.hardware.battery_voltage_min_design_v << ",\n";
+    out << "    \"battery_current_now_a\": " << r.hardware.battery_current_now_a << ",\n";
     out << "    \"battery_remaining_hours\": " << r.hardware.battery_remaining_hours << ",\n";
+    out << "    \"battery_remaining_hours_to_empty\": " << r.hardware.battery_remaining_hours_to_empty << ",\n";
+    out << "    \"battery_remaining_hours_to_threshold\": " << r.hardware.battery_remaining_hours_to_threshold << ",\n";
+    out << "    \"battery_remaining_hours_to_full\": " << r.hardware.battery_remaining_hours_to_full << ",\n";
     out << "    \"battery_cycle_count\": " << r.hardware.battery_cycle_count << ",\n";
     out << "    \"battery_capacity_percent\": " << r.hardware.battery_capacity_percent << ",\n";
+    out << "    \"is_conservation_mode_active\": " << (r.hardware.is_conservation_mode_active ? "true" : "false") << ",\n";
+    out << "    \"is_ac_passthrough\": " << (r.hardware.is_ac_passthrough ? "true" : "false") << ",\n";
+    out << "    \"battery_technology\": \"" << r.hardware.battery_technology << "\",\n";
+    out << "    \"battery_capacity_level\": \"" << r.hardware.battery_capacity_level << "\",\n";
+    out << "    \"battery_model_name\": \"" << r.hardware.battery_model_name << "\",\n";
+    out << "    \"battery_manufacturer\": \"" << r.hardware.battery_manufacturer << "\",\n";
+    out << "    \"battery_serial_number\": \"" << r.hardware.battery_serial_number << "\",\n";
+    out << "    \"battery_charge_start_threshold\": " << (r.hardware.battery_charge_start_threshold ? std::to_string(*r.hardware.battery_charge_start_threshold) : "null") << ",\n";
+    out << "    \"battery_charge_end_threshold\": " << (r.hardware.battery_charge_end_threshold ? std::to_string(*r.hardware.battery_charge_end_threshold) : "null") << ",\n";
+    out << "    \"battery_charge_behaviour\": \"" << r.hardware.battery_charge_behaviour << "\",\n";
     out << "    \"usbc_input_watts\": " << r.hardware.usbc_input_watts << ",\n";
+    out << "    \"usbc_pd_type\": \"" << r.hardware.usbc_pd_type << "\",\n";
+    out << "    \"peripheral_batteries\": [\n";
+    for (size_t k = 0; k < r.hardware.peripheral_batteries.size(); ++k) {
+        const auto& pb = r.hardware.peripheral_batteries[k];
+        out << "      {\"name\": \"" << pb.name << "\", \"capacity_percent\": " << pb.capacity_percent
+            << ", \"is_charging\": " << (pb.is_charging ? "true" : "false") << "}"
+            << (k + 1 < r.hardware.peripheral_batteries.size() ? "," : "") << "\n";
+    }
+    out << "    ],\n";
     out << "    \"cpu_temp_c\": " << r.hardware.cpu_temp_c << ",\n";
     out << "    \"cpu_freq_avg_mhz\": " << r.hardware.cpu_freq_avg_mhz << ",\n";
     out << "    \"cpu_freq_min_mhz\": " << r.hardware.cpu_freq_min_mhz << ",\n";
@@ -643,20 +752,30 @@ void ReportGenerator::render_extreme_profile(const AnalysisReportData& r, std::o
     out << DIM << " | Total System Load : " << RESET << BOLD << std::fixed << std::setprecision(2)
         << total_sys << " W" << RESET << "\n";
 
-    // Battery / Power Rail
+    // Battery / Power Rail (REF-REQ-022)
     out << DIM << " Power Delivery   : " << RESET;
     if (r.hardware.is_battery_discharging) {
         out << RED << BOLD << "Battery Discharging" << RESET << " (" << r.hardware.battery_capacity_percent << "%) "
             << "| Rate: " << BOLD << total_sys << "W" << RESET;
-        if (r.hardware.battery_remaining_hours > 0.0) {
-            out << " | Remaining: " << BOLD << std::fixed << std::setprecision(1) << r.hardware.battery_remaining_hours << "h" << RESET;
+        if (r.hardware.battery_remaining_hours_to_empty > 0.0) {
+            out << " | Remaining: " << BOLD << std::fixed << std::setprecision(1) << r.hardware.battery_remaining_hours_to_empty << "h" << RESET;
         }
-        out << " | Health: " << r.hardware.battery_health_percent << "% (Cycles: " << r.hardware.battery_cycle_count << ")";
+        out << " | Health: " << std::fixed << std::setprecision(1) << r.hardware.battery_health_percent << "% (Wear: "
+            << std::fixed << std::setprecision(1) << r.hardware.battery_degradation_percent << "%, Cycles: "
+            << r.hardware.battery_cycle_count << ")";
     } else {
         out << GREEN << BOLD << "AC / External Power Online" << RESET;
-        if (r.hardware.usbc_online) {
-            out << " (USB-PD Input: " << r.hardware.usbc_input_watts << "W)";
+        if (r.hardware.is_ac_passthrough) {
+            out << BOLD << GREEN << " [Hardware Direct Pass-Through]" << RESET;
         }
+        if (r.hardware.usbc_online) {
+            out << " (USB-PD Input: " << r.hardware.usbc_input_watts << "W";
+            if (!r.hardware.usbc_pd_type.empty()) out << ", " << r.hardware.usbc_pd_type;
+            out << ")";
+        }
+    }
+    if (!r.hardware.battery_model_name.empty()) {
+        out << DIM << " [" << r.hardware.battery_manufacturer << " " << r.hardware.battery_model_name << "]" << RESET;
     }
     out << "\n";
 

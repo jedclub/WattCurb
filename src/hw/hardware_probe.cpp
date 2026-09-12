@@ -28,56 +28,67 @@ void safe_close(int& fd) noexcept {
         fd = -1;
     }
 }
+} // anonymous namespace
 
-// Ultra-fast single-read uevent battery parser (REF-RES-007)
-inline void parse_battery_uevent_buf(std::string_view content, HardwareSample& sample) noexcept {
+// Fast string_view trim helper
+static inline std::string_view trim_sv(std::string_view sv) noexcept {
+    while (!sv.empty() && (sv.front() == ' ' || sv.front() == '\t' || sv.front() == '\r' || sv.front() == '\n')) {
+        sv.remove_prefix(1);
+    }
+    while (!sv.empty() && (sv.back() == ' ' || sv.back() == '\t' || sv.back() == '\r' || sv.back() == '\n')) {
+        sv.remove_suffix(1);
+    }
+    return sv;
+}
+
+// Ultra-fast single-read uevent battery parser (REF-RES-007, REF-REQ-022, REF-ARCH-012)
+void HardwareProbe::parse_battery_uevent_buf(std::string_view content, HardwareSample& sample) noexcept {
     const char* cur = content.data();
     const char* end = cur + content.size();
 
-    uint32_t found_mask = 0;
     while (cur < end) {
         const char* next_nl = core::simd::find_char_fast(cur, end, '\n');
         std::string_view line(cur, static_cast<size_t>(next_nl - cur));
         cur = (next_nl < end) ? next_nl + 1 : end;
 
         if (line.rfind("POWER_SUPPLY_STATUS=", 0) == 0) {
-            auto val = line.substr(20);
+            auto val = trim_sv(line.substr(20));
             sample.is_discharging = (val == "Discharging");
-            found_mask |= 1;
         } else if (line.rfind("POWER_SUPPLY_VOLTAGE_NOW=", 0) == 0) {
             uint64_t v = 0;
             const char* p = line.data() + 25;
             if (std::from_chars(p, line.data() + line.size(), v).ec == std::errc()) {
                 sample.battery_voltage_uv = v;
-                found_mask |= 2;
+            }
+        } else if (line.rfind("POWER_SUPPLY_VOLTAGE_MIN_DESIGN=", 0) == 0) {
+            uint64_t v = 0;
+            const char* p = line.data() + 32;
+            if (std::from_chars(p, line.data() + line.size(), v).ec == std::errc()) {
+                sample.battery_voltage_min_design_uv = v;
             }
         } else if (line.rfind("POWER_SUPPLY_CURRENT_NOW=", 0) == 0) {
             int64_t i = 0;
             const char* p = line.data() + 25;
             if (std::from_chars(p, line.data() + line.size(), i).ec == std::errc()) {
                 sample.battery_current_ua = i;
-                found_mask |= 4;
             }
         } else if (line.rfind("POWER_SUPPLY_POWER_NOW=", 0) == 0) {
             uint64_t p_val = 0;
             const char* p = line.data() + 23;
             if (std::from_chars(p, line.data() + line.size(), p_val).ec == std::errc()) {
                 sample.battery_power_uw = p_val;
-                found_mask |= 4;
             }
         } else if (line.rfind("POWER_SUPPLY_ENERGY_NOW=", 0) == 0) {
             uint64_t e_val = 0;
             const char* p = line.data() + 24;
             if (std::from_chars(p, line.data() + line.size(), e_val).ec == std::errc()) {
                 sample.battery_energy_now_uwh = e_val;
-                found_mask |= 8;
             }
         } else if (line.rfind("POWER_SUPPLY_ENERGY_FULL=", 0) == 0) {
             uint64_t e_val = 0;
             const char* p = line.data() + 25;
             if (std::from_chars(p, line.data() + line.size(), e_val).ec == std::errc()) {
                 sample.battery_energy_full_uwh = e_val;
-                found_mask |= 16;
             }
         } else if (line.rfind("POWER_SUPPLY_ENERGY_FULL_DESIGN=", 0) == 0) {
             uint64_t e_val = 0;
@@ -90,7 +101,6 @@ inline void parse_battery_uevent_buf(std::string_view content, HardwareSample& s
             const char* p = line.data() + 22;
             if (std::from_chars(p, line.data() + line.size(), cap).ec == std::errc()) {
                 sample.battery_capacity_percent = cap;
-                found_mask |= 32;
             }
         } else if (line.rfind("POWER_SUPPLY_CYCLE_COUNT=", 0) == 0) {
             uint32_t c = 0;
@@ -98,11 +108,16 @@ inline void parse_battery_uevent_buf(std::string_view content, HardwareSample& s
             if (std::from_chars(p, line.data() + line.size(), c).ec == std::errc()) {
                 sample.battery_cycle_count = c;
             }
-        }
-
-        // Early break: if all primary operational properties are parsed, exit immediately
-        if ((found_mask & 0x3F) == 0x3F) {
-            break;
+        } else if (line.rfind("POWER_SUPPLY_CAPACITY_LEVEL=", 0) == 0) {
+            sample.battery_capacity_level = trim_sv(line.substr(28));
+        } else if (line.rfind("POWER_SUPPLY_TECHNOLOGY=", 0) == 0) {
+            sample.battery_technology = trim_sv(line.substr(24));
+        } else if (line.rfind("POWER_SUPPLY_MODEL_NAME=", 0) == 0) {
+            sample.battery_model_name = trim_sv(line.substr(24));
+        } else if (line.rfind("POWER_SUPPLY_MANUFACTURER=", 0) == 0) {
+            sample.battery_manufacturer = trim_sv(line.substr(26));
+        } else if (line.rfind("POWER_SUPPLY_SERIAL_NUMBER=", 0) == 0) {
+            sample.battery_serial_number = trim_sv(line.substr(27));
         }
     }
 
@@ -111,8 +126,6 @@ inline void parse_battery_uevent_buf(std::string_view content, HardwareSample& s
         sample.battery_power_uw = static_cast<uint64_t>((*sample.battery_voltage_uv * static_cast<uint64_t>(abs_curr)) / 1'000'000ULL);
     }
 }
-
-} // namespace
 
 HardwareProbe::HardwareProbe(std::filesystem::path sysfs_root)
     : sysfs_root_(std::move(sysfs_root)) {
@@ -127,8 +140,14 @@ HardwareProbe::HardwareProbe(HardwareProbe&& other) noexcept
     : sysfs_root_(std::move(other.sysfs_root_)),
       battery_path_(std::move(other.battery_path_)),
       battery_uevent_path_(std::move(other.battery_uevent_path_)),
+      battery_threshold_start_path_(std::move(other.battery_threshold_start_path_)),
+      battery_threshold_end_path_(std::move(other.battery_threshold_end_path_)),
+      battery_behaviour_path_(std::move(other.battery_behaviour_path_)),
       ac_path_(std::move(other.ac_path_)),
       usbc_pd_path_(std::move(other.usbc_pd_path_)),
+      usbc_type_path_(std::move(other.usbc_type_path_)),
+      usbc_voltage_max_path_(std::move(other.usbc_voltage_max_path_)),
+      usbc_current_max_path_(std::move(other.usbc_current_max_path_)),
       rapl_pkg_path_(std::move(other.rapl_pkg_path_)),
       rapl_core_path_(std::move(other.rapl_core_path_)),
       rapl_dram_path_(std::move(other.rapl_dram_path_)),
@@ -164,9 +183,17 @@ HardwareProbe::HardwareProbe(HardwareProbe&& other) noexcept
       battery_cycle_fd_(std::exchange(other.battery_cycle_fd_, -1)),
       battery_capacity_fd_(std::exchange(other.battery_capacity_fd_, -1)),
       ac_online_fd_(std::exchange(other.ac_online_fd_, -1)),
+      battery_threshold_start_fd_(std::exchange(other.battery_threshold_start_fd_, -1)),
+      battery_threshold_end_fd_(std::exchange(other.battery_threshold_end_fd_, -1)),
+      battery_behaviour_fd_(std::exchange(other.battery_behaviour_fd_, -1)),
       usbc_voltage_fd_(std::exchange(other.usbc_voltage_fd_, -1)),
       usbc_current_fd_(std::exchange(other.usbc_current_fd_, -1)),
       usbc_online_fd_(std::exchange(other.usbc_online_fd_, -1)),
+      usbc_type_fd_(std::exchange(other.usbc_type_fd_, -1)),
+      usbc_voltage_max_fd_(std::exchange(other.usbc_voltage_max_fd_, -1)),
+      usbc_current_max_fd_(std::exchange(other.usbc_current_max_fd_, -1)),
+      peripheral_probes_(std::move(other.peripheral_probes_)),
+      peripheral_probe_count_(std::exchange(other.peripheral_probe_count_, 0)),
       rapl_pkg_fd_(std::exchange(other.rapl_pkg_fd_, -1)),
       rapl_core_fd_(std::exchange(other.rapl_core_fd_, -1)),
       rapl_dram_fd_(std::exchange(other.rapl_dram_fd_, -1)),
@@ -211,8 +238,14 @@ HardwareProbe& HardwareProbe::operator=(HardwareProbe&& other) noexcept {
         sysfs_root_ = std::move(other.sysfs_root_);
         battery_path_ = std::move(other.battery_path_);
         battery_uevent_path_ = std::move(other.battery_uevent_path_);
+        battery_threshold_start_path_ = std::move(other.battery_threshold_start_path_);
+        battery_threshold_end_path_ = std::move(other.battery_threshold_end_path_);
+        battery_behaviour_path_ = std::move(other.battery_behaviour_path_);
         ac_path_ = std::move(other.ac_path_);
         usbc_pd_path_ = std::move(other.usbc_pd_path_);
+        usbc_type_path_ = std::move(other.usbc_type_path_);
+        usbc_voltage_max_path_ = std::move(other.usbc_voltage_max_path_);
+        usbc_current_max_path_ = std::move(other.usbc_current_max_path_);
         rapl_pkg_path_ = std::move(other.rapl_pkg_path_);
         rapl_core_path_ = std::move(other.rapl_core_path_);
         rapl_dram_path_ = std::move(other.rapl_dram_path_);
@@ -249,9 +282,17 @@ HardwareProbe& HardwareProbe::operator=(HardwareProbe&& other) noexcept {
         battery_cycle_fd_ = std::exchange(other.battery_cycle_fd_, -1);
         battery_capacity_fd_ = std::exchange(other.battery_capacity_fd_, -1);
         ac_online_fd_ = std::exchange(other.ac_online_fd_, -1);
+        battery_threshold_start_fd_ = std::exchange(other.battery_threshold_start_fd_, -1);
+        battery_threshold_end_fd_ = std::exchange(other.battery_threshold_end_fd_, -1);
+        battery_behaviour_fd_ = std::exchange(other.battery_behaviour_fd_, -1);
         usbc_voltage_fd_ = std::exchange(other.usbc_voltage_fd_, -1);
         usbc_current_fd_ = std::exchange(other.usbc_current_fd_, -1);
         usbc_online_fd_ = std::exchange(other.usbc_online_fd_, -1);
+        usbc_type_fd_ = std::exchange(other.usbc_type_fd_, -1);
+        usbc_voltage_max_fd_ = std::exchange(other.usbc_voltage_max_fd_, -1);
+        usbc_current_max_fd_ = std::exchange(other.usbc_current_max_fd_, -1);
+        peripheral_probes_ = std::move(other.peripheral_probes_);
+        peripheral_probe_count_ = std::exchange(other.peripheral_probe_count_, 0);
         rapl_pkg_fd_ = std::exchange(other.rapl_pkg_fd_, -1);
         rapl_core_fd_ = std::exchange(other.rapl_core_fd_, -1);
         rapl_dram_fd_ = std::exchange(other.rapl_dram_fd_, -1);
@@ -305,9 +346,22 @@ void HardwareProbe::close_fds() noexcept {
     safe_close(battery_cycle_fd_);
     safe_close(battery_capacity_fd_);
     safe_close(ac_online_fd_);
+    safe_close(battery_threshold_start_fd_);
+    safe_close(battery_threshold_end_fd_);
+    safe_close(battery_behaviour_fd_);
     safe_close(usbc_voltage_fd_);
     safe_close(usbc_current_fd_);
     safe_close(usbc_online_fd_);
+    safe_close(usbc_type_fd_);
+    safe_close(usbc_voltage_max_fd_);
+    safe_close(usbc_current_max_fd_);
+
+    for (size_t i = 0; i < peripheral_probe_count_; ++i) {
+        safe_close(peripheral_probes_[i].capacity_fd);
+        safe_close(peripheral_probes_[i].status_fd);
+    }
+    peripheral_probe_count_ = 0;
+
     safe_close(rapl_pkg_fd_);
     safe_close(rapl_core_fd_);
     safe_close(rapl_dram_fd_);
@@ -380,6 +434,10 @@ void HardwareProbe::open_persistent_fds() {
         battery_energy_full_design_fd_ = open_ro_cloexec(battery_path_ / "energy_full_design");
         battery_cycle_fd_ = open_ro_cloexec(battery_path_ / "cycle_count");
         battery_capacity_fd_ = open_ro_cloexec(battery_path_ / "capacity");
+
+        if (!battery_threshold_start_path_.empty()) battery_threshold_start_fd_ = open_ro_cloexec(battery_threshold_start_path_);
+        if (!battery_threshold_end_path_.empty()) battery_threshold_end_fd_ = open_ro_cloexec(battery_threshold_end_path_);
+        if (!battery_behaviour_path_.empty()) battery_behaviour_fd_ = open_ro_cloexec(battery_behaviour_path_);
     }
     if (!ac_path_.empty()) {
         ac_online_fd_ = open_ro_cloexec(ac_path_ / "online");
@@ -388,6 +446,9 @@ void HardwareProbe::open_persistent_fds() {
         usbc_voltage_fd_ = open_ro_cloexec(usbc_pd_path_ / "voltage_now");
         usbc_current_fd_ = open_ro_cloexec(usbc_pd_path_ / "current_now");
         usbc_online_fd_ = open_ro_cloexec(usbc_pd_path_ / "online");
+        if (!usbc_type_path_.empty()) usbc_type_fd_ = open_ro_cloexec(usbc_type_path_);
+        if (!usbc_voltage_max_path_.empty()) usbc_voltage_max_fd_ = open_ro_cloexec(usbc_voltage_max_path_);
+        if (!usbc_current_max_path_.empty()) usbc_current_max_fd_ = open_ro_cloexec(usbc_current_max_path_);
     }
 
     // 2. RAPL & CPU
@@ -562,6 +623,17 @@ void HardwareProbe::refresh_device_paths() {
             if (filename.rfind("BAT", 0) == 0 && battery_path_.empty()) {
                 battery_path_ = entry.path();
                 battery_uevent_path_ = entry.path() / "uevent";
+
+                auto c_start = entry.path() / "charge_control_start_threshold";
+                if (!std::filesystem::exists(c_start, ec)) c_start = entry.path() / "charge_start_threshold";
+                if (std::filesystem::exists(c_start, ec)) battery_threshold_start_path_ = c_start;
+
+                auto c_end = entry.path() / "charge_control_end_threshold";
+                if (!std::filesystem::exists(c_end, ec)) c_end = entry.path() / "charge_stop_threshold";
+                if (std::filesystem::exists(c_end, ec)) battery_threshold_end_path_ = c_end;
+
+                auto c_beh = entry.path() / "charge_behaviour";
+                if (std::filesystem::exists(c_beh, ec)) battery_behaviour_path_ = c_beh;
             } else if (filename == "AC" && ac_path_.empty()) {
                 ac_path_ = entry.path();
             } else if (filename.rfind("ucsi-source-psy-", 0) == 0) {
@@ -573,6 +645,23 @@ void HardwareProbe::refresh_device_paths() {
                     ::close(tmp_fd);
                     if (val.value_or(0) == 1 || usbc_pd_path_.empty()) {
                         usbc_pd_path_ = entry.path();
+                        auto ut_file = entry.path() / "usb_type";
+                        if (std::filesystem::exists(ut_file, ec)) usbc_type_path_ = ut_file;
+                        auto vmax_file = entry.path() / "voltage_max";
+                        if (std::filesystem::exists(vmax_file, ec)) usbc_voltage_max_path_ = vmax_file;
+                        auto imax_file = entry.path() / "current_max";
+                        if (std::filesystem::exists(imax_file, ec)) usbc_current_max_path_ = imax_file;
+                    }
+                }
+            } else if (filename != "AC" && peripheral_probe_count_ < 4) {
+                auto cap_file = entry.path() / "capacity";
+                if (std::filesystem::exists(cap_file, ec)) {
+                    auto& probe = peripheral_probes_[peripheral_probe_count_++];
+                    probe.name = filename;
+                    probe.capacity_fd = open_ro_cloexec(cap_file);
+                    auto stat_file = entry.path() / "status";
+                    if (std::filesystem::exists(stat_file, ec)) {
+                        probe.status_fd = open_ro_cloexec(stat_file);
                     }
                 }
             }
@@ -739,6 +828,13 @@ HardwareSample HardwareProbe::capture_sample() const {
                     cached_energy_full_ = sample.battery_energy_full_uwh;
                     cached_energy_full_design_ = sample.battery_energy_full_design_uwh;
                     cached_cycle_count_ = sample.battery_cycle_count;
+
+                    cached_voltage_min_design_ = sample.battery_voltage_min_design_uv;
+                    cached_bat_capacity_level_ = sample.battery_capacity_level;
+                    cached_bat_technology_ = sample.battery_technology;
+                    cached_bat_model_name_ = sample.battery_model_name;
+                    cached_bat_manufacturer_ = sample.battery_manufacturer;
+                    cached_bat_serial_number_ = sample.battery_serial_number;
                     cached_battery_static_initialized_ = true;
                 }
             } else {
@@ -751,6 +847,13 @@ HardwareSample HardwareProbe::capture_sample() const {
                 sample.battery_energy_full_uwh = cached_energy_full_;
                 sample.battery_energy_full_design_uwh = cached_energy_full_design_;
                 sample.battery_cycle_count = cached_cycle_count_;
+
+                sample.battery_voltage_min_design_uv = cached_voltage_min_design_;
+                sample.battery_capacity_level = cached_bat_capacity_level_;
+                sample.battery_technology = cached_bat_technology_;
+                sample.battery_model_name = cached_bat_model_name_;
+                sample.battery_manufacturer = cached_bat_manufacturer_;
+                sample.battery_serial_number = cached_bat_serial_number_;
             }
         } else {
             if (battery_status_fd_ >= 0) {
@@ -808,11 +911,66 @@ HardwareSample HardwareProbe::capture_sample() const {
             sample.battery_cycle_count = cached_cycle_count_;
         }
 
+        // ThinkPad Charge Thresholds & Behavior (REF-REQ-022)
+        if (battery_threshold_start_fd_ >= 0) {
+            sample.battery_charge_start_threshold = read_uint32_fd(battery_threshold_start_fd_);
+            cached_bat_charge_start_threshold_ = sample.battery_charge_start_threshold;
+        } else {
+            sample.battery_charge_start_threshold = cached_bat_charge_start_threshold_;
+        }
+        if (battery_threshold_end_fd_ >= 0) {
+            sample.battery_charge_end_threshold = read_uint32_fd(battery_threshold_end_fd_);
+            cached_bat_charge_end_threshold_ = sample.battery_charge_end_threshold;
+        } else {
+            sample.battery_charge_end_threshold = cached_bat_charge_end_threshold_;
+        }
+        if (battery_behaviour_fd_ >= 0) {
+            std::array<char, 32> b_buf{};
+            if (read_string_buf(battery_behaviour_fd_, b_buf.data(), b_buf.size())) {
+                sample.battery_charge_behaviour = trim_sv(b_buf.data());
+                cached_bat_charge_behaviour_ = sample.battery_charge_behaviour;
+            }
+        } else {
+            sample.battery_charge_behaviour = cached_bat_charge_behaviour_;
+        }
+
+        // USB-C Power Delivery & Source Profile
         if (usbc_online_fd_ >= 0) {
             auto u_on = read_uint32_fd(usbc_online_fd_);
             sample.usbc_pd_online = (u_on.value_or(0) == 1);
             if (usbc_voltage_fd_ >= 0) sample.usbc_pd_voltage_uv = read_uint64_fd(usbc_voltage_fd_);
             if (usbc_current_fd_ >= 0) sample.usbc_pd_current_ua = read_uint64_fd(usbc_current_fd_);
+            if (usbc_voltage_max_fd_ >= 0) sample.usbc_pd_voltage_max_uv = read_uint64_fd(usbc_voltage_max_fd_);
+            if (usbc_current_max_fd_ >= 0) sample.usbc_pd_current_max_ua = read_uint64_fd(usbc_current_max_fd_);
+            if (usbc_type_fd_ >= 0) {
+                std::array<char, 32> t_buf{};
+                if (read_string_buf(usbc_type_fd_, t_buf.data(), t_buf.size())) {
+                    sample.usbc_pd_type = trim_sv(t_buf.data());
+                    cached_usbc_pd_type_ = sample.usbc_pd_type;
+                }
+            } else {
+                sample.usbc_pd_type = cached_usbc_pd_type_;
+            }
+        }
+
+        // Connected Peripheral Batteries (Bluetooth/HID/Stylus)
+        for (size_t i = 0; i < peripheral_probe_count_; ++i) {
+            const auto& p = peripheral_probes_[i];
+            if (p.capacity_fd >= 0) {
+                auto cap = read_uint32_fd(p.capacity_fd);
+                if (cap.has_value()) {
+                    HardwareSample::PeripheralBattery pb;
+                    pb.name = p.name;
+                    pb.capacity_percent = *cap;
+                    if (p.status_fd >= 0) {
+                        std::array<char, 16> s_buf{};
+                        if (read_string_buf(p.status_fd, s_buf.data(), s_buf.size())) {
+                            pb.is_charging = (std::strncmp(s_buf.data(), "Charging", 8) == 0);
+                        }
+                    }
+                    sample.peripheral_batteries.push_back(pb);
+                }
+            }
         }
     }
 

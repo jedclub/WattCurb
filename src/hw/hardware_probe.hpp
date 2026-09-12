@@ -36,6 +36,9 @@ public:
     static std::string read_string_fd(int fd);
     static bool read_string_buf(int fd, char* buf, size_t max_len);
 
+    // Fast single-read uevent battery parser exposed for testing (REF-RES-007, REF-REQ-022, REF-TEST-008)
+    static void parse_battery_uevent_buf(std::string_view content, HardwareSample& sample) noexcept;
+
     // Direct PCIe Capability 0x10 binary decoder (REF-REQ-015, REF-TEST-006)
     static std::pair<uint8_t, uint8_t> decode_pcie_link_status(const uint8_t* config_data, size_t size) noexcept;
     static std::pair<uint8_t, uint8_t> read_pcie_binary_link_status(int config_fd) noexcept;
@@ -46,11 +49,17 @@ public:
 private:
     std::filesystem::path sysfs_root_;
 
-    // 1. Power Supply & Battery paths
+    // 1. Power Supply & Battery paths (REF-REQ-022)
     std::filesystem::path battery_path_;
     std::filesystem::path battery_uevent_path_;
+    std::filesystem::path battery_threshold_start_path_;
+    std::filesystem::path battery_threshold_end_path_;
+    std::filesystem::path battery_behaviour_path_;
     std::filesystem::path ac_path_;
     std::filesystem::path usbc_pd_path_;
+    std::filesystem::path usbc_type_path_;
+    std::filesystem::path usbc_voltage_max_path_;
+    std::filesystem::path usbc_current_max_path_;
 
     // 2. RAPL & CPU paths
     std::filesystem::path rapl_pkg_path_;
@@ -107,10 +116,27 @@ private:
     int battery_capacity_fd_{-1};
     int ac_online_fd_{-1};
 
-    // USB-PD
+    // ThinkPad Battery Charge Thresholds & Behaviour (REF-REQ-022)
+    int battery_threshold_start_fd_{-1};
+    int battery_threshold_end_fd_{-1};
+    int battery_behaviour_fd_{-1};
+
+    // USB-PD Input & Negotiation
     int usbc_voltage_fd_{-1};
     int usbc_current_fd_{-1};
     int usbc_online_fd_{-1};
+    int usbc_type_fd_{-1};
+    int usbc_voltage_max_fd_{-1};
+    int usbc_current_max_fd_{-1};
+
+    // Peripheral Batteries (Bluetooth/HID/Stylus)
+    struct PeripheralProbe {
+        core::FixedString<32> name{};
+        int capacity_fd{-1};
+        int status_fd{-1};
+    };
+    std::array<PeripheralProbe, 4> peripheral_probes_{};
+    size_t peripheral_probe_count_{0};
 
     // 2. RAPL & CPU
     int rapl_pkg_fd_{-1};
@@ -186,6 +212,19 @@ private:
     mutable std::optional<uint64_t> cached_energy_full_{std::nullopt};
     mutable std::optional<uint64_t> cached_energy_full_design_{std::nullopt};
     mutable std::optional<uint32_t> cached_cycle_count_{std::nullopt};
+    mutable std::optional<uint64_t> cached_voltage_min_design_{std::nullopt};
+    mutable core::FixedString<16> cached_bat_capacity_level_{};
+    mutable core::FixedString<16> cached_bat_technology_{};
+    mutable core::FixedString<32> cached_bat_model_name_{};
+    mutable core::FixedString<24> cached_bat_manufacturer_{};
+    mutable core::FixedString<24> cached_bat_serial_number_{};
+    mutable std::optional<uint32_t> cached_bat_charge_start_threshold_{std::nullopt};
+    mutable std::optional<uint32_t> cached_bat_charge_end_threshold_{std::nullopt};
+    mutable core::FixedString<32> cached_bat_charge_behaviour_{};
+    mutable core::FixedString<32> cached_usbc_pd_type_{};
+    mutable std::optional<uint64_t> cached_usbc_pd_voltage_max_{std::nullopt};
+    mutable std::optional<uint64_t> cached_usbc_pd_current_max_{std::nullopt};
+    mutable core::FixedVector<HardwareSample::PeripheralBattery, 4> cached_peripheral_batteries_{};
 
     void init_pmu_counters();
     void init_pcie_binary_configs();
