@@ -18,14 +18,16 @@ HardwarePowerBreakdown AttributionEngine::compute_hardware_power(
     hw.is_battery_discharging = hw2.is_discharging;
     hw.is_ac_online = hw2.is_ac_online;
 
-    // 1. Battery Gas Gauge, Chemistry, Health & Flow (REF-REQ-010 Sec 2.1, REF-REQ-022, REF-ARCH-012)
-    if (hw2.battery_power_uw.has_value()) {
-        uint64_t p1 = hw1.battery_power_uw.value_or(*hw2.battery_power_uw);
-        uint64_t p2 = *hw2.battery_power_uw;
-        hw.total_system_watts = static_cast<double>(p1 + p2) / 2.0 / 1'000'000.0;
-    } else {
-        hw.total_system_watts = 0.0;
-    }
+    // 1. Battery Gas Gauge, Chemistry, Health & Flow (REF-REQ-010 Sec 2.1, REF-REQ-022, REF-ARCH-012, REF-REQ-023)
+    {
+        WATTCURB_PROFILE_SCOPE("attr.battery_physics");
+        if (hw2.battery_power_uw.has_value()) {
+            uint64_t p1 = hw1.battery_power_uw.value_or(*hw2.battery_power_uw);
+            uint64_t p2 = *hw2.battery_power_uw;
+            hw.total_system_watts = static_cast<double>(p1 + p2) / 2.0 / 1'000'000.0;
+        } else {
+            hw.total_system_watts = 0.0;
+        }
 
     if (hw2.battery_energy_full_uwh.has_value() && hw2.battery_energy_full_design_uwh.has_value() &&
         *hw2.battery_energy_full_design_uwh > 0) {
@@ -115,6 +117,7 @@ HardwarePowerBreakdown AttributionEngine::compute_hardware_power(
     hw.usbc_online = hw2.usbc_pd_online;
     hw.usbc_pd_type = hw2.usbc_pd_type;
     hw.peripheral_batteries = hw2.peripheral_batteries;
+    }
 
     // 2. GPU Subsystem Telemetry & PPT (REF-REQ-010 Sec 2.3)
     if (hw2.gpu_power_uw.has_value()) {

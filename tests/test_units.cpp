@@ -987,6 +987,87 @@ void test_deep_battery_telemetry() {
     std::cout << " [PASS] test_deep_battery_telemetry (ThinkPad BAT0 uevent, Degradation, Thresholds & Peripherals verified)\n";
 }
 
+// Implements REF-TEST-009: Battery Telemetry Fine-Grained Profiling & Oracle Gate Verification
+void test_battery_telemetry_profiling_scopes() {
+    std::string_view uevent_mock =
+        "POWER_SUPPLY_NAME=BAT0\n"
+        "POWER_SUPPLY_TYPE=Battery\n"
+        "POWER_SUPPLY_STATUS=Discharging\n"
+        "POWER_SUPPLY_PRESENT=1\n"
+        "POWER_SUPPLY_TECHNOLOGY=Li-poly\n"
+        "POWER_SUPPLY_CYCLE_COUNT=95\n"
+        "POWER_SUPPLY_VOLTAGE_MIN_DESIGN=11100000\n"
+        "POWER_SUPPLY_VOLTAGE_NOW=10865000\n"
+        "POWER_SUPPLY_CURRENT_NOW=1500000\n"
+        "POWER_SUPPLY_POWER_NOW=16297500\n"
+        "POWER_SUPPLY_ENERGY_FULL_DESIGN=45280000\n"
+        "POWER_SUPPLY_ENERGY_FULL=42650000\n"
+        "POWER_SUPPLY_ENERGY_NOW=29320000\n"
+        "POWER_SUPPLY_CAPACITY=69\n"
+        "POWER_SUPPLY_CAPACITY_LEVEL=Normal\n"
+        "POWER_SUPPLY_MODEL_NAME=LNV-5B10W13895\n"
+        "POWER_SUPPLY_MANUFACTURER=SMP\n"
+        "POWER_SUPPLY_SERIAL_NUMBER=3502\n";
+
+    wattcurb::HardwareSample sample;
+    const size_t WARMUP_ITERS = 1000;
+    const size_t BENCH_ITERS = 50000;
+
+    // Warmup
+    for (size_t i = 0; i < WARMUP_ITERS; ++i) {
+        wattcurb::hw::HardwareProbe::parse_battery_uevent_buf(uevent_mock, sample);
+    }
+
+    // Micro-benchmark on SIMD uevent parser
+    auto t0 = std::chrono::steady_clock::now();
+    uint64_t tsc0 = wattcurb::core::hw_isa::read_tsc();
+
+    for (size_t i = 0; i < BENCH_ITERS; ++i) {
+        wattcurb::hw::HardwareProbe::parse_battery_uevent_buf(uevent_mock, sample);
+    }
+
+    auto t1 = std::chrono::steady_clock::now();
+    uint64_t tsc1 = wattcurb::core::hw_isa::read_tsc();
+
+    auto total_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+    double avg_us_op = (static_cast<double>(total_ns) / static_cast<double>(BENCH_ITERS)) / 1000.0;
+    double cycles_op = static_cast<double>(tsc1 - tsc0) / static_cast<double>(BENCH_ITERS);
+
+    // Verify parser correctness
+    assert(sample.is_discharging == true);
+    assert(sample.battery_power_uw.value_or(0) == 16297500);
+    assert(sample.battery_model_name == "LNV-5B10W13895");
+
+    // Attribution Engine battery physics benchmark
+    wattcurb::policy::AttributionEngine engine;
+    auto t_attr0 = std::chrono::steady_clock::now();
+    for (size_t i = 0; i < BENCH_ITERS; ++i) {
+        auto bd = engine.compute_hardware_power(sample, sample, 1.0);
+        (void)bd;
+    }
+    auto t_attr1 = std::chrono::steady_clock::now();
+    auto total_attr_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t_attr1 - t_attr0).count();
+    double avg_attr_us_op = (static_cast<double>(total_attr_ns) / static_cast<double>(BENCH_ITERS)) / 1000.0;
+
+    std::cout << " [ORACLE GATE] Battery Telemetry Profiling Benchmark (" << BENCH_ITERS << " iters):\n"
+              << "   * SIMD uevent parse: " << std::fixed << std::setprecision(4) << avg_us_op << " us/op ("
+              << std::setprecision(1) << cycles_op << " cycles/op)\n"
+              << "   * Battery physics calc: " << std::setprecision(4) << avg_attr_us_op << " us/op\n";
+
+    // Oracle Gate Assertion: SIMD parser must complete in < 0.35 us/op (target: sub-0.3 us)
+    assert(avg_us_op < 0.35 && "Battery SIMD uevent parser exceeded Oracle Gate threshold (< 0.35 us/op)!");
+
+#if defined(WATTCURB_DEV_PROFILE)
+    std::ostringstream oss;
+    wattcurb::core::ScopedProfilerRegistry::instance().print_summary(oss);
+    std::string summary = oss.str();
+    assert(summary.find("hw.battery.uevent_simd_parse") != std::string::npos && "SIMD parse scope must be profiled");
+    assert(summary.find("attr.battery_physics") != std::string::npos && "Battery physics scope must be profiled");
+#endif
+
+    std::cout << " [PASS] test_battery_telemetry_profiling_scopes (REF-TEST-009)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -998,6 +1079,7 @@ int main() {
     test::test_custom_containers();
     test::test_memory_sequence_probe_and_cache_chunking();
     test::test_deep_battery_telemetry();
+    test::test_battery_telemetry_profiling_scopes();
     test::test_process_classifier();
     test::test_mitigation_engine();
     test::test_modular_battery_features();

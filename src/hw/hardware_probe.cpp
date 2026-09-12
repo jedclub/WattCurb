@@ -43,6 +43,7 @@ static inline std::string_view trim_sv(std::string_view sv) noexcept {
 
 // Ultra-fast single-read uevent battery parser (REF-RES-007, REF-REQ-022, REF-ARCH-012)
 void HardwareProbe::parse_battery_uevent_buf(std::string_view content, HardwareSample& sample) noexcept {
+    WATTCURB_PROFILE_SCOPE("hw.battery.uevent_simd_parse");
     const char* cur = content.data();
     const char* end = cur + content.size();
 
@@ -51,73 +52,109 @@ void HardwareProbe::parse_battery_uevent_buf(std::string_view content, HardwareS
         std::string_view line(cur, static_cast<size_t>(next_nl - cur));
         cur = (next_nl < end) ? next_nl + 1 : end;
 
-        if (line.rfind("POWER_SUPPLY_STATUS=", 0) == 0) {
-            auto val = trim_sv(line.substr(20));
-            sample.is_discharging = (val == "Discharging");
-        } else if (line.rfind("POWER_SUPPLY_VOLTAGE_NOW=", 0) == 0) {
-            uint64_t v = 0;
-            const char* p = line.data() + 25;
-            if (std::from_chars(p, line.data() + line.size(), v).ec == std::errc()) {
-                sample.battery_voltage_uv = v;
+        constexpr std::string_view PREFIX = "POWER_SUPPLY_";
+        if (line.size() <= PREFIX.size() || std::memcmp(line.data(), PREFIX.data(), PREFIX.size()) != 0) {
+            continue;
+        }
+
+        std::string_view key_val = line.substr(PREFIX.size());
+        switch (key_val[0]) {
+        case 'S':
+            if (key_val.rfind("STATUS=", 0) == 0) {
+                sample.is_discharging = (trim_sv(key_val.substr(7)) == "Discharging");
+            } else if (key_val.rfind("SERIAL_NUMBER=", 0) == 0) {
+                sample.battery_serial_number = trim_sv(key_val.substr(14));
             }
-        } else if (line.rfind("POWER_SUPPLY_VOLTAGE_MIN_DESIGN=", 0) == 0) {
-            uint64_t v = 0;
-            const char* p = line.data() + 32;
-            if (std::from_chars(p, line.data() + line.size(), v).ec == std::errc()) {
-                sample.battery_voltage_min_design_uv = v;
+            break;
+
+        case 'V':
+            if (key_val.rfind("VOLTAGE_NOW=", 0) == 0) {
+                uint64_t v = 0;
+                const char* p = key_val.data() + 12;
+                if (std::from_chars(p, key_val.data() + key_val.size(), v).ec == std::errc()) {
+                    sample.battery_voltage_uv = v;
+                }
+            } else if (key_val.rfind("VOLTAGE_MIN_DESIGN=", 0) == 0) {
+                uint64_t v = 0;
+                const char* p = key_val.data() + 19;
+                if (std::from_chars(p, key_val.data() + key_val.size(), v).ec == std::errc()) {
+                    sample.battery_voltage_min_design_uv = v;
+                }
             }
-        } else if (line.rfind("POWER_SUPPLY_CURRENT_NOW=", 0) == 0) {
-            int64_t i = 0;
-            const char* p = line.data() + 25;
-            if (std::from_chars(p, line.data() + line.size(), i).ec == std::errc()) {
-                sample.battery_current_ua = i;
+            break;
+
+        case 'C':
+            if (key_val.rfind("CURRENT_NOW=", 0) == 0) {
+                int64_t i = 0;
+                const char* p = key_val.data() + 12;
+                if (std::from_chars(p, key_val.data() + key_val.size(), i).ec == std::errc()) {
+                    sample.battery_current_ua = i;
+                }
+            } else if (key_val.rfind("CAPACITY=", 0) == 0) {
+                uint32_t cap = 0;
+                const char* p = key_val.data() + 9;
+                if (std::from_chars(p, key_val.data() + key_val.size(), cap).ec == std::errc()) {
+                    sample.battery_capacity_percent = cap;
+                }
+            } else if (key_val.rfind("CAPACITY_LEVEL=", 0) == 0) {
+                sample.battery_capacity_level = trim_sv(key_val.substr(15));
+            } else if (key_val.rfind("CYCLE_COUNT=", 0) == 0) {
+                uint32_t c = 0;
+                const char* p = key_val.data() + 12;
+                if (std::from_chars(p, key_val.data() + key_val.size(), c).ec == std::errc()) {
+                    sample.battery_cycle_count = c;
+                }
             }
-        } else if (line.rfind("POWER_SUPPLY_POWER_NOW=", 0) == 0) {
-            uint64_t p_val = 0;
-            const char* p = line.data() + 23;
-            if (std::from_chars(p, line.data() + line.size(), p_val).ec == std::errc()) {
-                sample.battery_power_uw = p_val;
+            break;
+
+        case 'P':
+            if (key_val.rfind("POWER_NOW=", 0) == 0) {
+                uint64_t p_val = 0;
+                const char* p = key_val.data() + 10;
+                if (std::from_chars(p, key_val.data() + key_val.size(), p_val).ec == std::errc()) {
+                    sample.battery_power_uw = p_val;
+                }
             }
-        } else if (line.rfind("POWER_SUPPLY_ENERGY_NOW=", 0) == 0) {
-            uint64_t e_val = 0;
-            const char* p = line.data() + 24;
-            if (std::from_chars(p, line.data() + line.size(), e_val).ec == std::errc()) {
-                sample.battery_energy_now_uwh = e_val;
+            break;
+
+        case 'E':
+            if (key_val.rfind("ENERGY_NOW=", 0) == 0) {
+                uint64_t e_val = 0;
+                const char* p = key_val.data() + 11;
+                if (std::from_chars(p, key_val.data() + key_val.size(), e_val).ec == std::errc()) {
+                    sample.battery_energy_now_uwh = e_val;
+                }
+            } else if (key_val.rfind("ENERGY_FULL=", 0) == 0) {
+                uint64_t e_val = 0;
+                const char* p = key_val.data() + 12;
+                if (std::from_chars(p, key_val.data() + key_val.size(), e_val).ec == std::errc()) {
+                    sample.battery_energy_full_uwh = e_val;
+                }
+            } else if (key_val.rfind("ENERGY_FULL_DESIGN=", 0) == 0) {
+                uint64_t e_val = 0;
+                const char* p = key_val.data() + 19;
+                if (std::from_chars(p, key_val.data() + key_val.size(), e_val).ec == std::errc()) {
+                    sample.battery_energy_full_design_uwh = e_val;
+                }
             }
-        } else if (line.rfind("POWER_SUPPLY_ENERGY_FULL=", 0) == 0) {
-            uint64_t e_val = 0;
-            const char* p = line.data() + 25;
-            if (std::from_chars(p, line.data() + line.size(), e_val).ec == std::errc()) {
-                sample.battery_energy_full_uwh = e_val;
+            break;
+
+        case 'M':
+            if (key_val.rfind("MODEL_NAME=", 0) == 0) {
+                sample.battery_model_name = trim_sv(key_val.substr(11));
+            } else if (key_val.rfind("MANUFACTURER=", 0) == 0) {
+                sample.battery_manufacturer = trim_sv(key_val.substr(13));
             }
-        } else if (line.rfind("POWER_SUPPLY_ENERGY_FULL_DESIGN=", 0) == 0) {
-            uint64_t e_val = 0;
-            const char* p = line.data() + 32;
-            if (std::from_chars(p, line.data() + line.size(), e_val).ec == std::errc()) {
-                sample.battery_energy_full_design_uwh = e_val;
+            break;
+
+        case 'T':
+            if (key_val.rfind("TECHNOLOGY=", 0) == 0) {
+                sample.battery_technology = trim_sv(key_val.substr(11));
             }
-        } else if (line.rfind("POWER_SUPPLY_CAPACITY=", 0) == 0) {
-            uint32_t cap = 0;
-            const char* p = line.data() + 22;
-            if (std::from_chars(p, line.data() + line.size(), cap).ec == std::errc()) {
-                sample.battery_capacity_percent = cap;
-            }
-        } else if (line.rfind("POWER_SUPPLY_CYCLE_COUNT=", 0) == 0) {
-            uint32_t c = 0;
-            const char* p = line.data() + 25;
-            if (std::from_chars(p, line.data() + line.size(), c).ec == std::errc()) {
-                sample.battery_cycle_count = c;
-            }
-        } else if (line.rfind("POWER_SUPPLY_CAPACITY_LEVEL=", 0) == 0) {
-            sample.battery_capacity_level = trim_sv(line.substr(28));
-        } else if (line.rfind("POWER_SUPPLY_TECHNOLOGY=", 0) == 0) {
-            sample.battery_technology = trim_sv(line.substr(24));
-        } else if (line.rfind("POWER_SUPPLY_MODEL_NAME=", 0) == 0) {
-            sample.battery_model_name = trim_sv(line.substr(24));
-        } else if (line.rfind("POWER_SUPPLY_MANUFACTURER=", 0) == 0) {
-            sample.battery_manufacturer = trim_sv(line.substr(26));
-        } else if (line.rfind("POWER_SUPPLY_SERIAL_NUMBER=", 0) == 0) {
-            sample.battery_serial_number = trim_sv(line.substr(27));
+            break;
+
+        default:
+            break;
         }
     }
 
@@ -791,12 +828,15 @@ HardwareSample HardwareProbe::capture_sample() const {
     HardwareSample sample;
     sample.timestamp = std::chrono::steady_clock::now();
 
-    // 1. Battery & Power Rail
+    // 1. Battery & Power Rail (REF-REQ-022, REF-ARCH-012, REF-REQ-023)
     {
         WATTCURB_PROFILE_SCOPE("hw.battery_rail");
-        if (ac_online_fd_ >= 0) {
-            auto ac_val = read_uint32_fd(ac_online_fd_);
-            sample.is_ac_online = (ac_val.value_or(0) == 1);
+        {
+            WATTCURB_PROFILE_SCOPE("hw.battery.ac_check");
+            if (ac_online_fd_ >= 0) {
+                auto ac_val = read_uint32_fd(ac_online_fd_);
+                sample.is_ac_online = (ac_val.value_or(0) == 1);
+            }
         }
 
         // Fast Single-Read uevent Telemetry (REF-RES-007):
@@ -815,7 +855,11 @@ HardwareSample HardwareProbe::capture_sample() const {
 
             if (!skip_bat) {
                 alignas(64) char uevent_buf[1024];
-                ssize_t n = ::pread(battery_uevent_fd_, uevent_buf, sizeof(uevent_buf) - 1, 0);
+                ssize_t n = 0;
+                {
+                    WATTCURB_PROFILE_SCOPE("hw.battery.uevent_io");
+                    n = ::pread(battery_uevent_fd_, uevent_buf, sizeof(uevent_buf) - 1, 0);
+                }
                 if (n > 0) {
                     uevent_buf[n] = '\0';
                     parse_battery_uevent_buf(std::string_view(uevent_buf, static_cast<size_t>(n)), sample);
@@ -838,6 +882,7 @@ HardwareSample HardwareProbe::capture_sample() const {
                     cached_battery_static_initialized_ = true;
                 }
             } else {
+                WATTCURB_PROFILE_SCOPE("hw.battery.cached_replay");
                 sample.is_discharging = cached_is_discharging_;
                 sample.battery_power_uw = cached_bat_power_uw_;
                 sample.battery_current_ua = cached_bat_current_ua_;
@@ -856,6 +901,7 @@ HardwareSample HardwareProbe::capture_sample() const {
                 sample.battery_serial_number = cached_bat_serial_number_;
             }
         } else {
+            WATTCURB_PROFILE_SCOPE("hw.battery.fallback_sysfs");
             if (battery_status_fd_ >= 0) {
                 std::array<char, 32> stat_buf{};
                 if (read_string_buf(battery_status_fd_, stat_buf.data(), stat_buf.size())) {
@@ -911,64 +957,82 @@ HardwareSample HardwareProbe::capture_sample() const {
             sample.battery_cycle_count = cached_cycle_count_;
         }
 
-        // ThinkPad Charge Thresholds & Behavior (REF-REQ-022)
-        if (battery_threshold_start_fd_ >= 0) {
-            sample.battery_charge_start_threshold = read_uint32_fd(battery_threshold_start_fd_);
-            cached_bat_charge_start_threshold_ = sample.battery_charge_start_threshold;
-        } else {
-            sample.battery_charge_start_threshold = cached_bat_charge_start_threshold_;
-        }
-        if (battery_threshold_end_fd_ >= 0) {
-            sample.battery_charge_end_threshold = read_uint32_fd(battery_threshold_end_fd_);
-            cached_bat_charge_end_threshold_ = sample.battery_charge_end_threshold;
-        } else {
-            sample.battery_charge_end_threshold = cached_bat_charge_end_threshold_;
-        }
-        if (battery_behaviour_fd_ >= 0) {
-            std::array<char, 32> b_buf{};
-            if (read_string_buf(battery_behaviour_fd_, b_buf.data(), b_buf.size())) {
-                sample.battery_charge_behaviour = trim_sv(b_buf.data());
-                cached_bat_charge_behaviour_ = sample.battery_charge_behaviour;
+        // ThinkPad Charge Thresholds & Behavior (REF-REQ-022, REF-REQ-023)
+        // Subsample slow ACPI EC transactions: threshold registers rarely change.
+        // Polling EC every tick blocks on SMBus (~60ms). Sample on initial pass & every 30 turns (~60s).
+        {
+            WATTCURB_PROFILE_SCOPE("hw.battery.thresholds");
+            bool poll_thresholds = (sample_counter_ % 30 == 1) || !cached_battery_static_initialized_;
+            if (poll_thresholds) {
+                if (battery_threshold_start_fd_ >= 0) {
+                    sample.battery_charge_start_threshold = read_uint32_fd(battery_threshold_start_fd_);
+                    cached_bat_charge_start_threshold_ = sample.battery_charge_start_threshold;
+                } else {
+                    sample.battery_charge_start_threshold = cached_bat_charge_start_threshold_;
+                }
+                if (battery_threshold_end_fd_ >= 0) {
+                    sample.battery_charge_end_threshold = read_uint32_fd(battery_threshold_end_fd_);
+                    cached_bat_charge_end_threshold_ = sample.battery_charge_end_threshold;
+                } else {
+                    sample.battery_charge_end_threshold = cached_bat_charge_end_threshold_;
+                }
+                if (battery_behaviour_fd_ >= 0) {
+                    std::array<char, 32> b_buf{};
+                    if (read_string_buf(battery_behaviour_fd_, b_buf.data(), b_buf.size())) {
+                        sample.battery_charge_behaviour = trim_sv(b_buf.data());
+                        cached_bat_charge_behaviour_ = sample.battery_charge_behaviour;
+                    }
+                } else {
+                    sample.battery_charge_behaviour = cached_bat_charge_behaviour_;
+                }
+            } else {
+                sample.battery_charge_start_threshold = cached_bat_charge_start_threshold_;
+                sample.battery_charge_end_threshold = cached_bat_charge_end_threshold_;
+                sample.battery_charge_behaviour = cached_bat_charge_behaviour_;
             }
-        } else {
-            sample.battery_charge_behaviour = cached_bat_charge_behaviour_;
         }
 
         // USB-C Power Delivery & Source Profile
-        if (usbc_online_fd_ >= 0) {
-            auto u_on = read_uint32_fd(usbc_online_fd_);
-            sample.usbc_pd_online = (u_on.value_or(0) == 1);
-            if (usbc_voltage_fd_ >= 0) sample.usbc_pd_voltage_uv = read_uint64_fd(usbc_voltage_fd_);
-            if (usbc_current_fd_ >= 0) sample.usbc_pd_current_ua = read_uint64_fd(usbc_current_fd_);
-            if (usbc_voltage_max_fd_ >= 0) sample.usbc_pd_voltage_max_uv = read_uint64_fd(usbc_voltage_max_fd_);
-            if (usbc_current_max_fd_ >= 0) sample.usbc_pd_current_max_ua = read_uint64_fd(usbc_current_max_fd_);
-            if (usbc_type_fd_ >= 0) {
-                std::array<char, 32> t_buf{};
-                if (read_string_buf(usbc_type_fd_, t_buf.data(), t_buf.size())) {
-                    sample.usbc_pd_type = trim_sv(t_buf.data());
-                    cached_usbc_pd_type_ = sample.usbc_pd_type;
+        {
+            WATTCURB_PROFILE_SCOPE("hw.battery.usbc_pd");
+            if (usbc_online_fd_ >= 0) {
+                auto u_on = read_uint32_fd(usbc_online_fd_);
+                sample.usbc_pd_online = (u_on.value_or(0) == 1);
+                if (usbc_voltage_fd_ >= 0) sample.usbc_pd_voltage_uv = read_uint64_fd(usbc_voltage_fd_);
+                if (usbc_current_fd_ >= 0) sample.usbc_pd_current_ua = read_uint64_fd(usbc_current_fd_);
+                if (usbc_voltage_max_fd_ >= 0) sample.usbc_pd_voltage_max_uv = read_uint64_fd(usbc_voltage_max_fd_);
+                if (usbc_current_max_fd_ >= 0) sample.usbc_pd_current_max_ua = read_uint64_fd(usbc_current_max_fd_);
+                if (usbc_type_fd_ >= 0) {
+                    std::array<char, 32> t_buf{};
+                    if (read_string_buf(usbc_type_fd_, t_buf.data(), t_buf.size())) {
+                        sample.usbc_pd_type = trim_sv(t_buf.data());
+                        cached_usbc_pd_type_ = sample.usbc_pd_type;
+                    }
+                } else {
+                    sample.usbc_pd_type = cached_usbc_pd_type_;
                 }
-            } else {
-                sample.usbc_pd_type = cached_usbc_pd_type_;
             }
         }
 
         // Connected Peripheral Batteries (Bluetooth/HID/Stylus)
-        for (size_t i = 0; i < peripheral_probe_count_; ++i) {
-            const auto& p = peripheral_probes_[i];
-            if (p.capacity_fd >= 0) {
-                auto cap = read_uint32_fd(p.capacity_fd);
-                if (cap.has_value()) {
-                    HardwareSample::PeripheralBattery pb;
-                    pb.name = p.name;
-                    pb.capacity_percent = *cap;
-                    if (p.status_fd >= 0) {
-                        std::array<char, 16> s_buf{};
-                        if (read_string_buf(p.status_fd, s_buf.data(), s_buf.size())) {
-                            pb.is_charging = (std::strncmp(s_buf.data(), "Charging", 8) == 0);
+        {
+            WATTCURB_PROFILE_SCOPE("hw.battery.peripherals");
+            for (size_t i = 0; i < peripheral_probe_count_; ++i) {
+                const auto& p = peripheral_probes_[i];
+                if (p.capacity_fd >= 0) {
+                    auto cap = read_uint32_fd(p.capacity_fd);
+                    if (cap.has_value()) {
+                        HardwareSample::PeripheralBattery pb;
+                        pb.name = p.name;
+                        pb.capacity_percent = *cap;
+                        if (p.status_fd >= 0) {
+                            std::array<char, 16> s_buf{};
+                            if (read_string_buf(p.status_fd, s_buf.data(), s_buf.size())) {
+                                pb.is_charging = (std::strncmp(s_buf.data(), "Charging", 8) == 0);
+                            }
                         }
+                        sample.peripheral_batteries.push_back(pb);
                     }
-                    sample.peripheral_batteries.push_back(pb);
                 }
             }
         }
