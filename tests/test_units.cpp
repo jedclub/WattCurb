@@ -1524,8 +1524,15 @@ void test_window_aware_governor() {
     using namespace wattcurb::policy;
     WindowAwareGovernor gov;
 
-    // 1. Initial minimization (Stage 1 Soft Throttling)
-    int32_t browser_pid = static_cast<int32_t>(getpid()); // Self PID for safe test execution
+    // 0. Test Self-Freeze Prevention Invariant (Never freeze daemon itself)
+    int32_t self_pid = static_cast<int32_t>(getpid());
+    assert(MitigationEngine::apply_cgroup_freeze(self_pid, true) == false && "Self-freeze must be strictly rejected");
+    
+    gov.on_window_state_changed(self_pid, true, false, 1000, false);
+    assert(gov.tracked_count() == 0 && "Governor must reject tracking self-PID");
+
+    // 1. Initial minimization with isolated target PID (Stage 1 Soft Throttling)
+    int32_t browser_pid = 88888; 
     uint64_t t0 = 1000;
     gov.on_window_state_changed(browser_pid, true, false, t0, false);
 
@@ -1569,7 +1576,7 @@ void test_window_aware_governor() {
     gov.rollback_all();
     assert(gov.tracked_count() == 0);
 
-    std::cout << " [PASS] test_window_aware_governor (Stage 1/2 ladder, audio immunity, sub-ms thaw verified: " 
+    std::cout << " [PASS] test_window_aware_governor (Self-freeze guard, Stage 1/2 ladder, audio immunity, sub-ms thaw: " 
               << elapsed_us << "us)\n";
 }
 

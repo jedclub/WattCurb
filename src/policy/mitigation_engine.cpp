@@ -220,6 +220,11 @@ bool MitigationEngine::apply_memory_reclaim(int32_t pid, uint64_t bytes) noexcep
 bool MitigationEngine::apply_cgroup_freeze(int32_t pid, bool freeze) noexcept {
     if (pid <= 1) return false;
 
+    // Self-Freeze Prevention Invariant: Never freeze the daemon itself or its parent
+    if (freeze && (pid == ::getpid() || pid == ::getppid())) {
+        return false;
+    }
+
     char cg_path[256];
     if (!resolve_cgroup_path(pid, cg_path, sizeof(cg_path))) {
         return false;

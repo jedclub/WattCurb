@@ -142,3 +142,5 @@ void WindowAwareGovernor::thaw_immediate(uint32_t pid) noexcept {
    - Run the hysteresis loop for 60 seconds; assert that the process remains at `Stage1Throttled` and is **never** escalated to `Stage2Frozen`.
 3. **State Machine Idempotency**:
    - Redundant calls to `on_window_state_changed` must result in no duplicate syscalls.
+4. **Self-Freeze Prevention Invariant**:
+   - Explicitly verify that passing `getpid()` or `getppid()` to `apply_cgroup_freeze()` or the window governor immediately returns `false` / rejects registration, strictly preventing test harness deadlocks.

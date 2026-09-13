@@ -13,7 +13,8 @@ void WindowAwareGovernor::on_window_state_changed(
     uint64_t now_sec,
     bool is_audio_active
 ) noexcept {
-    if (pid <= 1) return;
+    // Self-Safety Invariant: Ignore daemon self and parent process
+    if (pid <= 1 || pid == ::getpid() || pid == ::getppid()) return;
 
     // Fast-path: Foreground focus or unminimized window immediately thaws to 100% responsiveness
     if (active || !minimized) {

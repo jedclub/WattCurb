@@ -53,3 +53,5 @@ This requirement specifies the **Window-Aware Dynamic Suppression Ladder** which
    - Terminal processes (`foot`, `konsole`, `kitty`) containing active subprocesses shall only be subject to Stage 1 (`SCHED_IDLE`) and never Stage 2 freezing, preventing long-running build interruptions.
 2. **Deterministic Memory Footprint**:
    - The PID tracking table shall be statically allocated with a capacity of 64 concurrent windows (`FixedVector<WindowStateEntry, 64>`), with zero dynamic heap allocations.
+3. **Self-Freeze Prevention Invariant (Anti-Deadlock Guard)**:
+   - The mitigation engine and window governor shall strictly reject freezing the daemon's own PID (`getpid()`) or its parent PID (`getppid()`), completely eliminating test harness freeze deadlocks and daemon self-suspension.
