@@ -11,9 +11,8 @@ public:
     // Part 1: Human-readable Executive Text Briefing (REF-REQ-019, REF-REQ-020)
     static void render_executive_briefing(const AnalysisReportData& report, std::ostream& out);
 
-    // Part 2: Detailed Developer Terminal Dashboard & Machine Struct/JSON
+    // Part 2: Detailed Developer Terminal Dashboard
     static void render_terminal(const AnalysisReportData& report, std::ostream& out);
-    static void render_json(const AnalysisReportData& report, std::ostream& out);
 
     // Part 3: Feature Metadata Catalog Briefing (REF-REQ-020, REF-ARCH-010)
     static void render_feature_catalog(std::ostream& out);

@@ -927,6 +927,34 @@ This document tracks historical PMU (Performance Monitoring Unit) hardware bench
 3. **Cold Boot Subsystem Isolation**:
    - 부트스트랩 1회성 초기화 함수(`HardwareProbe::refresh_device_paths`, `open_persistent_fds`, `init_*`)에 `[[gnu::noinline, gnu::cold]]`를 명시하여 L1I 핫패스 캐시에서 콜드 코드를 완벽히 분리.
 
+---
+
+### Milestone M26: Complete JSON Purge, 128-Byte Seqlock POD & Zero-ELF Residue Release
+- **Date**: 2026-09-13
+- **Configuration**: C++23, 3-Stage PGO, `-fno-exceptions`, `-fomit-frame-pointer`, LTO, Native AVX2/BMI2 Tuning, Exhaustive ELF Metadata Stripping.
+- **Related Requirements**: [`REF-REQ-008`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-005-zero-residue-release.md), [`REF-REQ-028`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-025-desktop-tray-and-bidirectional-control.md), [`REF-REQ-029`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-026-binary-seqlock-data-supply-and-json-elimination.md)
+- **Related Architecture**: [`REF-ARCH-018`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-018-desktop-tray-and-daemon-coordination.md), [`REF-ARCH-019`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-019-binary-seqlock-and-elf-pruning.md)
+
+#### 1. 1:1 Direct Milestone Comparison (M25 vs M26)
+
+| Metric / Binary Sector | [이전] Milestone M25 | [현재] Milestone M26 | 변화 (절감 및 최적화 결과) |
+| :--- | :---: | :---: | :--- |
+| **Stripped Production Binary** | **225,288 B (220.0 KB)** | **204,216 B (199.4 KB)** | 💎 **-21,072 B (-20.6 KB / -9.4% 순수 감축)** |
+| **`render_json` 기계어 크기** | 8,072 B (8.0 KB) | **0 B (완전 영구 삭제)** | 🎯 **-8,072 B (JSON 포맷터 100% 소멸)** |
+| **`.eh_frame` / `.eh_frame_hdr`** | 12,840 B (12.5 KB) | **0 B (완전 스트립)** | 🛡️ **-12,840 B (불필요한 언와인딩 메타 소멸)** |
+| **`.note.*` / `.comment` / `.sframe`** | 1,480 B (1.4 KB) | **0 B (완전 스트립)** | ⚡ **-1,480 B (컴파일러 주석 및 식별자 소멸)** |
+| **외부 데이터 통신 프로토콜** | 텍스트 JSON 문자열 스트림 | **128-Byte Seqlock POD 바이너리** | 👑 **Zero-Copy, Zero-Alloc, <15ns 읽기 지연** |
+| **데스크톱 트레이 연동 방식** | 소켓 질의 파싱 (CPU Wakeup 발생) | **/dev/shm Seqlock 무락 공유 메모리** | 🛡️ **데몬 CPU Wakeup 0회 (Zero-Wakeup)** |
+| **정상상태 동작 메모리 (RSS)** | 336 KB | **336 KB** | 👑 Zero-Heap 무할당 원칙 100% 유지 |
+
+#### 2. Key Optimization Vectors
+1. **Complete JSON Excision & Zero-Overhead Seqlock Protocol**:
+   - 디버깅용으로 남아 있던 8KB의 `render_json` 함수 및 수십 개의 JSON 키 스트링을 완전히 제거.
+   - 128-Byte 2-캐시라인 정렬 POD(`WattCurbSharedState`)와 락-프리 Seqlock 프로토콜을 도입하여 트레이 아이콘에 직렬화/파싱 오버헤드가 0인 순수 바이너리 피드를 공급.
+2. **Zero-ELF Residue Release Pipeline**:
+   - 배포 바이너리에서 `.eh_frame`, `.eh_frame_hdr`, `.sframe`, `.note.*`, `.comment` 섹션을 완벽하게 제거하여 바이너리 크기를 **204,216 바이트(199.4 KB)**로 압축, 200KB 벽을 돌파.
+
+
 
 
 

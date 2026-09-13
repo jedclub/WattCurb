@@ -8,6 +8,7 @@
 #include <iostream>
 #include <sstream>
 #include <sys/epoll.h>
+#include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/signalfd.h>
 #include <sys/socket.h>
@@ -30,6 +31,11 @@ DaemonRunner::~DaemonRunner() {
 }
 
 void DaemonRunner::cleanup_descriptors() noexcept {
+    if (shm_state_ != nullptr && shm_state_ != MAP_FAILED) {
+        ::munmap(shm_state_, sizeof(ipc::WattCurbSharedState));
+        shm_state_ = nullptr;
+    }
+    if (shm_fd_ >= 0) { ::close(shm_fd_); shm_fd_ = -1; }
     if (epoll_fd_ >= 0) { ::close(epoll_fd_); epoll_fd_ = -1; }
     if (timer_fd_ >= 0) { ::close(timer_fd_); timer_fd_ = -1; }
     if (signal_fd_ >= 0) { ::close(signal_fd_); signal_fd_ = -1; }
@@ -69,11 +75,33 @@ bool DaemonRunner::setup_signals() {
     return (signal_fd_ >= 0);
 }
 
+bool DaemonRunner::setup_shm() {
+    shm_fd_ = ::open(ipc::SHARED_STATE_SHM_PATH, O_RDWR | O_CREAT | O_CLOEXEC, 0666);
+    if (shm_fd_ < 0) {
+        return false;
+    }
+    if (::ftruncate(shm_fd_, sizeof(ipc::WattCurbSharedState)) < 0) {
+        ::close(shm_fd_);
+        shm_fd_ = -1;
+        return false;
+    }
+    void* ptr = ::mmap(nullptr, sizeof(ipc::WattCurbSharedState), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd_, 0);
+    if (ptr == MAP_FAILED) {
+        ::close(shm_fd_);
+        shm_fd_ = -1;
+        return false;
+    }
+    shm_state_ = static_cast<ipc::WattCurbSharedState*>(ptr);
+    return true;
+}
+
 bool DaemonRunner::initialize() {
     if (!lock_.is_locked()) {
         std::cerr << "[!] Error: WattCurb singleton lock could not be acquired. Another instance is already running.\n";
         return false;
     }
+
+    setup_shm(); // Non-fatal: local Seqlock state remains 100% functional
 
     if (!setup_timer()) {
         std::cerr << "[!] Error: Failed to initialize timerfd.\n";
@@ -139,10 +167,11 @@ void DaemonRunner::collect_observation_window() {
     double batt_pct = static_cast<double>(cached_report_.hardware.battery_capacity_percent);
     feature_manager_.evaluate_and_actuate(cached_report_, on_battery, batt_pct);
 
-    // Pure In-Memory Struct Pipeline:
-    // Zero string serialization or formatting is performed in the routine background loop!
-    // Telemetry and feature mitigation states are retained 100% in memory structures.
-    // Serialization executes on-demand exclusively upon receiving client IPC datagrams.
+    // 6. Ultra-Fast 128-Byte Seqlock POD Export (REF-REQ-028, REF-ARCH-018)
+    local_shared_state_.update_from_report(cached_report_);
+    if (shm_state_ != nullptr) {
+        shm_state_->update_from_report(cached_report_);
+    }
 
     proc_pool_.swap(); // 0ns pointer swap
 }
@@ -211,17 +240,19 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
     buf[bytes] = '\0';
 
     std::string_view req(buf, static_cast<size_t>(bytes));
-    std::stringstream ss;
 
     if (req.find("BRIEFING") != std::string_view::npos) {
+        // Developer text briefing channel exclusively for manual terminal debugging
+        std::stringstream ss;
         report::ReportGenerator::render_executive_briefing(cached_report_, ss);
+        auto resp_str = ss.str();
+        ::sendto(fd, resp_str.data(), resp_str.size(), 0,
+                 reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
     } else {
-        report::ReportGenerator::render_json(cached_report_, ss);
+        // High-Efficiency Binary Telemetry: Send 128-Byte Seqlock POD directly (0 allocations, 0 parsing)
+        ::sendto(fd, &local_shared_state_, sizeof(local_shared_state_), 0,
+                 reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
     }
-
-    auto resp_str = ss.str();
-    ::sendto(fd, resp_str.data(), resp_str.size(), 0,
-             reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
 }
 
 void DaemonRunner::stop() noexcept {

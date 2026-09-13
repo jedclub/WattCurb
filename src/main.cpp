@@ -6,17 +6,21 @@
 #include "policy/battery_feature.hpp"
 #include "report/report_generator.hpp"
 #include "core/scoped_profiler.hpp"
+#include "ipc/tray_shared_state.hpp"
 
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <csignal>
 #include <cstdlib>
+#include <fcntl.h>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <string_view>
+#include <sys/mman.h>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
 namespace {
@@ -29,15 +33,14 @@ void handle_sigint(int) {
 void print_help(const char* prog) {
     std::cout << "Usage: " << prog << " [options]\n"
               << "WattCurb: Ultra-low-overhead Linux power profiler and modular battery mitigation daemon\n\n"
-              << "Two-Part Telemetry & High-Fidelity Executive Reporting (REF-REQ-020):\n"
+              << "Developer & Debugging Reporting (REF-REQ-020):\n"
               << "  -b, --briefing         High-fidelity detailed executive briefing (10s observation by default)\n"
-              << "  -j, --json             Machine-parsable JSON export of all structural telemetry fields\n"
               << "      --detail           Comprehensive engineering/developer terminal table dashboard\n"
               << "  -F, --features         Print catalog of all modular optimization features with rationale\n"
               << "  -X, --extreme-profile  Execute 30s extreme battery profile for LLM feature synthesis\n\n"
               << "Daemon & Live Modes:\n"
-              << "  -d, --daemon           Run persistent daemon (Default: 60s period with 5s observation)\n"
-              << "  -s, --status           Query live report/status from running background daemon via IPC\n"
+              << "  -d, --daemon           Run persistent daemon (128-byte binary Seqlock POD state in /dev/shm)\n"
+              << "  -s, --status           Query live binary state from running daemon via 128-byte Seqlock POD\n"
               << "  -l, --live             Continuous live interactive terminal dashboard (Ctrl+C to stop)\n\n"
               << "Observation & Feature Tuning Options:\n"
               << "      --period <sec>     Daemon sleep period in seconds (default: 60.0s)\n"
@@ -76,29 +79,42 @@ int query_daemon_briefing() {
 }
 
 int query_daemon_status() {
-    // 1. Direct on-demand IPC query to daemon
-    std::string resp;
-    if (wattcurb::core::SingletonLock::query_daemon("JSON", resp)) {
-        std::cout << resp << std::flush;
-        return 0;
-    }
-
-    // 2. Fallback to cached live file
-    std::ifstream live_file("/tmp/wattcurb_live.json");
-    if (live_file.is_open()) {
-        std::string line;
-        while (std::getline(live_file, line)) {
-            std::cout << line << "\n";
+    // 1. Ultra-fast direct read from 128-byte Seqlock POD Shared Memory (REF-REQ-028, REF-ARCH-018)
+    int fd = ::open(wattcurb::ipc::SHARED_STATE_SHM_PATH, O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        void* ptr = ::mmap(nullptr, sizeof(wattcurb::ipc::WattCurbSharedState), PROT_READ, MAP_SHARED, fd, 0);
+        if (ptr != MAP_FAILED) {
+            auto* shm = static_cast<const wattcurb::ipc::WattCurbSharedState*>(ptr);
+            wattcurb::ipc::WattCurbSharedState state{};
+            if (shm->read_atomic(state)) {
+                std::cout << "\033[1m[WattCurb Resident Daemon Binary Status (REF-ARCH-018)]\033[0m\n"
+                          << "  - Total System Drain : " << std::fixed << std::setprecision(2) << (state.system_drain_mw / 1000.0) << " W\n"
+                          << "  - CPU Package Drain  : " << (state.cpu_drain_mw / 1000.0) << " W (" << state.cpu_temp_c << "°C)\n"
+                          << "  - GPU Silicon Drain  : " << (state.gpu_drain_mw / 1000.0) << " W\n"
+                          << "  - Battery Level      : " << static_cast<int>(state.battery_percent) << "% ("
+                          << (state.battery_state == 1 ? "Discharging" : (state.battery_state == 2 ? "AC Pass-through" : "AC Connected")) << ")\n"
+                          << "  - System Wakeups     : " << state.wakeups_per_sec << " wakeups/sec\n"
+                          << "  - Cooling Fan        : " << state.fan_rpm << " RPM\n"
+                          << "  - Active Mitigations : " << state.active_mitigations << " features active\n";
+                if (state.culprits[0].pid > 0) {
+                    std::cout << "  - Top Drain Culprit  : PID " << state.culprits[0].pid << " (" << state.culprits[0].comm
+                              << ") -> " << (state.culprits[0].drain_mw / 1000.0) << " W\n";
+                }
+                ::munmap(ptr, sizeof(wattcurb::ipc::WattCurbSharedState));
+                ::close(fd);
+                return 0;
+            }
+            ::munmap(ptr, sizeof(wattcurb::ipc::WattCurbSharedState));
         }
-        return 0;
+        ::close(fd);
     }
 
     if (wattcurb::core::SingletonLock::is_daemon_running("wattcurb.lock")) {
-        std::cout << "[*] Daemon is running. Waiting for initial sample report...\n";
+        std::cout << "[*] Daemon is running. Initializing binary shared state...\n";
         return 0;
     }
 
-    std::cerr << "[!] No running WattCurb daemon found (or daemon not responding to IPC).\n"
+    std::cerr << "[!] No running WattCurb daemon found.\n"
               << "    Start daemon with: wattcurb --daemon\n";
     return 1;
 }
@@ -110,7 +126,6 @@ int main(int argc, char* argv[]) {
     double window_sec = 5.0;
     size_t sample_count = 1;
     size_t top_n = 15;
-    bool json_output = false;
     bool briefing_mode = false;
     bool detail_mode = false;
     bool daemon_mode = false;
@@ -154,8 +169,6 @@ int main(int argc, char* argv[]) {
             sample_count = static_cast<size_t>(std::max(1L, std::strtol(argv[++i], nullptr, 10)));
         } else if ((arg == "-n" || arg == "--top") && i + 1 < argc) {
             top_n = static_cast<size_t>(std::max(1L, std::strtol(argv[++i], nullptr, 10)));
-        } else if (arg == "-j" || arg == "--json") {
-            json_output = true;
         }
     }
 
@@ -169,7 +182,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Extended High-Fidelity Executive Briefing query/execution (REF-REQ-020)
-    if (!extreme_profile_mode && (briefing_mode || (!daemon_mode && !json_output && !detail_mode && !live_mode)) && duration_sec == 0.0) {
+    if (!extreme_profile_mode && (briefing_mode || (!daemon_mode && !detail_mode && !live_mode)) && duration_sec == 0.0) {
         // First try to fetch on-demand live briefing from active daemon
         int ret = query_daemon_briefing();
         if (ret == 0) {
@@ -187,7 +200,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (duration_sec > 0.0) {
-        sample_count = std::max<size_t>(1, static_cast<size_t>(std::round(duration_sec / interval_sec)));
+        sample_count = static_cast<size_t>(std::max<size_t>(1, static_cast<size_t>(std::round(duration_sec / interval_sec))));
     }
 
     wattcurb::hw::HardwareProbe hw_probe;
@@ -218,9 +231,7 @@ int main(int argc, char* argv[]) {
             auto report = engine.compute_attribution(hw_prev, hw_cur, prev_snapshot.span(), cur_snapshot.span(), top_n);
             feature_manager.evaluate_and_actuate(report, report.hardware.is_battery_discharging, static_cast<double>(report.hardware.battery_capacity_percent));
 
-            if (json_output) {
-                wattcurb::report::ReportGenerator::render_json(report, std::cout);
-            } else if (briefing_mode) {
+            if (briefing_mode) {
                 std::cout << "\033[H\033[2J";
                 wattcurb::report::ReportGenerator::render_executive_briefing(report, std::cout);
             } else {
@@ -248,7 +259,7 @@ int main(int argc, char* argv[]) {
     proc_analyzer.capture_snapshot(proc_samples.back());
 
     for (size_t step = 1; step <= sample_count; ++step) {
-        if (!json_output && sample_count > 1) {
+        if (sample_count > 1) {
             double progress = static_cast<double>(step - 1) / static_cast<double>(sample_count);
             int bar_width = 24;
             int filled = static_cast<int>(progress * bar_width);
@@ -272,7 +283,7 @@ int main(int argc, char* argv[]) {
         proc_analyzer.capture_snapshot(proc_samples.back(), &proc_samples[proc_samples.size() - 2]);
     }
 
-    if (!json_output && sample_count > 1) {
+    if (sample_count > 1) {
         std::cout << "\r\033[K" << std::flush; // Clear progress bar line
     }
 
@@ -285,10 +296,7 @@ int main(int argc, char* argv[]) {
     feature_manager.evaluate_and_actuate(report, on_batt, b_pct);
 
     // Render Telemetry Outputs (REF-REQ-019, REF-REQ-020, REF-REQ-021)
-    if (json_output) {
-        // Part 2 (Machine): Structured JSON
-        wattcurb::report::ReportGenerator::render_json(report, std::cout);
-    } else if (extreme_profile_mode) {
+    if (extreme_profile_mode) {
         // Part 4: Extreme 30s Physical Hardware Causation Profile for LLM Synthesis (REF-REQ-021)
         wattcurb::report::ReportGenerator::render_extreme_profile(report, std::cout);
     } else if (detail_mode) {

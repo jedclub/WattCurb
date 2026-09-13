@@ -10,9 +10,11 @@
 #include <atomic>
 #include <string>
 
+#include "ipc/tray_shared_state.hpp"
+
 namespace wattcurb::core {
 
-// Implements REF-REQ-002, REF-REQ-007, REF-REQ-019, REF-REQ-020, REF-ARCH-004, REF-ARCH-009
+// Implements REF-REQ-002, REF-REQ-007, REF-REQ-019, REF-REQ-020, REF-REQ-028, REF-ARCH-004, REF-ARCH-018
 class DaemonRunner {
 public:
     explicit DaemonRunner(double period_sec = 60.0, double window_sec = 5.0, std::string_view lock_name = "wattcurb.lock");
@@ -26,6 +28,7 @@ public:
     void stop() noexcept;
 
     [[nodiscard]] const AnalysisReportData& latest_report() const noexcept { return cached_report_; }
+    [[nodiscard]] const ipc::WattCurbSharedState& shared_state() const noexcept { return local_shared_state_; }
     [[nodiscard]] policy::FeatureManager& feature_manager() noexcept { return feature_manager_; }
     [[nodiscard]] const policy::FeatureManager& feature_manager() const noexcept { return feature_manager_; }
 
@@ -43,12 +46,17 @@ private:
     ProcessPool proc_pool_;
     AnalysisReportData cached_report_;
 
+    ipc::WattCurbSharedState local_shared_state_{};
+    ipc::WattCurbSharedState* shm_state_{nullptr};
+    int shm_fd_{-1};
+
     int epoll_fd_{-1};
     int timer_fd_{-1};
     int signal_fd_{-1};
 
     bool setup_timer();
     bool setup_signals();
+    bool setup_shm();
     void collect_observation_window();
     void handle_ipc_datagram(int fd);
     void cleanup_descriptors() noexcept;

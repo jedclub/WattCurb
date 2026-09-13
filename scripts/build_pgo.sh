@@ -28,7 +28,7 @@ echo "[2/4] Training profile data on realistic and synthetic workloads..."
 "${BUILD_DIR}/wattcurb_tests" > /dev/null
 "${BUILD_DIR}/wattcurb" --features > /dev/null
 "${BUILD_DIR}/wattcurb" --interval 1 --top 30 > /dev/null
-"${BUILD_DIR}/wattcurb" --interval 1 --top 30 --json > /dev/null
+"${BUILD_DIR}/wattcurb" --briefing > /dev/null
 "${BUILD_DIR}/wattcurb" -X -w 2 -i 1 > /dev/null
 
 # 3. Compile final PGO-optimized binary
@@ -41,9 +41,17 @@ cmake -B "${BUILD_DIR}" -G Ninja \
 
 ninja -C "${BUILD_DIR}" wattcurb wattcurb_tests wattcurb_asm
 
-# Stage final stripped production binary (REF-REQ-008)
+# Stage final stripped production binary (REF-REQ-008 & ELF Metadata Pruning)
 mkdir -p "${ROOT_DIR}/output"
-strip --strip-all "${BUILD_DIR}/wattcurb" -o "${ROOT_DIR}/output/wattcurb"
+strip --strip-all \
+    --remove-section=.note.gnu.build-id \
+    --remove-section=.note.ABI-tag \
+    --remove-section=.note.gnu.property \
+    --remove-section=.comment \
+    --remove-section=.sframe \
+    --remove-section=.eh_frame \
+    --remove-section=.eh_frame_hdr \
+    "${BUILD_DIR}/wattcurb" -o "${ROOT_DIR}/output/wattcurb"
 echo "Stripped production binary generated: ${ROOT_DIR}/output/wattcurb ($(stat -c%s "${ROOT_DIR}/output/wattcurb") bytes)"
 
 # 4. Execute PMU Hardware Counter Analysis
