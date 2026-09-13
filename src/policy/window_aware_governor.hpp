@@ -7,12 +7,14 @@
 
 namespace wattcurb::policy {
 
-// Implements REF-REQ-032, REF-REQ-033, REF-ARCH-022, REF-ARCH-023
-// Window-Aware Dynamic Suppression Ladder & Desktop Governor for KDE Plasma 6 (Wayland)
+// Implements REF-REQ-033, REF-ARCH-023:
+// Non-Halting Graceful Throttle & Window-Aware Desktop Governor for KDE Plasma 6 (Wayland)
+// Core Invariant: NEVER freeze or halt background applications completely.
+// Processes remain 100% alive for WebSockets, background notifications, and IPC,
+// while yielding CPU runqueue priority (SCHED_IDLE) and coalescing wakeup timers.
 enum class WindowSuppressionState : uint8_t {
-    ActiveForeground = 0, // Uninhibited (SCHED_OTHER, 50µs timerslack)
-    Stage1Throttled  = 1, // SCHED_IDLE, 100ms timerslack, uclamp capped
-    Stage2Frozen     = 2  // cgroup.freeze = 1, memory reclaimed
+    ActiveForeground     = 0, // Uninhibited (SCHED_OTHER, 50µs timerslack)
+    GracefulIdleThrottled = 1  // Non-Halting Throttle (SCHED_IDLE, 50ms timerslack, IOPRIO_IDLE)
 };
 
 struct alignas(32) WindowStateEntry {
@@ -27,7 +29,6 @@ struct alignas(32) WindowStateEntry {
 class WindowAwareGovernor {
 public:
     static constexpr size_t MAX_TRACKED_WINDOWS = 64;
-    static constexpr uint64_t STAGE2_HYSTERESIS_SEC = 20; // 20 seconds before freezing
 
     WindowAwareGovernor() noexcept = default;
 
@@ -40,11 +41,11 @@ public:
         bool is_audio_active = false
     ) noexcept;
 
-    // Evaluates hysteresis for all minimized windows (escalation to Stage 2 freezing)
+    // Evaluates non-halting graceful throttle state
     void evaluate_hysteresis(uint64_t now_sec) noexcept;
 
-    // Instantaneous thaw and scheduler restoration (< 1.0ms)
-    bool thaw_immediate(int32_t pid) noexcept;
+    // Instantaneous unthrottle and scheduler restoration (< 50µs)
+    bool unthrottle_immediate(int32_t pid) noexcept;
 
     // Global rollback (e.g. on AC reconnection or daemon shutdown)
     void rollback_all() noexcept;

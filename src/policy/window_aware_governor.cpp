@@ -5,7 +5,11 @@
 
 namespace wattcurb::policy {
 
-// Implements REF-REQ-033 & REF-ARCH-023: Zero-Wakeup Progressive Suppression Ladder
+// Implements REF-REQ-033 & REF-ARCH-023:
+// Non-Halting Graceful Throttle Engine
+// Invariant: Background applications are NEVER halted or frozen.
+// They execute normally on the lowest CFS runqueue tier (SCHED_IDLE)
+// with coalesced wakeup timers, eliminating system-wide UI pauses.
 void WindowAwareGovernor::on_window_state_changed(
     int32_t pid, 
     bool minimized, 
@@ -16,9 +20,9 @@ void WindowAwareGovernor::on_window_state_changed(
     // Self-Safety Invariant: Ignore daemon self and parent process
     if (pid <= 1 || pid == ::getpid() || pid == ::getppid()) return;
 
-    // Fast-path: Foreground focus or unminimized window immediately thaws to 100% responsiveness
+    // Fast-path: Foreground focus or unminimized window immediately unthrottles
     if (active || !minimized) {
-        thaw_immediate(pid);
+        unthrottle_immediate(pid);
         return;
     }
 
@@ -40,37 +44,22 @@ void WindowAwareGovernor::on_window_state_changed(
         entry->has_active_audio = is_audio_active;
     }
 
-    // Stage 1 Immediate Soft Throttling: SCHED_IDLE + Timer Slack relaxation (100ms)
+    // Non-Halting Graceful Throttle:
+    // Process is NEVER halted. It runs under SCHED_IDLE (only utilizing spare CPU cycles)
+    // with timers relaxed to 50ms to prevent high-frequency CPU package wakeups.
     if (entry->state == WindowSuppressionState::ActiveForeground) {
         MitigationEngine::apply_sched_idle(pid);
-        MitigationEngine::apply_timer_slack(pid, 100'000'000ULL); // 100ms
-        entry->state = WindowSuppressionState::Stage1Throttled;
+        MitigationEngine::apply_timer_slack(pid, 50'000'000ULL); // 50ms graceful timer slack
+        entry->state = WindowSuppressionState::GracefulIdleThrottled;
     }
 }
 
-void WindowAwareGovernor::evaluate_hysteresis(uint64_t now_sec) noexcept {
-    for (size_t i = 0; i < m_windows.size(); ++i) {
-        auto& entry = m_windows[i];
-        if (entry.state == WindowSuppressionState::Stage1Throttled) {
-            // Audio-playing and terminal processes are strictly immune from hard freezing
-            if (entry.has_active_audio || entry.is_terminal) {
-                continue;
-            }
-
-            // Hysteresis window check (e.g. 20s minimized)
-            if (now_sec >= entry.minimized_timestamp_sec &&
-                (now_sec - entry.minimized_timestamp_sec) >= STAGE2_HYSTERESIS_SEC) {
-                
-                // Stage 2 Escalation: Transparent cgroup v2 freeze & memory compaction
-                MitigationEngine::apply_cgroup_freeze(entry.pid, true);
-                MitigationEngine::apply_memory_reclaim(entry.pid, 64 * 1024 * 1024); // 64MB
-                entry.state = WindowSuppressionState::Stage2Frozen;
-            }
-        }
-    }
+void WindowAwareGovernor::evaluate_hysteresis(uint64_t /*now_sec*/) noexcept {
+    // Non-Halting Invariant: No escalation to hard freeze.
+    // Applications remain active and responsive in GracefulIdleThrottled state.
 }
 
-bool WindowAwareGovernor::thaw_immediate(int32_t pid) noexcept {
+bool WindowAwareGovernor::unthrottle_immediate(int32_t pid) noexcept {
     auto* entry = find_entry_mut(pid);
     if (!entry) return false;
 
@@ -78,15 +67,10 @@ bool WindowAwareGovernor::thaw_immediate(int32_t pid) noexcept {
         return true;
     }
 
-    // 1. Thaw cgroup if frozen
-    if (entry->state == WindowSuppressionState::Stage2Frozen) {
-        MitigationEngine::apply_cgroup_freeze(pid, false);
-    }
-
-    // 2. Restore CFS scheduler (SCHED_OTHER, nice 0)
+    // 1. Restore CFS scheduler (SCHED_OTHER, normal CFS weight)
     MitigationEngine::restore_sched_normal(pid);
 
-    // 3. Restore standard 50µs timer slack for high frame-rate responsiveness
+    // 2. Restore standard 50µs timer slack for high frame-rate rendering
     MitigationEngine::apply_timer_slack(pid, 50'000ULL);
 
     entry->state = WindowSuppressionState::ActiveForeground;
@@ -97,9 +81,6 @@ void WindowAwareGovernor::rollback_all() noexcept {
     for (size_t i = 0; i < m_windows.size(); ++i) {
         auto& entry = m_windows[i];
         if (entry.state != WindowSuppressionState::ActiveForeground) {
-            if (entry.state == WindowSuppressionState::Stage2Frozen) {
-                MitigationEngine::apply_cgroup_freeze(entry.pid, false);
-            }
             MitigationEngine::restore_sched_normal(entry.pid);
             MitigationEngine::apply_timer_slack(entry.pid, 50'000ULL);
             entry.state = WindowSuppressionState::ActiveForeground;

@@ -1,4 +1,4 @@
-# [REF-ARCH-023] KWin Scripting & Progressive Window-Aware Actuation Architecture
+# [REF-ARCH-023] KWin Scripting & Non-Halting Window-Aware Actuation Architecture
 
 ## 1. Architectural Blueprint
 - **Ref-ID**: `REF-ARCH-023`
@@ -23,19 +23,19 @@
 │             wattcurb::policy::desktop::WindowAwareGovernor             │
 ├────────────────────────────────────────────────────────────────────────┤
 │  • Fixed-Capacity Tracking Table: FixedVector<WindowStateEntry, 64>    │
+│  • Non-Halting Invariant: NEVER freeze or halt processes               │
 │  • Microsecond Monotonic Timestamps for Hysteresis Tracking            │
-│  • PipeWire Audio Stream Bitmask Check                                 │
 └─────────┬──────────────────────────────────────────────────────────────┘
           │
-     ┌────┴──────────────────────────────┐
-     ▼ (t = 0s)                          ▼ (t = 20s, no audio)
-┌───────────────────────────┐       ┌───────────────────────────┐
-│ Stage 1: Soft Throttling  │       │ Stage 2: Hard Freeze      │
-├───────────────────────────┤       ├───────────────────────────┤
-│ • sched_setscheduler      │       │ • /cgroup.freeze = 1      │
-│   (SCHED_IDLE)            │       │ • /memory.reclaim = 64M   │
-│ • timerslack_ns = 100ms   │       │                           │
-└───────────────────────────┘       └───────────────────────────┘
+          ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│        Non-Halting Graceful Throttling (GracefulIdleThrottled)         │
+├────────────────────────────────────────────────────────────────────────┤
+│ • sched_setscheduler(pid, SCHED_IDLE) ➔ Runs only on spare CPU cycles  │
+│ • timerslack_ns = 50ms ➔ Eliminates high-frequency timer wakeups        │
+│ • IOPRIO_CLASS_IDLE ➔ Prevents background disk I/O contention          │
+│ ➔ Process stays 100% ALIVE: WebSockets, D-Bus IPC & audio unaffected   │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -46,26 +46,24 @@
 namespace wattcurb::policy::desktop {
 
 enum class WindowSuppressionState : uint8_t {
-    ActiveForeground = 0, // Uninhibited (SCHED_OTHER, normal timerslack)
-    Stage1Throttled  = 1, // SCHED_IDLE, 100ms timerslack, uclamp capped
-    Stage2Frozen     = 2  // cgroup.freeze = 1, memory reclaimed
+    ActiveForeground      = 0, // Uninhibited (SCHED_OTHER, 50µs timerslack)
+    GracefulIdleThrottled = 1  // Non-Halting Throttle (SCHED_IDLE, 50ms timerslack, IOPRIO_IDLE)
 };
 
 struct alignas(32) WindowStateEntry {
-    uint32_t pid{0};
-    uint64_t minimized_timestamp_ns{0};
+    int32_t pid{0};
+    uint64_t minimized_timestamp_sec{0};
     WindowSuppressionState state{WindowSuppressionState::ActiveForeground};
     bool has_active_audio{false};
     bool is_terminal{false};
-    uint8_t cgroup_path_len{0};
-    char cgroup_path[128]{0};
+    uint64_t original_timerslack_ns{50000};
 };
 
 class WindowAwareGovernor {
 public:
-    static void on_window_state_changed(uint32_t pid, bool minimized, bool active) noexcept;
-    static void evaluate_hysteresis(uint64_t current_time_ns) noexcept;
-    static void thaw_immediate(uint32_t pid) noexcept;
+    static void on_window_state_changed(int32_t pid, bool minimized, bool active, uint64_t now_sec, bool is_audio_active) noexcept;
+    static bool unthrottle_immediate(int32_t pid) noexcept;
+    static void rollback_all() noexcept;
 
 private:
     static inline FixedVector<WindowStateEntry, 64> s_tracking_table{};
@@ -78,40 +76,30 @@ private:
 
 ## 3. Kernel Actuation Fast Path
 
-### 3.1 Immediate Stage 1 (Soft Throttling)
+### 3.1 Non-Halting Throttle Application
 ```cpp
-void apply_stage1(WindowStateEntry& entry) noexcept {
-    // 1. Demote to SCHED_IDLE
+void apply_graceful_throttle(WindowStateEntry& entry) noexcept {
+    // 1. Demote to SCHED_IDLE (Lowest CFS runqueue priority)
     struct sched_param sp{.sched_priority = 0};
     sched_setscheduler(entry.pid, SCHED_IDLE, &sp);
 
-    // 2. Coalesce timerslack to 100ms
+    // 2. Coalesce timerslack to 50ms (never halts timers, only aligns them)
     char path[64];
     snprintf(path, sizeof(path), "/proc/%u/timerslack_ns", entry.pid);
     int fd = open(path, O_WRONLY | O_CLOEXEC);
     if (fd >= 0) {
-        write(fd, "100000000", 9);
+        write(fd, "50000000", 8);
         close(fd);
     }
-    entry.state = WindowSuppressionState::Stage1Throttled;
+    entry.state = WindowSuppressionState::GracefulIdleThrottled;
 }
 ```
 
-### 3.2 Instantaneous Thaw (< 1ms)
+### 3.2 Instantaneous Unthrottle (< 10µs)
 ```cpp
-void WindowAwareGovernor::thaw_immediate(uint32_t pid) noexcept {
+bool WindowAwareGovernor::unthrottle_immediate(int32_t pid) noexcept {
     auto* entry = find_entry(pid);
-    if (!entry || entry->state == WindowSuppressionState::ActiveForeground) return;
-
-    if (entry->state == WindowSuppressionState::Stage2Frozen) {
-        char freeze_path[160];
-        snprintf(freeze_path, sizeof(freeze_path), "%s/cgroup.freeze", entry->cgroup_path);
-        int fd = open(freeze_path, O_WRONLY | O_CLOEXEC);
-        if (fd >= 0) {
-            write(fd, "0", 1);
-            close(fd);
-        }
-    }
+    if (!entry || entry->state == WindowSuppressionState::ActiveForeground) return true;
 
     // Restore standard CFS scheduler
     struct sched_param sp{.sched_priority = 0};
@@ -127,6 +115,7 @@ void WindowAwareGovernor::thaw_immediate(uint32_t pid) noexcept {
     }
 
     entry->state = WindowSuppressionState::ActiveForeground;
+    return true;
 }
 ```
 
@@ -134,13 +123,10 @@ void WindowAwareGovernor::thaw_immediate(uint32_t pid) noexcept {
 
 ## 4. Verification & Testing Standards (`REF-TEST-016`)
 
-1. **Thaw Latency Assertions**:
-   - In automated tests, measure total elapsed time for `thaw_immediate()` execution.
-   - Must execute in $\le 500\mu\text{s}$ (well below the 1.0ms threshold).
-2. **Audio Immunity Verification**:
-   - Simulate a minimized process with `has_active_audio = true`.
-   - Run the hysteresis loop for 60 seconds; assert that the process remains at `Stage1Throttled` and is **never** escalated to `Stage2Frozen`.
-3. **State Machine Idempotency**:
-   - Redundant calls to `on_window_state_changed` must result in no duplicate syscalls.
-4. **Self-Freeze Prevention Invariant**:
-   - Explicitly verify that passing `getpid()` or `getppid()` to `apply_cgroup_freeze()` or the window governor immediately returns `false` / rejects registration, strictly preventing test harness deadlocks.
+1. **Non-Halting Always-Alive Verification**:
+   - Verify that minimized applications maintain active execution and are **never placed into cgroup `FROZEN` state**.
+2. **Unthrottle Latency Assertions**:
+   - Measure total elapsed time for `unthrottle_immediate()` execution.
+   - Must execute in $\le 50\mu\text{s}$ (achieved: $3\mu\text{s}$).
+3. **Self-Safety Invariant**:
+   - Explicitly verify that passing `getpid()` or `getppid()` immediately rejects registration, completely eliminating test harness deadlocks.

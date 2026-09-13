@@ -1524,14 +1524,12 @@ void test_window_aware_governor() {
     using namespace wattcurb::policy;
     WindowAwareGovernor gov;
 
-    // 0. Test Self-Freeze Prevention Invariant (Never freeze daemon itself)
+    // 0. Test Self-Safety Invariant (Never throttle daemon itself)
     int32_t self_pid = static_cast<int32_t>(getpid());
-    assert(MitigationEngine::apply_cgroup_freeze(self_pid, true) == false && "Self-freeze must be strictly rejected");
-    
     gov.on_window_state_changed(self_pid, true, false, 1000, false);
     assert(gov.tracked_count() == 0 && "Governor must reject tracking self-PID");
 
-    // 1. Initial minimization with isolated target PID (Stage 1 Soft Throttling)
+    // 1. Initial minimization: Non-Halting Graceful Throttle (SCHED_IDLE + 50ms timerslack)
     int32_t browser_pid = 88888; 
     uint64_t t0 = 1000;
     gov.on_window_state_changed(browser_pid, true, false, t0, false);
@@ -1539,44 +1537,36 @@ void test_window_aware_governor() {
     assert(gov.tracked_count() == 1);
     const auto* entry = gov.find_entry(browser_pid);
     assert(entry != nullptr);
-    assert(entry->state == WindowSuppressionState::Stage1Throttled);
+    assert(entry->state == WindowSuppressionState::GracefulIdleThrottled);
     assert(entry->has_active_audio == false);
 
-    // 2. Hysteresis before 20s: Remains at Stage 1
-    gov.evaluate_hysteresis(t0 + 10);
-    assert(entry->state == WindowSuppressionState::Stage1Throttled);
+    // 2. Non-Halting Invariant: Even after long minimization, process remains alive in GracefulIdleThrottled!
+    gov.evaluate_hysteresis(t0 + 60);
+    assert(entry->state == WindowSuppressionState::GracefulIdleThrottled);
 
-    // 3. Hysteresis at 20s: Escalates to Stage 2 (Hard Freezing)
-    gov.evaluate_hysteresis(t0 + 20);
-    assert(entry->state == WindowSuppressionState::Stage2Frozen);
-
-    // 4. Test Audio Immunity: A separate media player process
+    // 3. Audio/media app test: Also remains alive in GracefulIdleThrottled
     int32_t audio_pid = 99999;
     gov.on_window_state_changed(audio_pid, true, false, t0, true);
     const auto* audio_entry = gov.find_entry(audio_pid);
     assert(audio_entry != nullptr);
-    assert(audio_entry->state == WindowSuppressionState::Stage1Throttled);
+    assert(audio_entry->state == WindowSuppressionState::GracefulIdleThrottled);
     assert(audio_entry->has_active_audio == true);
 
-    // Even after 100 seconds, audio-playing app must NEVER be frozen!
-    gov.evaluate_hysteresis(t0 + 100);
-    assert(audio_entry->state == WindowSuppressionState::Stage1Throttled);
-
-    // 5. Instant Thaw on window focus recovery
+    // 4. Instant Unthrottle on window focus recovery
     auto start = std::chrono::high_resolution_clock::now();
-    bool thawed = gov.thaw_immediate(browser_pid);
+    bool unthrottled = gov.unthrottle_immediate(browser_pid);
     auto end = std::chrono::high_resolution_clock::now();
     auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 
-    assert(thawed == true);
+    assert(unthrottled == true);
     assert(entry->state == WindowSuppressionState::ActiveForeground);
-    assert(elapsed_us < 1000 && "Thaw latency must be strictly sub-millisecond (< 1000 us)");
+    assert(elapsed_us < 1000 && "Unthrottle latency must be strictly sub-millisecond (< 1000 us)");
 
-    // 6. Rollback all
+    // 5. Rollback all
     gov.rollback_all();
     assert(gov.tracked_count() == 0);
 
-    std::cout << " [PASS] test_window_aware_governor (Self-freeze guard, Stage 1/2 ladder, audio immunity, sub-ms thaw: " 
+    std::cout << " [PASS] test_window_aware_governor (Non-Halting Graceful Throttle, Always-Alive Invariant verified: " 
               << elapsed_us << "us)\n";
 }
 
