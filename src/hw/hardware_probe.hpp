@@ -20,7 +20,7 @@ public:
     HardwareProbe(HardwareProbe&& other) noexcept;
     HardwareProbe& operator=(HardwareProbe&& other) noexcept;
 
-    void refresh_device_paths();
+    [[gnu::noinline, gnu::cold]] void refresh_device_paths();
     [[nodiscard]] HardwareSample capture_sample() const;
     [[nodiscard]] HardwareSample capture_sample_desktop() const;
 
@@ -241,10 +241,10 @@ private:
     mutable core::FixedVector<HardwareSample::PeripheralBattery, 4> cached_peripheral_batteries_{};
 
     void capture_subsystems(HardwareSample& sample) const;
-    void init_pmu_counters();
-    void init_pcie_binary_configs();
-    void init_msr_telemetry();
-    void open_persistent_fds();
+    [[gnu::noinline, gnu::cold]] void init_pmu_counters();
+    [[gnu::noinline, gnu::cold]] void init_pcie_binary_configs();
+    [[gnu::noinline, gnu::cold]] void init_msr_telemetry();
+    [[gnu::noinline, gnu::cold]] void open_persistent_fds();
     void close_fds() noexcept;
 };
 

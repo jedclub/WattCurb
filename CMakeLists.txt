@@ -41,9 +41,12 @@ if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
         -ffunction-sections
         -fdata-sections
         -fno-rtti
+        -fno-exceptions
+        -fomit-frame-pointer
     )
     add_link_options(
         -Wl,--gc-sections
+        -Wl,--as-needed
     )
 endif()
 

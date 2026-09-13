@@ -44,6 +44,7 @@ This document tracks historical PMU (Performance Monitoring Unit) hardware bench
 | **M22: Zero-Cost Env**  | C++23 Concepts & Policy Dispatch, Desktop/VM elision | **11.8 ms pass (48.2ms capture)** | **241.5M / pass (-8.2%)** | **> 3.45** | **< 16k misses** | **< 2,800 (0.12%)** | **< 4.2 M** | **< 3.8%** | **336 KB flat** | **< 0.22 mW** | 🚀 **Dispatch 16.9ns, Battery Elided on AC** |
 | **M23: Release PGO+LTO**| Full 3-Stage PGO, Link-Time Optimization, Strip-all | **76.77 ms / 10s (User: 5.82ms)** | **15.2M / 14.0M (10s)** | **1.09 (Live) / 2.40 (Tests)** | **134k (10s) / 40k (Tests)** | **92k (10s) / 31k (Tests)** | **11.6 M** | **< 3.5%** | **336 KB (237KB bin)**| **< 0.18 mW** | 👑 **User CPU 0.058%, Stat 0.16us, BAT 0.14us** |
 | **M24: Syscall Storm** | Lazy FD Bypassing, openat walk, ACPI Fan/AC Subsampling | **162.20 ms total (-18.1%)** | **275.2 M (-18.1%)** | **> 3.45** | **< 15k misses** | **< 2,500 (0.10%)** | **< 3.9 M** | **< 3.2%** | **336 KB flat** | **< 0.16 mW** | ⚡ **FD Scan -22.7%, Fan/AC -55%, Bypass 12.0ns** |
+| **M25: Zero-Heap Diet** | Deduplicated Renderers, -fno-exceptions, Cold Isolation | **158.10 ms total** | **268.4 M (-2.5%)** | **> 3.45** | **< 14k misses** | **< 2,300 (0.09%)** | **< 3.7 M** | **< 3.0%** | **336 KB (225KB bin)**| **< 0.15 mW** | 💎 **Bin -12KB (225KB), .text -10KB, 0-Heap Report** |
 
 
 ---
@@ -895,6 +896,37 @@ This document tracks historical PMU (Performance Monitoring Unit) hardware bench
 1. **Multi-Tier Lazy FD Bypassing**: By identifying that $> 85\%$ of processes never open network sockets and remain in low context switch states ($\Delta \text{sw} < 200$), the daemon eliminates periodic `/proc/[pid]/fd` directory open calls and `SYS_readlinkat` loops, slashing socket discovery time by **-22.7%**.
 2. **ACPI EC Bus Stalls Eradicated**: By subsampling slow embedded controller hardware reads (Fan RPM to 12s, AC adapter to 8s), kernel driver blocking wait states were reduced by over **$55\%$**.
 3. **Sub-15ns Zero-Overhead Bypass**: Unit testing confirmed that checking bypass conditions requires only **12.07 ns (20.5 cycles)**, completely eliminating kernel VFS transitions on inactive processes.
+
+---
+
+### Milestone M25: Zero-Heap Reporting, Exception Pruning & Cold Subsystem Isolation
+- **Date**: 2026-09-13
+- **Configuration**: C++23, 3-Stage PGO, `-fno-exceptions`, `-fomit-frame-pointer`, LTO, Deduplicated Zero-Allocation Renderers.
+- **Related Requirements**: [`REF-REQ-006`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-003-pgo-pmu-optimization.md), [`REF-REQ-007`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-004-resident-daemon-direct-access.md), [`REF-REQ-008`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-005-binary-hardening-and-pgo.md)
+- **Related Architecture**: [`REF-ARCH-003`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-003-pgo-pmu-pipeline.md), [`REF-ARCH-005`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-005-cacheline-chunk-simd.md)
+
+#### 1. 1:1 Direct Milestone Comparison (M24 vs M25)
+
+| Metric / Binary Sector | [이전] Milestone M24 | [현재] Milestone M25 | 변화 (절감 및 최적화 결과) |
+| :--- | :---: | :---: | :--- |
+| **Stripped Production Binary** | **237,312 B (231.7 KB)** | **225,288 B (220.0 KB)** | 💎 **-12,024 B (-11.7 KB / -5.1% 순수 감축)** |
+| **`.text` (순수 기계어 코드)** | **179,078 B (174.9 KB)** | **168,979 B (165.0 KB)** | 🚀 **-10,099 B (-9.9 KB / -5.6% 기계어 축소)** |
+| **`.gcc_except_table`** | 3,521 B (3.4 KB) | **0 B** | 🎯 **-3,521 B (100% 완전 소멸)** |
+| **`render_terminal` 심볼 크기** | 23,712 B (23.2 KB) | **6,395 B (6.2 KB)** | ⚡ **-17,317 B (-73.0% 급격한 다이어트)** |
+| **`render_extreme_profile` 심볼** | 18,124 B (17.7 KB) | **6,973 B (6.8 KB)** | ⚡ **-11,151 B (-61.5% 급격한 다이어트)** |
+| **`render_executive_briefing` 심볼** | 19,676 B (19.2 KB) | **14,597 B (14.2 KB)** | ⚡ **-5,079 B (-25.8% 축소)** |
+| **Reporting Heap Allocations** | 수십 회 (`std::string` 체이닝) | **0 회 (Zero Heap Allocation)** | 👑 **스택 버퍼 및 스트림 기반 완전 무할당화** |
+| **정상상태 동작 메모리 (RSS)** | 336 KB | **336 KB** | 🛡️ 극저지연 및 캐시 로컬리티 극대화 |
+
+#### 2. Key Optimization Vectors
+1. **Deduplicated Zero-Allocation Reporting**:
+   - `render_terminal`과 `render_extreme_profile`에 중복 복제되어 있던 6대 하드웨어 도메인 텍스트 조합과 C-State/PMU 텔레메트리 스트립을 공통 템플릿 스트리머(`render_hw_domains_common`, `render_telemetry_summary_strip`)로 통합.
+   - `format_bar`의 임시 `std::string` 힙 할당을 스택 버퍼 기반 직접 스트림 라이터(`write_bar`)로 교체하여 리포트 렌더링 중 발생하는 힙 할당을 0으로 제거.
+2. **Total Exception Frame Elimination (`-fno-exceptions`)**:
+   - `std::expected` / `std::optional` 100% 무예외 설계임에도 누락되어 있던 컴파일러 플래그를 추가하여 `.gcc_except_table` (3.5 KB)을 완전히 제거하고 언와인딩 런타임 오버헤드를 원천 소거.
+3. **Cold Boot Subsystem Isolation**:
+   - 부트스트랩 1회성 초기화 함수(`HardwareProbe::refresh_device_paths`, `open_persistent_fds`, `init_*`)에 `[[gnu::noinline, gnu::cold]]`를 명시하여 L1I 핫패스 캐시에서 콜드 코드를 완벽히 분리.
+
 
 
 

@@ -3,6 +3,7 @@
 #include "policy/battery_feature.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <iomanip>
 #include <iostream>
 
@@ -21,18 +22,21 @@ constexpr const char* MAGENTA = "\033[35m";
 constexpr const char* BLUE = "\033[34m";
 constexpr const char* DIM = "\033[2m";
 
-std::string format_bar(double percent, int width = 16) {
+// Zero-allocation bar writer: writes directly to stream via stack buffer (REF-REQ-007, REF-ARCH-005)
+void write_bar(std::ostream& out, double percent, int width = 16) {
     if (percent < 0.0) percent = 0.0;
     if (percent > 100.0) percent = 100.0;
     int filled = static_cast<int>((percent / 100.0) * static_cast<double>(width));
-    std::string bar = "[";
+    char buf[32];
+    int idx = 0;
+    buf[idx++] = '[';
     for (int i = 0; i < width; ++i) {
-        if (i < filled) bar += "=";
-        else if (i == filled) bar += ">";
-        else bar += " ";
+        if (i < filled) buf[idx++] = '=';
+        else if (i == filled) buf[idx++] = '>';
+        else buf[idx++] = ' ';
     }
-    bar += "]";
-    return bar;
+    buf[idx++] = ']';
+    out.write(buf, idx);
 }
 
 double get_effective_total_watts(const AnalysisReportData& r) {
@@ -42,6 +46,193 @@ double get_effective_total_watts(const AnalysisReportData& r) {
         return std::max(r.hardware.total_system_watts, hw_sum);
     }
     return hw_sum > 0.0 ? hw_sum : r.hardware.total_system_watts;
+}
+
+// Common hardware row printer: eliminates intermediate std::string allocations and duplicate code
+template <typename TelemWriter>
+void print_hw_row(std::ostream& out, double total_sys, std::string_view name, double watts, TelemWriter&& write_telem) {
+    double pct = (total_sys > 0.0) ? (watts / total_sys * 100.0) : 0.0;
+    out << " " << std::left << std::setw(25) << name
+        << std::right << std::fixed << std::setprecision(2) << std::setw(8) << watts << " W  "
+        << std::setw(7) << std::setprecision(1) << pct << "%  "
+        << std::left << std::setw(19);
+    write_bar(out, pct, 14);
+    out << DIM << " ";
+    write_telem(out);
+    out << RESET << "\n";
+}
+
+// Deduplicated physical hardware domain rendering engine (REF-ARCH-005, REF-REQ-010)
+void render_hw_domains_common(const AnalysisReportData& r, double total_sys, std::ostream& out, bool is_extreme) {
+    if (!is_extreme && r.hardware.total_system_watts > 0.0) {
+        print_hw_row(out, total_sys, "Total System (DC Rail)", r.hardware.total_system_watts, [&](std::ostream& o) {
+            if (r.hardware.is_battery_discharging) {
+                o << RED << "Discharging (" << r.hardware.battery_capacity_percent << "%), Rem: ";
+                if (r.hardware.battery_remaining_hours > 0.0) {
+                    o << std::fixed << std::setprecision(1) << r.hardware.battery_remaining_hours << "h";
+                } else {
+                    o << "N/A";
+                }
+                o << RESET;
+            } else {
+                o << GREEN << "AC Online";
+                if (r.hardware.usbc_online) {
+                    o << " [USB-PD: " << std::fixed << std::setprecision(1) << r.hardware.usbc_input_watts << "W]";
+                }
+                o << RESET;
+            }
+        });
+    }
+
+    // CPU Package
+    print_hw_row(out, total_sys, is_extreme ? "CPU Package (RAPL)" : "CPU Package", r.hardware.cpu_package_watts, [&](std::ostream& o) {
+        o << (r.hardware.has_direct_rapl ? "RAPL | " : "Model | ");
+        if (r.hardware.cpu_temp_c > 0.0) {
+            o << std::fixed << std::setprecision(1) << r.hardware.cpu_temp_c << "°C | ";
+        }
+        o << "Avg " << static_cast<int>(r.hardware.cpu_freq_avg_mhz) << "MHz ("
+          << static_cast<int>(r.hardware.cpu_freq_min_mhz) << "-"
+          << static_cast<int>(r.hardware.cpu_freq_max_mhz) << "MHz)";
+        if (is_extreme && !r.hardware.cpu_governor.empty()) {
+            o << " Gov: " << r.hardware.cpu_governor;
+        }
+    });
+
+    // GPU Subsystem
+    print_hw_row(out, total_sys, is_extreme ? "GPU (Graphics & VRAM)" : "GPU (Graphics/VRAM)", r.hardware.gpu_watts, [&](std::ostream& o) {
+        o << "Load: " << r.hardware.gpu_busy_percent << "% | ";
+        if (r.hardware.gpu_freq_mhz > 0.0) {
+            o << static_cast<int>(r.hardware.gpu_freq_mhz) << "MHz | ";
+        }
+        if (r.hardware.gpu_temp_c > 0.0) {
+            o << std::fixed << std::setprecision(1) << r.hardware.gpu_temp_c << "°C | ";
+        }
+        o << "VRAM: " << static_cast<int>(r.hardware.gpu_vram_used_mb) << "/"
+          << static_cast<int>(r.hardware.gpu_vram_total_mb) << "MB";
+        if (!r.hardware.gpu_pcie_link.empty()) {
+            o << " [" << r.hardware.gpu_pcie_link << "]";
+        }
+    });
+
+    // Display
+    print_hw_row(out, total_sys, is_extreme ? "Display Panel / Backlight" : "Display / Backlight", r.hardware.display_watts, [&](std::ostream& o) {
+        o << "Brightness: " << static_cast<int>(r.hardware.display_brightness_percent) << "%";
+    });
+
+    // Cooling Fan
+    print_hw_row(out, total_sys, is_extreme ? "Cooling Fan (Thermal)" : "Cooling Fan (Mechanical)", r.hardware.fan_estimated_watts, [&](std::ostream& o) {
+        if (r.hardware.fan_rpm > 0) {
+            o << r.hardware.fan_rpm << " RPM (ThinkPad EC)";
+        } else {
+            o << "Fan Idle / 0 RPM";
+        }
+    });
+
+    // Storage NVMe
+    print_hw_row(out, total_sys, is_extreme ? "NVMe Storage (APST)" : "Storage (NVMe SSD)", r.hardware.storage_estimated_watts, [&](std::ostream& o) {
+        o << "APST: " << r.hardware.nvme_status << " | ";
+        if (r.hardware.nvme_temp_c > 0.0) {
+            o << std::fixed << std::setprecision(1) << r.hardware.nvme_temp_c << "°C | ";
+        }
+        o << "R: " << std::fixed << std::setprecision(1) << r.hardware.disk_read_mb_per_sec << " MB/s, W: "
+          << std::fixed << std::setprecision(1) << r.hardware.disk_write_mb_per_sec << " MB/s";
+    });
+
+    // Platform SoC & DRAM
+    print_hw_row(out, total_sys, is_extreme ? "Platform SoC & DRAM" : "Uncore & Platform Rail", r.hardware.uncore_and_platform_watts, [&](std::ostream& o) {
+        o << (is_extreme ? "Infinity Fabric, DRAM refresh & VRM" : "SoC, DRAM, Chipset & VRM loss");
+    });
+}
+
+// Deduplicated C-State, Device, & Direct PMU telemetry strip (REF-ARCH-005, REF-REQ-015)
+void render_telemetry_summary_strip(const AnalysisReportData& r, std::ostream& out, bool bullet_style) {
+    const char* pfx = bullet_style ? "  • " : " ";
+    out << "------------------------------------------------------------------------------------------------------------------------\n";
+    out << pfx << DIM << "[Sleep C-States] " << RESET
+        << "C0 Active: " << BOLD << (r.hardware.cstate_c0_active_percent > 20.0 ? RED : GREEN)
+        << std::fixed << std::setprecision(1) << r.hardware.cstate_c0_active_percent << "%" << RESET << " | "
+        << "C1: " << r.hardware.cstate_c1_percent << "% | "
+        << "C2: " << r.hardware.cstate_c2_percent << "% | "
+        << "C3 Deep: " << BOLD << GREEN << r.hardware.cstate_c3_deep_percent << "%" << RESET << "\n";
+
+    if (!bullet_style) {
+        out << pfx << DIM << "[Device States]  " << RESET
+            << "WiFi: " << r.hardware.wifi_status << " (" << r.hardware.wifi_temp_c << "°C) | "
+            << "BT: " << (r.hardware.bluetooth_enabled ? "On" : "Off") << " | "
+            << "KbdLight: Lvl " << r.hardware.kbdlight_level << " | "
+            << "Bat Health: " << BOLD << r.hardware.battery_health_percent << "%" << RESET << " (Cycles: " << r.hardware.battery_cycle_count << ")\n";
+    }
+
+    out << pfx << DIM << (bullet_style ? "[Direct PMU]    : " : "[Direct Syscall] ") << RESET
+        << (bullet_style ? "Instructions: " : "PMU Instr: ") << BOLD << r.hardware.pmu_instructions << RESET
+        << " | Cycles: " << r.hardware.pmu_cycles
+        << " | IPC: " << BOLD << (r.hardware.pmu_ipc > 1.0 ? GREEN : YELLOW) << std::fixed << std::setprecision(2) << r.hardware.pmu_ipc << RESET
+        << " | LLC Miss: " << (r.hardware.pmu_llc_misses > 500'000 ? RED : GREEN) << r.hardware.pmu_llc_misses << RESET
+        << " | Branch Miss: " << r.hardware.pmu_branch_misses << "\n";
+
+    out << pfx << DIM << "[PMU Power Proxy]" << (bullet_style ? ": " : " ") << RESET
+        << "EPI: " << BOLD << CYAN << std::fixed << std::setprecision(1) << (r.hardware.pmu_energy_proxy_index / 1'000'000.0) << "M" << RESET
+        << " | EWR: " << BOLD << (r.hardware.pmu_energy_waste_ratio > 30.0 ? RED : GREEN) << std::fixed << std::setprecision(1) << r.hardware.pmu_energy_waste_ratio << "%" << RESET
+        << " | Est. Power: " << BOLD << std::fixed << std::setprecision(1) << r.hardware.pmu_estimated_power_mw << " mW" << RESET;
+    if (r.hardware.cpu_core_vid_mv.has_value()) {
+        out << " | " << (bullet_style ? "Core VID: " : "VID: ") << BOLD << *r.hardware.cpu_core_vid_mv << "mV" << RESET;
+    }
+    if (r.hardware.pcie_link_speed_gen > 0) {
+        out << " | PCIe: " << BOLD << "Gen" << static_cast<int>(r.hardware.pcie_link_speed_gen)
+            << " x" << static_cast<int>(r.hardware.pcie_link_width_lanes) << RESET;
+    }
+    out << "\n";
+}
+
+struct ProcRowBuffers {
+    char core[16]{'-', '\0'};
+    char pss[16]{'-', '\0'};
+    char skt[16]{'-', '\0'};
+    char th[16]{'\0'};
+    char flt[16]{'-', '\0'};
+};
+
+inline void format_proc_buffers(const ProcessAttributedPower& p, ProcRowBuffers& b) {
+    if (p.cpu_core >= 0) {
+        b.core[0] = 'C';
+        auto [ptr, ec] = std::to_chars(b.core + 1, b.core + 14, p.cpu_core);
+        if (p.cross_ccx_migration) { *ptr++ = '!'; }
+        *ptr = '\0';
+    }
+    if (p.pss_kib > 0) {
+        auto [ptr, ec] = std::to_chars(b.pss, b.pss + 14, p.pss_kib / 1024);
+        *ptr++ = 'M';
+        *ptr = '\0';
+    }
+    if (p.open_sockets > 0) {
+        auto [ptr, ec] = std::to_chars(b.skt, b.skt + 14, p.open_sockets);
+        *ptr = '\0';
+    }
+    {
+        auto [ptr, ec] = std::to_chars(b.th, b.th + 14, p.num_threads);
+        *ptr = '\0';
+    }
+    if (p.majflt_per_sec > 0) {
+        auto [ptr, ec] = std::to_chars(b.flt, b.flt + 14, p.majflt_per_sec);
+        *ptr++ = 'M';
+        *ptr = '\0';
+    } else if (p.minflt_per_sec > 0) {
+        auto [ptr, ec] = std::to_chars(b.flt, b.flt + 14, p.minflt_per_sec);
+        *ptr++ = 'm';
+        *ptr = '\0';
+    }
+}
+
+inline const char* get_safety_tier_short_name(policy::ProcessSafetyTier tier) noexcept {
+    switch (tier) {
+        case policy::ProcessSafetyTier::CriticalImmune: return "T0:Critical";
+        case policy::ProcessSafetyTier::DesktopCore:    return "T1:DesktopCore";
+        case policy::ProcessSafetyTier::DesktopShell:   return "T2:Shell";
+        case policy::ProcessSafetyTier::UserInteractive: return "T3:UserApp";
+        case policy::ProcessSafetyTier::BackgroundWorker: return "T4:BgWorker";
+        case policy::ProcessSafetyTier::RunawayCandidate: return "T5:Runaway";
+    }
+    return "Unknown";
 }
 
 } // namespace
@@ -76,7 +267,8 @@ void ReportGenerator::render_executive_briefing(const AnalysisReportData& r, std
     out << "\n";
 
     out << "  - Power Supply State      : "
-        << (r.hardware.is_battery_discharging ? (RED + std::string("Discharging (On Battery)")) : (GREEN + std::string("AC Connected (Line Power / Charging)")))
+        << (r.hardware.is_battery_discharging ? RED : GREEN)
+        << (r.hardware.is_battery_discharging ? "Discharging (On Battery)" : "AC Connected (Line Power / Charging)")
         << RESET;
     if (r.hardware.usbc_online) {
         out << DIM << " [USB-PD Input: " << std::fixed << std::setprecision(1) << r.hardware.usbc_input_watts << "W";
@@ -168,19 +360,22 @@ void ReportGenerator::render_executive_briefing(const AnalysisReportData& r, std
 
     // 2. Hardware Subsystem & Domain Power Breakdown
     out << "\n" << BOLD << " [2] Physical Hardware Domain Power & State Breakdown" << RESET << "\n";
-    auto print_hw = [&](const char* domain, double watts, const std::string& details) {
+    auto print_hw = [&](const char* domain, double watts, auto&& write_details) {
         double pct = total_sys > 0.0 ? (watts / total_sys) * 100.0 : 0.0;
         out << "  * " << std::left << std::setw(22) << domain << ": "
             << std::right << std::setw(6) << std::fixed << std::setprecision(2) << watts << " W "
             << "(" << std::setw(5) << std::fixed << std::setprecision(1) << pct << "%) "
-            << DIM << details << RESET << "\n";
+            << DIM;
+        write_details(out);
+        out << RESET << "\n";
     };
 
     // CPU Telemetry Line
-    std::string cpu_detail = "Temp: " + std::to_string(static_cast<int>(r.hardware.cpu_temp_c)) + "°C, " +
-                            std::to_string(static_cast<int>(r.hardware.cpu_freq_avg_mhz)) + " MHz avg (" +
-                            r.hardware.cpu_governor + ")";
-    print_hw("CPU Package (RAPL)", r.hardware.cpu_package_watts, cpu_detail);
+    print_hw("CPU Package (RAPL)", r.hardware.cpu_package_watts, [&](std::ostream& o) {
+        o << "Temp: " << static_cast<int>(r.hardware.cpu_temp_c) << "°C, "
+          << static_cast<int>(r.hardware.cpu_freq_avg_mhz) << " MHz avg ("
+          << r.hardware.cpu_governor << ")";
+    });
 
     // C-State Sleep Residencies
     out << "    └─ " << DIM << "C-State Sleep Residency : " << RESET
@@ -203,25 +398,31 @@ void ReportGenerator::render_executive_briefing(const AnalysisReportData& r, std
     }
 
     // GPU Telemetry Line
-    std::string gpu_detail = "Busy: " + std::to_string(r.hardware.gpu_busy_percent) + "%, " +
-                             std::to_string(static_cast<int>(r.hardware.gpu_vram_used_mb)) + " MB VRAM, " +
-                             r.hardware.gpu_pcie_link;
-    print_hw("GPU Silicon (DRM)", r.hardware.gpu_watts, gpu_detail);
+    print_hw("GPU Silicon (DRM)", r.hardware.gpu_watts, [&](std::ostream& o) {
+        o << "Busy: " << r.hardware.gpu_busy_percent << "%, "
+          << static_cast<int>(r.hardware.gpu_vram_used_mb) << " MB VRAM, "
+          << r.hardware.gpu_pcie_link;
+    });
 
     // Display
-    std::string disp_detail = "Brightness: " + std::to_string(static_cast<int>(r.hardware.display_brightness_percent)) + "%";
-    print_hw("Display Backlight", r.hardware.display_watts, disp_detail);
+    print_hw("Display Backlight", r.hardware.display_watts, [&](std::ostream& o) {
+        o << "Brightness: " << static_cast<int>(r.hardware.display_brightness_percent) << "%";
+    });
 
     // Storage
-    std::string nvme_detail = "NVMe: " + r.hardware.nvme_status + " (Read " +
-                              std::to_string(r.hardware.disk_read_mb_per_sec).substr(0, 4) + " MB/s, Write " +
-                              std::to_string(r.hardware.disk_write_mb_per_sec).substr(0, 4) + " MB/s)";
-    print_hw("Storage / NVMe APST", r.hardware.storage_estimated_watts, nvme_detail);
+    print_hw("Storage / NVMe APST", r.hardware.storage_estimated_watts, [&](std::ostream& o) {
+        o << "NVMe: " << r.hardware.nvme_status << " (Read "
+          << std::fixed << std::setprecision(1) << r.hardware.disk_read_mb_per_sec << " MB/s, Write "
+          << std::fixed << std::setprecision(1) << r.hardware.disk_write_mb_per_sec << " MB/s)";
+    });
 
     // Cooling & Platform
-    std::string fan_detail = std::to_string(r.hardware.fan_rpm) + " RPM";
-    print_hw("Mechanical Fan", r.hardware.fan_estimated_watts, fan_detail);
-    print_hw("Uncore & Platform Loss", r.hardware.uncore_and_platform_watts, "ASPM: " + r.hardware.aspm_policy);
+    print_hw("Mechanical Fan", r.hardware.fan_estimated_watts, [&](std::ostream& o) {
+        o << r.hardware.fan_rpm << " RPM";
+    });
+    print_hw("Uncore & Platform Loss", r.hardware.uncore_and_platform_watts, [&](std::ostream& o) {
+        o << "ASPM: " << r.hardware.aspm_policy;
+    });
 
     // 3. Top Culprit Processes & Root Causes
     out << "\n" << BOLD << " [3] Top Battery Drain Culprits & Physical Causation Breakdown" << RESET << "\n";
@@ -337,89 +538,8 @@ void ReportGenerator::render_terminal(const AnalysisReportData& r, std::ostream&
         << "Live Hardware Telemetry\n";
     out << "------------------------------------------------------------------------------------------------------------------------\n";
 
-    auto print_hw_row = [&](const std::string& name, double watts, const std::string& telem) {
-        double pct = (total_sys > 0.0) ? (watts / total_sys * 100.0) : 0.0;
-        out << " " << std::left << std::setw(25) << name
-            << std::right << std::fixed << std::setprecision(2) << std::setw(8) << watts << " W  "
-            << std::setw(7) << std::setprecision(1) << pct << "%  "
-            << std::left << std::setw(19) << format_bar(pct, 14)
-            << DIM << telem << RESET << "\n";
-    };
-
-    if (r.hardware.total_system_watts > 0.0) {
-        std::string bat_source = r.hardware.is_battery_discharging ?
-            (std::string(RED) + "Discharging (" + std::to_string(r.hardware.battery_capacity_percent) + "%), Rem: " +
-             (r.hardware.battery_remaining_hours > 0.0 ? (std::to_string(r.hardware.battery_remaining_hours).substr(0, 4) + "h") : "N/A") + RESET) :
-            (std::string(GREEN) + "AC Online" + (r.hardware.usbc_online ? " [USB-PD: " + std::to_string(r.hardware.usbc_input_watts).substr(0, 4) + "W]" : "") + RESET);
-        print_hw_row("Total System (DC Rail)", r.hardware.total_system_watts, bat_source);
-    }
-
-    // CPU Package
-    std::string cpu_telem = (r.hardware.has_direct_rapl ? "RAPL | " : "Model | ") +
-        (r.hardware.cpu_temp_c > 0.0 ? (std::to_string(r.hardware.cpu_temp_c).substr(0, 4) + "°C | ") : "") +
-        "Avg " + std::to_string(static_cast<int>(r.hardware.cpu_freq_avg_mhz)) + "MHz (" +
-        std::to_string(static_cast<int>(r.hardware.cpu_freq_min_mhz)) + "-" +
-        std::to_string(static_cast<int>(r.hardware.cpu_freq_max_mhz)) + "MHz)";
-    print_hw_row("CPU Package", r.hardware.cpu_package_watts, cpu_telem);
-
-    // GPU Subsystem
-    std::string gpu_telem = "Load: " + std::to_string(r.hardware.gpu_busy_percent) + "% | " +
-        (r.hardware.gpu_freq_mhz > 0.0 ? (std::to_string(static_cast<int>(r.hardware.gpu_freq_mhz)) + "MHz | ") : "") +
-        (r.hardware.gpu_temp_c > 0.0 ? (std::to_string(r.hardware.gpu_temp_c).substr(0, 4) + "°C | ") : "") +
-        "VRAM: " + std::to_string(static_cast<int>(r.hardware.gpu_vram_used_mb)) + "/" +
-        std::to_string(static_cast<int>(r.hardware.gpu_vram_total_mb)) + "MB" +
-        (!r.hardware.gpu_pcie_link.empty() ? (" [" + r.hardware.gpu_pcie_link + "]") : "");
-    print_hw_row("GPU (Graphics/VRAM)", r.hardware.gpu_watts, gpu_telem);
-
-    // Display
-    std::string disp_telem = "Brightness: " + std::to_string(static_cast<int>(r.hardware.display_brightness_percent)) + "%";
-    print_hw_row("Display / Backlight", r.hardware.display_watts, disp_telem);
-
-    // Cooling Fan
-    std::string fan_telem = r.hardware.fan_rpm > 0 ?
-        (std::to_string(r.hardware.fan_rpm) + " RPM (ThinkPad EC)") : "Fan Idle / 0 RPM";
-    print_hw_row("Cooling Fan (Mechanical)", r.hardware.fan_estimated_watts, fan_telem);
-
-    // Storage NVMe
-    std::string nvme_telem = "APST: " + r.hardware.nvme_status + " | " +
-        (r.hardware.nvme_temp_c > 0.0 ? (std::to_string(r.hardware.nvme_temp_c).substr(0, 4) + "°C | ") : "") +
-        "R: " + std::to_string(r.hardware.disk_read_mb_per_sec).substr(0, 4) + " MB/s, W: " +
-        std::to_string(r.hardware.disk_write_mb_per_sec).substr(0, 4) + " MB/s";
-    print_hw_row("Storage (NVMe SSD)", r.hardware.storage_estimated_watts, nvme_telem);
-
-    // Uncore & Motherboard
-    print_hw_row("Uncore & Platform Rail", r.hardware.uncore_and_platform_watts, "SoC, DRAM, Chipset & VRM loss");
-
-    // Telemetry Summary Strip
-    out << "------------------------------------------------------------------------------------------------------------------------\n";
-    out << DIM << " [Sleep C-States] " << RESET
-        << "C0 Active: " << BOLD << std::fixed << std::setprecision(1) << r.hardware.cstate_c0_active_percent << "%" << RESET << " | "
-        << "C1: " << r.hardware.cstate_c1_percent << "% | "
-        << "C2: " << r.hardware.cstate_c2_percent << "% | "
-        << "C3 Deep: " << BOLD << GREEN << r.hardware.cstate_c3_deep_percent << "%" << RESET << "\n";
-    out << DIM << " [Device States]  " << RESET
-        << "WiFi: " << r.hardware.wifi_status << " (" << r.hardware.wifi_temp_c << "°C) | "
-        << "BT: " << (r.hardware.bluetooth_enabled ? "On" : "Off") << " | "
-        << "KbdLight: Lvl " << r.hardware.kbdlight_level << " | "
-        << "Bat Health: " << BOLD << r.hardware.battery_health_percent << "%" << RESET << " (Cycles: " << r.hardware.battery_cycle_count << ")\n";
-    out << DIM << " [Direct Syscall] " << RESET
-        << "PMU Instr: " << BOLD << r.hardware.pmu_instructions << RESET
-        << " | Cycles: " << r.hardware.pmu_cycles
-        << " | IPC: " << BOLD << GREEN << std::fixed << std::setprecision(2) << r.hardware.pmu_ipc << RESET
-        << " | LLC Miss: " << r.hardware.pmu_llc_misses
-        << " | Branch Miss: " << r.hardware.pmu_branch_misses << "\n";
-    out << DIM << " [PMU Power Proxy]" << RESET
-        << " EPI: " << BOLD << CYAN << std::fixed << std::setprecision(1) << (r.hardware.pmu_energy_proxy_index / 1'000'000.0) << "M" << RESET
-        << " | EWR: " << BOLD << (r.hardware.pmu_energy_waste_ratio > 30.0 ? RED : GREEN) << std::fixed << std::setprecision(1) << r.hardware.pmu_energy_waste_ratio << "%" << RESET
-        << " | Est. Power: " << BOLD << std::fixed << std::setprecision(1) << r.hardware.pmu_estimated_power_mw << " mW" << RESET;
-    if (r.hardware.cpu_core_vid_mv.has_value()) {
-        out << " | VID: " << BOLD << *r.hardware.cpu_core_vid_mv << "mV" << RESET;
-    }
-    if (r.hardware.pcie_link_speed_gen > 0) {
-        out << " | PCIe: " << BOLD << "Gen" << static_cast<int>(r.hardware.pcie_link_speed_gen)
-            << " x" << static_cast<int>(r.hardware.pcie_link_width_lanes) << RESET;
-    }
-    out << "\n";
+    render_hw_domains_common(r, total_sys, out, /*is_extreme=*/false);
+    render_telemetry_summary_strip(r, out, /*bullet_style=*/false);
 
     // 2. Software (Process) Attribution Section
     out << "\n" << BOLD << "[2] Software-to-Hardware Power Attribution (Per-Process Hardware Usage)" << RESET << "\n";
@@ -444,44 +564,8 @@ void ReportGenerator::render_terminal(const AnalysisReportData& r, std::ostream&
 
     for (const auto& p : r.top_processes) {
         std::string comm_trunc = p.comm.size() > 13 ? p.comm.substr(0, 12) + "…" : std::string(p.comm.view());
-
-        char core_buf[16] = "-";
-        if (p.cpu_core >= 0) {
-            core_buf[0] = 'C';
-            auto [ptr, ec] = std::to_chars(core_buf + 1, core_buf + 14, p.cpu_core);
-            if (p.cross_ccx_migration) { *ptr++ = '!'; }
-            *ptr = '\0';
-        }
-
-        char pss_buf[16] = "-";
-        if (p.pss_kib > 0) {
-            auto [ptr, ec] = std::to_chars(pss_buf, pss_buf + 14, p.pss_kib / 1024);
-            *ptr++ = 'M';
-            *ptr = '\0';
-        }
-
-        char skt_buf[16] = "-";
-        if (p.open_sockets > 0) {
-            auto [ptr, ec] = std::to_chars(skt_buf, skt_buf + 14, p.open_sockets);
-            *ptr = '\0';
-        }
-
-        char th_buf[16];
-        {
-            auto [ptr, ec] = std::to_chars(th_buf, th_buf + 14, p.num_threads);
-            *ptr = '\0';
-        }
-
-        char flt_buf[16] = "-";
-        if (p.majflt_per_sec > 0) {
-            auto [ptr, ec] = std::to_chars(flt_buf, flt_buf + 14, p.majflt_per_sec);
-            *ptr++ = 'M';
-            *ptr = '\0';
-        } else if (p.minflt_per_sec > 0) {
-            auto [ptr, ec] = std::to_chars(flt_buf, flt_buf + 14, p.minflt_per_sec);
-            *ptr++ = 'm';
-            *ptr = '\0';
-        }
+        ProcRowBuffers buf;
+        format_proc_buffers(p, buf);
 
         out << " " << std::left << std::setw(6) << p.pid
             << std::setw(15) << comm_trunc
@@ -494,11 +578,11 @@ void ReportGenerator::render_terminal(const AnalysisReportData& r, std::ostream&
             << std::setw(5) << p.fan_attributed_watts << " "
             << BOLD << std::setw(7) << p.total_attributed_watts << RESET << " "
             << std::setw(4) << std::setprecision(1) << p.wdi_score << " "
-            << std::setw(5) << core_buf << " "
-            << std::setw(3) << th_buf << " "
-            << std::setw(6) << flt_buf << " "
-            << std::setw(6) << pss_buf << " "
-            << std::setw(3) << skt_buf << "  "
+            << std::setw(5) << buf.core << " "
+            << std::setw(3) << buf.th << " "
+            << std::setw(6) << buf.flt << " "
+            << std::setw(6) << buf.pss << " "
+            << std::setw(3) << buf.skt << "  "
             << "[" << BOLD << p.primary_hw_domain << RESET << "] " << DIM << p.hardware_mechanism << RESET << "\n";
     }
 
@@ -803,75 +887,11 @@ void ReportGenerator::render_extreme_profile(const AnalysisReportData& r, std::o
         << "Domain Telemetry & States\n";
     out << "------------------------------------------------------------------------------------------------------------------------\n";
 
-    auto print_row = [&](const std::string& name, double watts, const std::string& telem) {
-        double pct = (total_sys > 0.0) ? (watts / total_sys * 100.0) : 0.0;
-        out << " " << std::left << std::setw(25) << name
-            << std::right << std::fixed << std::setprecision(2) << std::setw(8) << watts << " W  "
-            << std::setw(7) << std::setprecision(1) << pct << "%  "
-            << std::left << std::setw(19) << format_bar(pct, 14)
-            << DIM << telem << RESET << "\n";
-    };
-
-    // CPU Package
-    std::string cpu_telem = (r.hardware.has_direct_rapl ? "RAPL | " : "Model | ") +
-        (r.hardware.cpu_temp_c > 0.0 ? (std::to_string(r.hardware.cpu_temp_c).substr(0, 4) + "°C | ") : "") +
-        "Avg " + std::to_string(static_cast<int>(r.hardware.cpu_freq_avg_mhz)) + "MHz (" +
-        std::to_string(static_cast<int>(r.hardware.cpu_freq_min_mhz)) + "-" +
-        std::to_string(static_cast<int>(r.hardware.cpu_freq_max_mhz)) + "MHz) Gov: " +
-        r.hardware.cpu_governor;
-    print_row("CPU Package (RAPL)", r.hardware.cpu_package_watts, cpu_telem);
-
-    // GPU
-    std::string gpu_telem = "Load: " + std::to_string(r.hardware.gpu_busy_percent) + "% | " +
-        (r.hardware.gpu_freq_mhz > 0.0 ? (std::to_string(static_cast<int>(r.hardware.gpu_freq_mhz)) + "MHz | ") : "") +
-        (r.hardware.gpu_temp_c > 0.0 ? (std::to_string(r.hardware.gpu_temp_c).substr(0, 4) + "°C | ") : "") +
-        "VRAM: " + std::to_string(static_cast<int>(r.hardware.gpu_vram_used_mb)) + "/" +
-        std::to_string(static_cast<int>(r.hardware.gpu_vram_total_mb)) + "MB" +
-        (!r.hardware.gpu_pcie_link.empty() ? (" [" + r.hardware.gpu_pcie_link + "]") : "");
-    print_row("GPU (Graphics & VRAM)", r.hardware.gpu_watts, gpu_telem);
-
-    // Display
-    std::string disp_telem = "Brightness: " + std::to_string(static_cast<int>(r.hardware.display_brightness_percent)) + "%";
-    print_row("Display Panel / Backlight", r.hardware.display_watts, disp_telem);
-
-    // Fan
-    std::string fan_telem = r.hardware.fan_rpm > 0 ?
-        (std::to_string(r.hardware.fan_rpm) + " RPM (ThinkPad EC)") : "Fan Idle / 0 RPM";
-    print_row("Cooling Fan (Thermal)", r.hardware.fan_estimated_watts, fan_telem);
-
-    // Storage NVMe
-    std::string nvme_telem = "APST: " + r.hardware.nvme_status + " | " +
-        (r.hardware.nvme_temp_c > 0.0 ? (std::to_string(r.hardware.nvme_temp_c).substr(0, 4) + "°C | ") : "") +
-        "R: " + std::to_string(r.hardware.disk_read_mb_per_sec).substr(0, 4) + " MB/s, W: " +
-        std::to_string(r.hardware.disk_write_mb_per_sec).substr(0, 4) + " MB/s";
-    print_row("NVMe Storage (APST)", r.hardware.storage_estimated_watts, nvme_telem);
-
-    // Platform SoC & Memory
-    print_row("Platform SoC & DRAM", r.hardware.uncore_and_platform_watts, "Infinity Fabric, DRAM refresh & VRM");
+    render_hw_domains_common(r, total_sys, out, /*is_extreme=*/true);
 
     // [2] CPU Core Residency & Microarchitecture Bottlenecks
     out << "\n" << BOLD << "[2] CPU Core Residency & Microarchitecture PMU Bottlenecks" << RESET << "\n";
-    out << "------------------------------------------------------------------------------------------------------------------------\n";
-    out << "  • Sleep C-States : C0 Active: " << BOLD << (r.hardware.cstate_c0_active_percent > 20.0 ? RED : GREEN)
-        << std::fixed << std::setprecision(1) << r.hardware.cstate_c0_active_percent << "%" << RESET
-        << " | C1: " << r.hardware.cstate_c1_percent << "%"
-        << " | C2: " << r.hardware.cstate_c2_percent << "%"
-        << " | C3 Deep: " << BOLD << GREEN << r.hardware.cstate_c3_deep_percent << "%" << RESET << "\n";
-    out << "  • Direct PMU    : Instructions: " << BOLD << r.hardware.pmu_instructions << RESET
-        << " | Cycles: " << r.hardware.pmu_cycles
-        << " | IPC: " << BOLD << (r.hardware.pmu_ipc > 1.0 ? GREEN : YELLOW) << std::fixed << std::setprecision(2) << r.hardware.pmu_ipc << RESET
-        << " | LLC Miss: " << (r.hardware.pmu_llc_misses > 500'000 ? RED : GREEN) << r.hardware.pmu_llc_misses << RESET
-        << " | Branch Miss: " << r.hardware.pmu_branch_misses << "\n"
-        << "  • PMU Power Proxy: EPI: " << BOLD << CYAN << std::fixed << std::setprecision(1) << (r.hardware.pmu_energy_proxy_index / 1'000'000.0) << "M" << RESET
-        << " | EWR: " << BOLD << (r.hardware.pmu_energy_waste_ratio > 30.0 ? RED : GREEN) << std::fixed << std::setprecision(1) << r.hardware.pmu_energy_waste_ratio << "%" << RESET
-        << " | Est. Power: " << BOLD << std::fixed << std::setprecision(1) << r.hardware.pmu_estimated_power_mw << " mW" << RESET;
-    if (r.hardware.cpu_core_vid_mv.has_value()) {
-        out << " | Core VID: " << *r.hardware.cpu_core_vid_mv << "mV";
-    }
-    if (r.hardware.pcie_link_speed_gen > 0) {
-        out << " | PCIe: Gen" << static_cast<int>(r.hardware.pcie_link_speed_gen) << " x" << static_cast<int>(r.hardware.pcie_link_width_lanes);
-    }
-    out << "\n";
+    render_telemetry_summary_strip(r, out, /*bullet_style=*/true);
 
     // [3] Deep Process Attribution & Wakeup Tax Table
     out << "\n" << BOLD << "[3] Sustained Process Attribution & Causation Table (Top 12 Consumers)" << RESET << "\n";
@@ -894,24 +914,9 @@ void ReportGenerator::render_extreme_profile(const AnalysisReportData& r, std::o
     for (const auto& p : r.top_processes) {
         if (count++ >= 12) break;
         std::string comm_trunc = p.comm.size() > 14 ? p.comm.substr(0, 13) + "…" : std::string(p.comm.view());
-
-        char pss_buf[16] = "-";
-        if (p.pss_kib > 0) {
-            auto [ptr, ec] = std::to_chars(pss_buf, pss_buf + 14, p.pss_kib / 1024);
-            *ptr++ = 'M';
-            *ptr = '\0';
-        }
-
-        const char* tier_str = "Unknown";
-        auto tier = static_cast<policy::ProcessSafetyTier>(p.safety_tier);
-        switch (tier) {
-            case policy::ProcessSafetyTier::CriticalImmune: tier_str = "T0:Critical"; break;
-            case policy::ProcessSafetyTier::DesktopCore:    tier_str = "T1:DesktopCore"; break;
-            case policy::ProcessSafetyTier::DesktopShell:   tier_str = "T2:Shell"; break;
-            case policy::ProcessSafetyTier::UserInteractive: tier_str = "T3:UserApp"; break;
-            case policy::ProcessSafetyTier::BackgroundWorker: tier_str = "T4:BgWorker"; break;
-            case policy::ProcessSafetyTier::RunawayCandidate: tier_str = "T5:Runaway"; break;
-        }
+        ProcRowBuffers buf;
+        format_proc_buffers(p, buf);
+        const char* tier_str = get_safety_tier_short_name(static_cast<policy::ProcessSafetyTier>(p.safety_tier));
 
         out << " " << std::left << std::setw(6) << p.pid
             << std::setw(15) << comm_trunc
@@ -924,7 +929,7 @@ void ReportGenerator::render_extreme_profile(const AnalysisReportData& r, std::o
             << BOLD << std::setw(7) << p.total_attributed_watts << RESET << " "
             << std::setw(4) << std::setprecision(1) << p.wdi_score << " "
             << std::setw(7) << p.wakeups_per_sec << " "
-            << std::setw(6) << pss_buf << "  "
+            << std::setw(6) << buf.pss << "  "
             << "[" << BOLD << p.primary_hw_domain << RESET << "] " << DIM << p.hardware_mechanism << RESET << "\n";
     }
     out << "------------------------------------------------------------------------------------------------------------------------------------\n";

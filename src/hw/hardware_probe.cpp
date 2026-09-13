@@ -458,7 +458,7 @@ void HardwareProbe::close_fds() noexcept {
     safe_close(cpu0_msr_fd_);
 }
 
-void HardwareProbe::open_persistent_fds() {
+[[gnu::noinline, gnu::cold]] void HardwareProbe::open_persistent_fds() {
     close_fds();
 
     // 1. Battery & Power Rail
@@ -656,7 +656,7 @@ std::pair<uint8_t, uint8_t> HardwareProbe::read_pcie_binary_link_status(int conf
     return {0, 0};
 }
 
-void HardwareProbe::refresh_device_paths() {
+[[gnu::noinline, gnu::cold]] void HardwareProbe::refresh_device_paths() {
     std::error_code ec;
 
     // 1. Power Supply Discovery (/sys/class/power_supply/*)
