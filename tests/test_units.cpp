@@ -1649,30 +1649,19 @@ void test_thinkpower_tray_client() {
     assert(std::string_view(desc).find("Top 2: kwin_wayland (1800 mW, PID 1200)") != std::string_view::npos);
     assert(std::string_view(desc).find("Profile: PowerSaver | Active Gates: 2") != std::string_view::npos);
 
-    // 2. Icon Name Resolution Test
-    char icon[32]{};
+    // 2. Icon Name Resolution Test (Breeze power-profile symbolic icons)
+    char icon[48]{};
+    state.power_profile_mode = 1; // PowerSaver
     TrayClient::resolve_icon_name(state, icon, sizeof(icon));
-    assert(std::string_view(icon) == "battery-good");
+    assert(std::string_view(icon) == "battery-profile-powersave-symbolic");
 
-    state.battery_percent = 50;
+    state.power_profile_mode = 0; // Balanced
     TrayClient::resolve_icon_name(state, icon, sizeof(icon));
-    assert(std::string_view(icon) == "battery-medium");
+    assert(std::string_view(icon) == "battery-profile-balanced-symbolic");
 
-    state.battery_percent = 25;
+    state.power_profile_mode = 2; // UltraEndurance
     TrayClient::resolve_icon_name(state, icon, sizeof(icon));
-    assert(std::string_view(icon) == "battery-low");
-
-    state.battery_percent = 10;
-    TrayClient::resolve_icon_name(state, icon, sizeof(icon));
-    assert(std::string_view(icon) == "battery-caution");
-
-    state.battery_state = 0; // AC Online
-    TrayClient::resolve_icon_name(state, icon, sizeof(icon));
-    assert(std::string_view(icon) == "ac-adapter");
-
-    state.battery_state = 2; // Charging
-    TrayClient::resolve_icon_name(state, icon, sizeof(icon));
-    assert(std::string_view(icon) == "battery-charging");
+    assert(std::string_view(icon) == "battery-profile-powersave-symbolic");
 
     // 3. High-Throughput ToolTip Micro-Benchmark (50,000 iterations)
     constexpr size_t BENCH_COUNT = 50000;

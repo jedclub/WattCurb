@@ -57,7 +57,10 @@ public:
     static int property_get_icon_name(sd_bus* bus, const char* path, const char* interface, const char* property, sd_bus_message* reply, void* userdata, sd_bus_error* error);
     static int property_get_tooltip(sd_bus* bus, const char* path, const char* interface, const char* property, sd_bus_message* reply, void* userdata, sd_bus_error* error);
     static int property_get_icon_theme_path(sd_bus* bus, const char* path, const char* interface, const char* property, sd_bus_message* reply, void* userdata, sd_bus_error* error);
+    static int property_get_icon_pixmap(sd_bus* bus, const char* path, const char* interface, const char* property, sd_bus_message* reply, void* userdata, sd_bus_error* error);
+    static int property_get_menu(sd_bus* bus, const char* path, const char* interface, const char* property, sd_bus_message* reply, void* userdata, sd_bus_error* error);
     static int property_get_item_is_menu(sd_bus* bus, const char* path, const char* interface, const char* property, sd_bus_message* reply, void* userdata, sd_bus_error* error);
+    static int property_get_window_id(sd_bus* bus, const char* path, const char* interface, const char* property, sd_bus_message* reply, void* userdata, sd_bus_error* error);
     static int method_activate(sd_bus_message* msg, void* userdata, sd_bus_error* error);
     static int method_context_menu(sd_bus_message* msg, void* userdata, sd_bus_error* error);
     static int method_noop(sd_bus_message* msg, void* userdata, sd_bus_error* error);

@@ -22,8 +22,11 @@ static const sd_bus_vtable sni_vtable[] = {
     SD_BUS_PROPERTY("Title", "s", TrayClient::property_get_title, 0, SD_BUS_VTABLE_PROPERTY_CONST),
     SD_BUS_PROPERTY("Status", "s", TrayClient::property_get_status, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
     SD_BUS_PROPERTY("IconName", "s", TrayClient::property_get_icon_name, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+    SD_BUS_PROPERTY("IconPixmap", "a(iiay)", TrayClient::property_get_icon_pixmap, 0, SD_BUS_VTABLE_PROPERTY_CONST),
     SD_BUS_PROPERTY("IconThemePath", "s", TrayClient::property_get_icon_theme_path, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+    SD_BUS_PROPERTY("Menu", "o", TrayClient::property_get_menu, 0, SD_BUS_VTABLE_PROPERTY_CONST),
     SD_BUS_PROPERTY("ItemIsMenu", "b", TrayClient::property_get_item_is_menu, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+    SD_BUS_PROPERTY("WindowId", "i", TrayClient::property_get_window_id, 0, SD_BUS_VTABLE_PROPERTY_CONST),
     SD_BUS_PROPERTY("ToolTip", "(sa(iiay)ss)", TrayClient::property_get_tooltip, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
     SD_BUS_METHOD("Activate", "ii", nullptr, TrayClient::method_activate, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("ContextMenu", "ii", nullptr, TrayClient::method_context_menu, SD_BUS_VTABLE_UNPRIVILEGED),
@@ -125,20 +128,13 @@ void TrayClient::resolve_icon_name(
     const ipc::WattCurbSharedState& state,
     char* out_icon, size_t icon_cap
 ) noexcept {
-    if (state.battery_state == 0) {
-        std::snprintf(out_icon, icon_cap, "ac-adapter");
-    } else if (state.battery_state == 2) {
-        std::snprintf(out_icon, icon_cap, "battery-charging");
+    // ThinkPower standard: uses verified Breeze power-profile icons present on all KDE systems
+    if (state.power_profile_mode == 1) {
+        std::snprintf(out_icon, icon_cap, "battery-profile-powersave-symbolic");
+    } else if (state.power_profile_mode == 2) {
+        std::snprintf(out_icon, icon_cap, "battery-profile-powersave-symbolic");
     } else {
-        if (state.battery_percent >= 80) {
-            std::snprintf(out_icon, icon_cap, "battery-good");
-        } else if (state.battery_percent >= 40) {
-            std::snprintf(out_icon, icon_cap, "battery-medium");
-        } else if (state.battery_percent >= 20) {
-            std::snprintf(out_icon, icon_cap, "battery-low");
-        } else {
-            std::snprintf(out_icon, icon_cap, "battery-caution");
-        }
+        std::snprintf(out_icon, icon_cap, "battery-profile-balanced-symbolic");
     }
 }
 
@@ -200,6 +196,13 @@ bool TrayClient::register_with_watcher() noexcept {
         "s",
         service_name_
     );
+    if (r >= 0) {
+        // Emit initial change signals to trigger plasmashell to query properties immediately
+        sd_bus_emit_signal(bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewIcon", nullptr);
+        sd_bus_emit_signal(bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewStatus", "s", "Active");
+        sd_bus_emit_signal(bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewToolTip", nullptr);
+        sd_bus_flush(bus_);
+    }
     return (r >= 0);
 }
 
@@ -233,7 +236,7 @@ void TrayClient::stop() noexcept {
 
 // D-Bus Property & Method Callbacks
 int TrayClient::property_get_category(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void*, sd_bus_error*) {
-    return sd_bus_message_append(reply, "s", "Hardware");
+    return sd_bus_message_append(reply, "s", "ApplicationStatus");
 }
 
 int TrayClient::property_get_id(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void*, sd_bus_error*) {
@@ -257,7 +260,7 @@ int TrayClient::property_get_icon_name(sd_bus*, const char*, const char*, const 
     ipc::WattCurbSharedState state{};
     self->read_state(state);
 
-    char icon[32]{};
+    char icon[64]{};
     resolve_icon_name(state, icon, sizeof(icon));
     return sd_bus_message_append(reply, "s", icon);
 }
@@ -267,7 +270,7 @@ int TrayClient::property_get_tooltip(sd_bus*, const char*, const char*, const ch
     ipc::WattCurbSharedState state{};
     self->read_state(state);
 
-    char icon[32]{};
+    char icon[64]{};
     resolve_icon_name(state, icon, sizeof(icon));
 
     char title[64]{};
@@ -301,6 +304,20 @@ int TrayClient::property_get_tooltip(sd_bus*, const char*, const char*, const ch
 
 int TrayClient::property_get_icon_theme_path(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void*, sd_bus_error*) {
     return sd_bus_message_append(reply, "s", "");
+}
+
+int TrayClient::property_get_icon_pixmap(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void*, sd_bus_error*) {
+    int r = sd_bus_message_open_container(reply, 'a', "(iiay)");
+    if (r < 0) return r;
+    return sd_bus_message_close_container(reply);
+}
+
+int TrayClient::property_get_menu(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void*, sd_bus_error*) {
+    return sd_bus_message_append(reply, "o", "/MenuBar");
+}
+
+int TrayClient::property_get_window_id(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void*, sd_bus_error*) {
+    return sd_bus_message_append(reply, "i", 0);
 }
 
 int TrayClient::method_activate(sd_bus_message*, void* userdata, sd_bus_error*) {
