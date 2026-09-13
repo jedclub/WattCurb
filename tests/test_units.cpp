@@ -7,6 +7,7 @@
 #include "policy/attribution_engine.hpp"
 #include "policy/process_classifier.hpp"
 #include "policy/mitigation_engine.hpp"
+#include "policy/window_aware_governor.hpp"
 #include "policy/battery_feature.hpp"
 #include "report/report_generator.hpp"
 #include "ipc/tray_shared_state.hpp"
@@ -1519,6 +1520,59 @@ void test_tray_binary_shared_state() {
     std::cout << " [PASS] test_tray_binary_shared_state (128B Seqlock, Zero-Copy POD serialization verified)\n";
 }
 
+void test_window_aware_governor() {
+    using namespace wattcurb::policy;
+    WindowAwareGovernor gov;
+
+    // 1. Initial minimization (Stage 1 Soft Throttling)
+    int32_t browser_pid = static_cast<int32_t>(getpid()); // Self PID for safe test execution
+    uint64_t t0 = 1000;
+    gov.on_window_state_changed(browser_pid, true, false, t0, false);
+
+    assert(gov.tracked_count() == 1);
+    const auto* entry = gov.find_entry(browser_pid);
+    assert(entry != nullptr);
+    assert(entry->state == WindowSuppressionState::Stage1Throttled);
+    assert(entry->has_active_audio == false);
+
+    // 2. Hysteresis before 20s: Remains at Stage 1
+    gov.evaluate_hysteresis(t0 + 10);
+    assert(entry->state == WindowSuppressionState::Stage1Throttled);
+
+    // 3. Hysteresis at 20s: Escalates to Stage 2 (Hard Freezing)
+    gov.evaluate_hysteresis(t0 + 20);
+    assert(entry->state == WindowSuppressionState::Stage2Frozen);
+
+    // 4. Test Audio Immunity: A separate media player process
+    int32_t audio_pid = 99999;
+    gov.on_window_state_changed(audio_pid, true, false, t0, true);
+    const auto* audio_entry = gov.find_entry(audio_pid);
+    assert(audio_entry != nullptr);
+    assert(audio_entry->state == WindowSuppressionState::Stage1Throttled);
+    assert(audio_entry->has_active_audio == true);
+
+    // Even after 100 seconds, audio-playing app must NEVER be frozen!
+    gov.evaluate_hysteresis(t0 + 100);
+    assert(audio_entry->state == WindowSuppressionState::Stage1Throttled);
+
+    // 5. Instant Thaw on window focus recovery
+    auto start = std::chrono::high_resolution_clock::now();
+    bool thawed = gov.thaw_immediate(browser_pid);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+
+    assert(thawed == true);
+    assert(entry->state == WindowSuppressionState::ActiveForeground);
+    assert(elapsed_us < 1000 && "Thaw latency must be strictly sub-millisecond (< 1000 us)");
+
+    // 6. Rollback all
+    gov.rollback_all();
+    assert(gov.tracked_count() == 0);
+
+    std::cout << " [PASS] test_window_aware_governor (Stage 1/2 ladder, audio immunity, sub-ms thaw verified: " 
+              << elapsed_us << "us)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -1535,6 +1589,7 @@ int main() {
     test::test_zero_cost_environment_abstraction();
     test::test_syscall_storm_suppression_and_lazy_fd_bypass();
     test::test_tray_binary_shared_state();
+    test::test_window_aware_governor();
     test::test_process_classifier();
     test::test_mitigation_engine();
     test::test_adaptive_mitigation_and_rollback();
