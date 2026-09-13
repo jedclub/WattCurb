@@ -436,7 +436,15 @@ struct DomainCulprit {
     core::FixedVector<ProcessDomainShare, 8> top_culprits;
 };
 
+// Implements REF-REQ-031 & REF-ARCH-021: Closed-Loop Adaptive Power Profiles
+enum class PowerProfileMode : uint8_t {
+    Balanced = 0,        // AC or Battery > 50%: Normal CFS, runaways only
+    PowerSaver = 1,      // Battery 20% ~ 50%: SCHED_IDLE on T4, timer 100ms, PCIe ASPM
+    UltraEndurance = 2   // Battery < 20%: cgroup freeze on heavy T4, display cap, EPP power
+};
+
 struct ActiveMitigationStatus {
+    PowerProfileMode current_profile{PowerProfileMode::Balanced};
     size_t throttled_count{0};
     size_t frozen_count{0};
     uint64_t reclaimed_bytes{0};

@@ -689,6 +689,91 @@ void test_mitigation_engine() {
     std::cout << " [PASS] test_mitigation_engine (Immunity guarantees & adaptive logic verified)\n";
 }
 
+void test_adaptive_mitigation_and_rollback() {
+    using namespace wattcurb;
+    using namespace wattcurb::policy;
+
+    std::cout << "--- [REF-TEST-014] Adaptive Power State Machine & Dynamic Rollback Verification ---\n";
+
+    MitigationEngine engine;
+
+    // 1. Initial State & AC Power Verification
+    assert(engine.current_profile() == PowerProfileMode::Balanced);
+    assert(engine.determine_profile(false, 10.0) == PowerProfileMode::Balanced); // AC always Balanced
+
+    // 2. Battery Discharge Hysteresis Transitions
+    // Balanced -> PowerSaver trigger at <= 50.0%
+    assert(engine.determine_profile(true, 75.0) == PowerProfileMode::Balanced);
+    assert(engine.determine_profile(true, 50.0) == PowerProfileMode::PowerSaver);
+
+    // Transition to PowerSaver
+    AnalysisReportData report;
+    engine.evaluate_and_actuate(report, true, 49.0);
+    assert(engine.current_profile() == PowerProfileMode::PowerSaver);
+
+    // Hysteresis Guard: 52% must stay in PowerSaver (requires > 55% to recover to Balanced)
+    assert(engine.determine_profile(true, 52.0) == PowerProfileMode::PowerSaver);
+    assert(engine.determine_profile(true, 54.9) == PowerProfileMode::PowerSaver);
+    assert(engine.determine_profile(true, 55.1) == PowerProfileMode::Balanced);
+
+    // Transition to UltraEndurance (< 20%)
+    engine.evaluate_and_actuate(report, true, 18.0);
+    assert(engine.current_profile() == PowerProfileMode::UltraEndurance);
+
+    // Hysteresis Guard: 22% must stay in UltraEndurance (requires >= 25% to recover to PowerSaver)
+    assert(engine.determine_profile(true, 22.0) == PowerProfileMode::UltraEndurance);
+    assert(engine.determine_profile(true, 24.9) == PowerProfileMode::UltraEndurance);
+    assert(engine.determine_profile(true, 25.0) == PowerProfileMode::PowerSaver);
+
+    // 3. Actuation and Bidirectional Rollback Test
+    // Construct report with a heavy Background Worker and a Critical process
+    report.top_processes.clear();
+
+    ProcessAttributedPower crit;
+    crit.pid = 10001;
+    crit.comm = "systemd";
+    crit.cpu_watts = 2.0;
+    crit.safety_tier = static_cast<uint8_t>(ProcessSafetyTier::CriticalImmune);
+    report.top_processes.push_back(crit);
+
+    ProcessAttributedPower bg;
+    bg.pid = 10002;
+    bg.comm = "baloo_file";
+    bg.cpu_watts = 3.5;
+    bg.total_attributed_watts = 4.2;
+    bg.safety_tier = static_cast<uint8_t>(ProcessSafetyTier::BackgroundWorker);
+    bg.wdi_score = 12.0; // High WDI score
+    bg.timerslack_ns = 50000;
+    report.top_processes.push_back(bg);
+
+    // In UltraEndurance: bg worker is frozen (or throttled if cgroup access fails in unprivileged mock)
+    auto status = engine.evaluate_and_actuate(report, true, 15.0);
+    assert(status.current_profile == PowerProfileMode::UltraEndurance);
+    assert(status.active_summary.size() > 0);
+    assert(std::string_view(status.active_summary.c_str()).starts_with("[UltraEndurance]"));
+
+    // Verify SharedState IPC Synchronization
+    ipc::WattCurbSharedState shm{};
+    shm.update_from_report(report);
+    assert(shm.power_profile_mode == static_cast<uint8_t>(PowerProfileMode::UltraEndurance));
+
+    // Transition to PowerSaver (battery recovers to 30%): Thaw executed
+    engine.evaluate_and_actuate(report, true, 30.0);
+    assert(engine.current_profile() == PowerProfileMode::PowerSaver);
+    shm.update_from_report(report);
+    assert(shm.power_profile_mode == static_cast<uint8_t>(PowerProfileMode::PowerSaver));
+
+    // Transition to Balanced on AC Connection: Full Rollback executed
+    engine.evaluate_and_actuate(report, false, 30.0); // AC connected
+    assert(engine.current_profile() == PowerProfileMode::Balanced);
+    assert(engine.tracked_count() == 0); // Rollback must completely clear active tracked list!
+    shm.update_from_report(report);
+    assert(shm.power_profile_mode == static_cast<uint8_t>(PowerProfileMode::Balanced));
+
+    std::cout << " [PASS] test_adaptive_mitigation_and_rollback (3-Tier Hysteresis, Thaw & Rollback verified)\n";
+}
+
+
 void test_executive_briefing_and_telemetry() {
     using namespace wattcurb;
 
@@ -1452,6 +1537,7 @@ int main() {
     test::test_tray_binary_shared_state();
     test::test_process_classifier();
     test::test_mitigation_engine();
+    test::test_adaptive_mitigation_and_rollback();
     test::test_modular_battery_features();
     test::test_executive_briefing_and_telemetry();
     test::test_proc_stat_parsing();

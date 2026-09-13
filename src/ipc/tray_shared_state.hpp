@@ -34,7 +34,8 @@ struct alignas(64) WattCurbSharedState {
     uint16_t fan_rpm{0};
     uint8_t  cstate_c3_percent{0};
     uint8_t  battery_health_percent{0};
-    uint8_t  reserved0[22]{0};
+    uint8_t  power_profile_mode{0};        // 0: Balanced, 1: PowerSaver, 2: UltraEndurance (REF-REQ-031)
+    uint8_t  reserved0[21]{0};
 
     // Cacheline 1: Top Dominant Energy Culprits
     SharedCulprit culprits[2];            // 2 * 32 = 64 Bytes -> Total struct = 128 Bytes exactly
@@ -57,6 +58,7 @@ struct alignas(64) WattCurbSharedState {
         fan_rpm = static_cast<uint16_t>(std::clamp(r.hardware.fan_rpm, 0u, 20000u));
         cstate_c3_percent = static_cast<uint8_t>(std::clamp(static_cast<int>(r.hardware.cstate_c3_deep_percent), 0, 100));
         battery_health_percent = static_cast<uint8_t>(std::clamp(static_cast<int>(r.hardware.battery_health_percent), 0, 100));
+        power_profile_mode = static_cast<uint8_t>(r.mitigation_status.current_profile);
 
         // Copy top 2 culprits
         size_t n = std::min(size_t{2}, r.top_processes.size());
