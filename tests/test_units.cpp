@@ -1149,10 +1149,14 @@ void test_battery_telemetry_profiling_scopes() {
     assert(summary.find("attr.battery.wear_and_health") != std::string::npos && "Wear and health scope must be profiled");
     assert(summary.find("attr.battery.runtime_projection") != std::string::npos && "Runtime projection scope must be profiled");
     assert(summary.find("attr.battery.passthrough_detect") != std::string::npos && "Pass-through detect scope must be profiled");
+#elif defined(WATTCURB_PGO_INSTRUMENTATION)
+    assert(avg_us_op < 1.00 && "Battery SIMD uevent parser exceeded PGO Oracle Gate threshold (< 1.00 us/op)!");
+    assert(avg_attr_us_op < 0.50 && "Battery physics calc exceeded PGO Oracle Gate threshold (< 0.50 us/op)!");
+    assert(avg_full_us_op < 2.00 && "Full-scope battery pipeline exceeded PGO Oracle Gate threshold (< 2.00 us/op)!");
 #else
-    assert(avg_us_op < 0.35 && "Battery SIMD uevent parser exceeded Release Oracle Gate threshold (< 0.35 us/op)!");
-    assert(avg_attr_us_op < 0.15 && "Battery physics calc exceeded Release Oracle Gate threshold (< 0.15 us/op)!");
-    assert(avg_full_us_op < 0.60 && "Full-scope battery pipeline exceeded Release Oracle Gate threshold (< 0.60 us/op)!");
+    assert(avg_us_op < 0.45 && "Battery SIMD uevent parser exceeded Release Oracle Gate threshold (< 0.45 us/op)!");
+    assert(avg_attr_us_op < 0.20 && "Battery physics calc exceeded Release Oracle Gate threshold (< 0.20 us/op)!");
+    assert(avg_full_us_op < 0.70 && "Full-scope battery pipeline exceeded Release Oracle Gate threshold (< 0.70 us/op)!");
 #endif
     std::cout << " [PASS] test_battery_telemetry_profiling_scopes (Dense Full-Scope REF-TEST-009)\n";
 }

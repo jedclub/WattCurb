@@ -57,6 +57,7 @@ endif()
 
 if(WATTCURB_ENABLE_PGO_GEN)
     message(STATUS "PGO: Instrumentation generation enabled (-fprofile-generate)")
+    add_compile_definitions(WATTCURB_PGO_INSTRUMENTATION=1)
     add_compile_options(-fprofile-generate)
     add_link_options(-fprofile-generate)
 elseif(WATTCURB_ENABLE_PGO_USE)
