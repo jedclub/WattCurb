@@ -70,6 +70,9 @@ elseif(WATTCURB_ENABLE_PGO_USE)
 endif()
 
 
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(SYSTEMD REQUIRED libsystemd)
+
 # Core Library Sources
 set(WATTCURB_LIB_SOURCES
     src/core/singleton_lock.cpp
@@ -88,14 +91,26 @@ set(WATTCURB_LIB_SOURCES
 add_library(wattcurb_lib STATIC ${WATTCURB_LIB_SOURCES})
 target_include_directories(wattcurb_lib PUBLIC src)
 
-# Main Executable
+# Main Executable (Daemon - zero D-Bus / GUI dependency)
 add_executable(wattcurb src/main.cpp)
 target_link_libraries(wattcurb PRIVATE wattcurb_lib)
 
+# Desktop SNI Tray Client Executable (REF-REQ-035, REF-ARCH-025)
+add_executable(wattcurb-tray
+    src/tray/main_tray.cpp
+    src/tray/tray_client.cpp
+)
+target_include_directories(wattcurb-tray PRIVATE src ${SYSTEMD_INCLUDE_DIRS})
+target_link_libraries(wattcurb-tray PRIVATE ${SYSTEMD_LIBRARIES})
+
 # Testing & Oracle Gate Suite
 enable_testing()
-add_executable(wattcurb_tests tests/test_units.cpp)
-target_link_libraries(wattcurb_tests PRIVATE wattcurb_lib)
+add_executable(wattcurb_tests
+    tests/test_units.cpp
+    src/tray/tray_client.cpp
+)
+target_include_directories(wattcurb_tests PRIVATE src ${SYSTEMD_INCLUDE_DIRS})
+target_link_libraries(wattcurb_tests PRIVATE wattcurb_lib ${SYSTEMD_LIBRARIES})
 add_test(NAME OracleGate COMMAND wattcurb_tests)
 
 # Custom Target: Generate Verbose Assembly for Hot Paths
