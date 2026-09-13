@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/types.hpp"
+#include "core/environment_profile.hpp"
 #include <array>
 #include <filesystem>
 #include <string>
@@ -8,7 +9,7 @@
 
 namespace wattcurb::hw {
 
-// Implements REF-REQ-001, REF-REQ-007, REF-REQ-010, REF-ARCH-004
+// Implements REF-REQ-001, REF-REQ-007, REF-REQ-010, REF-ARCH-004 & REF-REQ-026
 class HardwareProbe {
 public:
     explicit HardwareProbe(std::filesystem::path sysfs_root = "/sys");
@@ -21,6 +22,17 @@ public:
 
     void refresh_device_paths();
     [[nodiscard]] HardwareSample capture_sample() const;
+    [[nodiscard]] HardwareSample capture_sample_desktop() const;
+
+    // C++23 Zero-Cost Environment-Specialized Sample Capture (REF-REQ-026, REF-ARCH-016)
+    template <core::PlatformPolicyConcept PlatPolicy>
+    [[nodiscard]] HardwareSample capture_sample_policy() const {
+        if constexpr (!PlatPolicy::has_battery()) {
+            return capture_sample_desktop();
+        } else {
+            return capture_sample();
+        }
+    }
 
     [[nodiscard]] bool has_battery() const noexcept { return battery_power_fd_ >= 0 || battery_voltage_fd_ >= 0; }
     [[nodiscard]] bool has_rapl() const noexcept { return rapl_pkg_fd_ >= 0; }
@@ -228,6 +240,7 @@ private:
     mutable std::optional<uint64_t> cached_usbc_pd_current_max_{std::nullopt};
     mutable core::FixedVector<HardwareSample::PeripheralBattery, 4> cached_peripheral_batteries_{};
 
+    void capture_subsystems(HardwareSample& sample) const;
     void init_pmu_counters();
     void init_pcie_binary_configs();
     void init_msr_telemetry();

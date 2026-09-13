@@ -1053,6 +1053,25 @@ HardwareSample HardwareProbe::capture_sample() const {
         }
     }
 
+    capture_subsystems(sample);
+    return sample;
+}
+
+HardwareSample HardwareProbe::capture_sample_desktop() const {
+    WATTCURB_PROFILE_SCOPE("hw.capture_all");
+    ++sample_counter_;
+    HardwareSample sample;
+    sample.timestamp = std::chrono::steady_clock::now();
+
+    // Desktop / Headless AC-Only Power State (Zero Battery Sysfs I/O)
+    sample.is_ac_online = true;
+    sample.is_discharging = false;
+
+    capture_subsystems(sample);
+    return sample;
+}
+
+void HardwareProbe::capture_subsystems(HardwareSample& sample) const {
     // 2. RAPL & CPU Telemetry
     {
         WATTCURB_PROFILE_SCOPE("hw.cpu_metrics");
@@ -1335,8 +1354,6 @@ HardwareSample HardwareProbe::capture_sample() const {
             sample.cpu_core_vid_mv = sample.gpu_vddgfx_mv;
         }
     }
-
-    return sample;
 }
 
 std::optional<uint64_t> HardwareProbe::read_uint64_fd(int fd) {
