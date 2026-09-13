@@ -1649,19 +1649,21 @@ void test_thinkpower_tray_client() {
     assert(std::string_view(desc).find("Top 2: kwin_wayland (1800 mW, PID 1200)") != std::string_view::npos);
     assert(std::string_view(desc).find("Profile: PowerSaver | Active Gates: 2") != std::string_view::npos);
 
-    // 2. Icon Name Resolution Test (Breeze power-profile symbolic icons)
-    char icon[48]{};
+    // 2. Icon Name Resolution Test (Breeze 10% quantized battery + profile icons)
+    char icon[64]{};
+    state.battery_percent = 82; // rounds to 080
+    state.battery_state = 1; // Discharging
     state.power_profile_mode = 1; // PowerSaver
     TrayClient::resolve_icon_name(state, icon, sizeof(icon));
-    assert(std::string_view(icon) == "battery-profile-powersave-symbolic");
+    assert(std::string_view(icon) == "battery-080-profile-powersave");
 
     state.power_profile_mode = 0; // Balanced
     TrayClient::resolve_icon_name(state, icon, sizeof(icon));
-    assert(std::string_view(icon) == "battery-profile-balanced-symbolic");
+    assert(std::string_view(icon) == "battery-080-profile-balanced");
 
-    state.power_profile_mode = 2; // UltraEndurance
+    state.battery_state = 2; // Charging
     TrayClient::resolve_icon_name(state, icon, sizeof(icon));
-    assert(std::string_view(icon) == "battery-profile-powersave-symbolic");
+    assert(std::string_view(icon) == "battery-080-charging-profile-balanced");
 
     // 3. High-Throughput ToolTip Micro-Benchmark (50,000 iterations)
     constexpr size_t BENCH_COUNT = 50000;

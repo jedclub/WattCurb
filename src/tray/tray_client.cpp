@@ -28,6 +28,9 @@ static const sd_bus_vtable sni_vtable[] = {
     SD_BUS_PROPERTY("ItemIsMenu", "b", TrayClient::property_get_item_is_menu, 0, SD_BUS_VTABLE_PROPERTY_CONST),
     SD_BUS_PROPERTY("WindowId", "i", TrayClient::property_get_window_id, 0, SD_BUS_VTABLE_PROPERTY_CONST),
     SD_BUS_PROPERTY("ToolTip", "(sa(iiay)ss)", TrayClient::property_get_tooltip, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+    SD_BUS_PROPERTY("XAyatanaLabel", "s", TrayClient::property_get_xayatana_label, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+    SD_BUS_PROPERTY("XAyatanaLabelGuide", "s", TrayClient::property_get_xayatana_label_guide, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+    SD_BUS_PROPERTY("XAyatanaOrderingIndex", "u", nullptr, 0, SD_BUS_VTABLE_PROPERTY_CONST),
     SD_BUS_METHOD("Activate", "ii", nullptr, TrayClient::method_activate, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("ContextMenu", "ii", nullptr, TrayClient::method_context_menu, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("SecondaryActivate", "ii", nullptr, TrayClient::method_noop, SD_BUS_VTABLE_UNPRIVILEGED),
@@ -36,6 +39,18 @@ static const sd_bus_vtable sni_vtable[] = {
     SD_BUS_SIGNAL("NewIcon", nullptr, 0),
     SD_BUS_SIGNAL("NewToolTip", nullptr, 0),
     SD_BUS_SIGNAL("NewStatus", "s", 0),
+    SD_BUS_SIGNAL("XAyatanaNewLabel", "ss", 0),
+    SD_BUS_VTABLE_END
+};
+
+static const sd_bus_vtable dbusmenu_vtable[] = {
+    SD_BUS_VTABLE_START(0),
+    SD_BUS_PROPERTY("Version", "u", TrayClient::dbusmenu_property_get_version, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+    SD_BUS_PROPERTY("Status", "s", TrayClient::dbusmenu_property_get_status, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+    SD_BUS_METHOD("GetLayout", "iias", "u(ia{sv}av)", TrayClient::dbusmenu_method_get_layout, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("Event", "isvu", nullptr, TrayClient::dbusmenu_method_event, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("AboutToShow", "i", "b", TrayClient::dbusmenu_method_about_to_show, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_SIGNAL("LayoutUpdated", "ui", 0),
     SD_BUS_VTABLE_END
 };
 
@@ -46,6 +61,10 @@ TrayClient::~TrayClient() noexcept {
 }
 
 void TrayClient::cleanup() noexcept {
+    if (menu_slot_) {
+        sd_bus_slot_unref(menu_slot_);
+        menu_slot_ = nullptr;
+    }
     if (slot_) {
         sd_bus_slot_unref(slot_);
         slot_ = nullptr;
@@ -128,13 +147,20 @@ void TrayClient::resolve_icon_name(
     const ipc::WattCurbSharedState& state,
     char* out_icon, size_t icon_cap
 ) noexcept {
-    // ThinkPower standard: uses verified Breeze power-profile icons present on all KDE systems
-    if (state.power_profile_mode == 1) {
-        std::snprintf(out_icon, icon_cap, "battery-profile-powersave-symbolic");
-    } else if (state.power_profile_mode == 2) {
-        std::snprintf(out_icon, icon_cap, "battery-profile-powersave-symbolic");
+    const char* prof = (state.power_profile_mode == 1 || state.power_profile_mode == 2) ? "powersave" : "balanced";
+    uint8_t pct = state.battery_percent;
+    if (pct > 100) pct = 100;
+
+    // Quantize to nearest 10% step (000, 010, 020, ..., 100) matching KDE Breeze SVG assets
+    unsigned int rounded = ((static_cast<unsigned int>(pct) + 5) / 10) * 10;
+    if (rounded > 100) rounded = 100;
+
+    if (state.battery_state == 2 || state.battery_state == 0) {
+        // Charging or AC direct
+        std::snprintf(out_icon, icon_cap, "battery-%03u-charging-profile-%s", rounded, prof);
     } else {
-        std::snprintf(out_icon, icon_cap, "battery-profile-balanced-symbolic");
+        // Discharging on battery
+        std::snprintf(out_icon, icon_cap, "battery-%03u-profile-%s", rounded, prof);
     }
 }
 
@@ -177,6 +203,9 @@ bool TrayClient::setup_dbus() noexcept {
     if (r < 0) return false;
 
     r = sd_bus_add_object_vtable(bus_, &slot_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", sni_vtable, this);
+    if (r < 0) return false;
+
+    r = sd_bus_add_object_vtable(bus_, &menu_slot_, "/MenuBar", "com.canonical.dbusmenu", dbusmenu_vtable, this);
     if (r < 0) return false;
 
     return true;
@@ -320,6 +349,23 @@ int TrayClient::property_get_window_id(sd_bus*, const char*, const char*, const 
     return sd_bus_message_append(reply, "i", 0);
 }
 
+int TrayClient::property_get_xayatana_label(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*) {
+    auto* self = static_cast<TrayClient*>(userdata);
+    ipc::WattCurbSharedState state{};
+    self->read_state(state);
+
+    char label[32]{};
+    unsigned int sys_w = state.system_drain_mw / 1000;
+    unsigned int sys_frac = (state.system_drain_mw % 1000) / 100;
+    char sign = (state.battery_state == 2) ? '+' : '-';
+    std::snprintf(label, sizeof(label), "%u%% (%c%u.%uW)", state.battery_percent, sign, sys_w, sys_frac);
+    return sd_bus_message_append(reply, "s", label);
+}
+
+int TrayClient::property_get_xayatana_label_guide(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void*, sd_bus_error*) {
+    return sd_bus_message_append(reply, "s", " 100% (+00.0W)");
+}
+
 int TrayClient::method_activate(sd_bus_message*, void* userdata, sd_bus_error*) {
     auto* self = static_cast<TrayClient*>(userdata);
     self->cycle_power_profile();
@@ -336,6 +382,163 @@ int TrayClient::method_context_menu(sd_bus_message*, void* userdata, sd_bus_erro
 
 int TrayClient::method_noop(sd_bus_message*, void*, sd_bus_error*) {
     return 0;
+}
+
+// com.canonical.dbusmenu VTable Implementation
+int TrayClient::dbusmenu_property_get_version(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void*, sd_bus_error*) {
+    return sd_bus_message_append(reply, "u", 3);
+}
+
+int TrayClient::dbusmenu_property_get_status(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void*, sd_bus_error*) {
+    return sd_bus_message_append(reply, "s", "normal");
+}
+
+int TrayClient::dbusmenu_method_about_to_show(sd_bus_message* msg, void*, sd_bus_error*) {
+    return sd_bus_reply_method_return(msg, "b", 0);
+}
+
+static void append_menu_node(
+    sd_bus_message* reply,
+    int id,
+    const char* label,
+    bool enabled,
+    const char* type,
+    const char* toggle_type,
+    int toggle_state
+) {
+    sd_bus_message_open_container(reply, 'r', "ia{sv}av");
+    sd_bus_message_append(reply, "i", id);
+
+    sd_bus_message_open_container(reply, 'a', "{sv}");
+    if (label) {
+        sd_bus_message_open_container(reply, 'e', "sv");
+        sd_bus_message_append(reply, "s", "label");
+        sd_bus_message_open_container(reply, 'v', "s");
+        sd_bus_message_append(reply, "s", label);
+        sd_bus_message_close_container(reply);
+        sd_bus_message_close_container(reply);
+    }
+    if (!enabled) {
+        sd_bus_message_open_container(reply, 'e', "sv");
+        sd_bus_message_append(reply, "s", "enabled");
+        sd_bus_message_open_container(reply, 'v', "b");
+        sd_bus_message_append(reply, "b", 0);
+        sd_bus_message_close_container(reply);
+        sd_bus_message_close_container(reply);
+    }
+    if (type) {
+        sd_bus_message_open_container(reply, 'e', "sv");
+        sd_bus_message_append(reply, "s", "type");
+        sd_bus_message_open_container(reply, 'v', "s");
+        sd_bus_message_append(reply, "s", type);
+        sd_bus_message_close_container(reply);
+        sd_bus_message_close_container(reply);
+    }
+    if (toggle_type) {
+        sd_bus_message_open_container(reply, 'e', "sv");
+        sd_bus_message_append(reply, "s", "toggle-type");
+        sd_bus_message_open_container(reply, 'v', "s");
+        sd_bus_message_append(reply, "s", toggle_type);
+        sd_bus_message_close_container(reply);
+        sd_bus_message_close_container(reply);
+
+        sd_bus_message_open_container(reply, 'e', "sv");
+        sd_bus_message_append(reply, "s", "toggle-state");
+        sd_bus_message_open_container(reply, 'v', "i");
+        sd_bus_message_append(reply, "i", toggle_state);
+        sd_bus_message_close_container(reply);
+        sd_bus_message_close_container(reply);
+    }
+    sd_bus_message_close_container(reply); // a{sv}
+
+    sd_bus_message_open_container(reply, 'a', "v"); // empty children
+    sd_bus_message_close_container(reply);
+
+    sd_bus_message_close_container(reply); // r
+}
+
+int TrayClient::dbusmenu_method_get_layout(sd_bus_message* msg, void* userdata, sd_bus_error*) {
+    auto* self = static_cast<TrayClient*>(userdata);
+    ipc::WattCurbSharedState state{};
+    self->read_state(state);
+
+    sd_bus_message* reply = nullptr;
+    int r = sd_bus_message_new_method_return(msg, &reply);
+    if (r < 0) return r;
+
+    // uint revision
+    sd_bus_message_append(reply, "u", 1);
+
+    // root node: (ia{sv}av)
+    sd_bus_message_open_container(reply, 'r', "ia{sv}av");
+    sd_bus_message_append(reply, "i", 0); // id=0
+
+    sd_bus_message_open_container(reply, 'a', "{sv}");
+    sd_bus_message_close_container(reply); // empty root props
+
+    sd_bus_message_open_container(reply, 'a', "v"); // children
+
+    char h1[128]{}, h2[128]{}, h3[128]{};
+    unsigned int sys_w = state.system_drain_mw / 1000;
+    unsigned int sys_frac = (state.system_drain_mw % 1000) / 100;
+    const char* status_str = state.battery_state == 1 ? "On Battery" : (state.battery_state == 2 ? "Charging" : "AC Passthrough");
+    char sign = (state.battery_state == 2) ? '+' : '-';
+
+    std::snprintf(h1, sizeof(h1), "⚡ %u%% (Est: %u min) | %c%u.%u W (%s)",
+        state.battery_percent, state.time_to_empty_min, sign, sys_w, sys_frac, status_str);
+
+    std::snprintf(h2, sizeof(h2), "🔋 Health: %u%% | CPU: %u.%u W (%u°C, Fan %u RPM)",
+        state.battery_health_percent, state.cpu_drain_mw / 1000, (state.cpu_drain_mw % 1000) / 100,
+        state.cpu_temp_c, state.fan_rpm);
+
+    std::snprintf(h3, sizeof(h3), "🔥 Top: %s (%u mW) | %s (%u mW)",
+        state.culprits[0].comm[0] ? state.culprits[0].comm : "none", state.culprits[0].drain_mw,
+        state.culprits[1].comm[0] ? state.culprits[1].comm : "none", state.culprits[1].drain_mw);
+
+    auto add_item = [&](int id, const char* label, bool enabled = true, const char* type = nullptr, const char* toggle_type = nullptr, int toggle_state = 0) {
+        sd_bus_message_open_container(reply, 'v', "(ia{sv}av)");
+        append_menu_node(reply, id, label, enabled, type, toggle_type, toggle_state);
+        sd_bus_message_close_container(reply);
+    };
+
+    add_item(1, h1, false);
+    add_item(2, h2, false);
+    add_item(3, h3, false);
+    add_item(4, nullptr, true, "separator");
+    add_item(5, "● Balanced (균형 모드 - 기본 권장)", true, nullptr, "radio", (state.power_profile_mode == 0 ? 1 : 0));
+    add_item(6, "○ Power Saver (절전 모드)", true, nullptr, "radio", (state.power_profile_mode == 1 ? 1 : 0));
+    add_item(7, "○ Ultra Endurance (초절전 모드)", true, nullptr, "radio", (state.power_profile_mode == 2 ? 1 : 0));
+    add_item(8, nullptr, true, "separator");
+    add_item(9, "🔍 지금 전력 소비 정밀 분석 (Rescan Now)");
+    add_item(10, "📊 KDE 시스템 모니터 열기 (System Monitor)");
+
+    sd_bus_message_close_container(reply); // children av
+    sd_bus_message_close_container(reply); // root r
+
+    r = sd_bus_send(self->bus_, reply, nullptr);
+    sd_bus_message_unref(reply);
+    return r;
+}
+
+int TrayClient::dbusmenu_method_event(sd_bus_message* msg, void*, sd_bus_error*) {
+    int id = 0;
+    const char* event_id = nullptr;
+    int r = sd_bus_message_read(msg, "is", &id, &event_id);
+    if (r < 0) return r;
+
+    if (event_id && std::strcmp(event_id, "clicked") == 0) {
+        if (id == 5) send_daemon_command("PROFILE 0\n");
+        else if (id == 6) send_daemon_command("PROFILE 1\n");
+        else if (id == 7) send_daemon_command("PROFILE 2\n");
+        else if (id == 9) send_daemon_command("RESCAN\n");
+        else if (id == 10) {
+            if (::fork() == 0) {
+                ::execlp("plasma-systemmonitor", "plasma-systemmonitor", nullptr);
+                ::_exit(0);
+            }
+        }
+    }
+    return sd_bus_reply_method_return(msg, "");
 }
 
 } // namespace wattcurb::tray

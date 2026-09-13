@@ -40,6 +40,32 @@ The desktop tray client is the user's primary interface to WattCurb. It must fai
 - The tray client shall **NEVER** run a periodic timer to poll telemetry or redraw the icon.
 - The client shall sleep in `epoll_wait` on the D-Bus file descriptor, waking **only when the user hovers, clicks, or the daemon explicitly notifies state changes**.
 
+### REQ-035.5: Visual Battery Percentage & Gauge in Tray Icon (Breeze Dynamic Status Icons)
+- The client must dynamically resolve the exact battery level (quantized to 10% steps: `000` to `100`), charging state, and active power profile into KDE Breeze official icons:
+  - Discharging: `battery-%03d-profile-%s` (e.g. `battery-080-profile-balanced`, `battery-070-profile-powersave`)
+  - Charging: `battery-%03d-charging-profile-%s` (e.g. `battery-080-charging-profile-balanced`)
+  - AC Passthrough: `battery-100-profile-balanced` / `battery-080-charging-profile-balanced`
+- The system tray icon must visually convey the battery level and charging state directly without hovering.
+
+### REQ-035.6: Real-Time Panel Text Label (`XAyatanaLabel`)
+- The client shall expose `XAyatanaLabel` and `XAyatanaLabelGuide` properties:
+  - Label format: `"%u%% (%c%.1fW)"` (e.g., `80% (-14.2W)` or `80% (+25.0W)`).
+  - Label guide: `" 100% (+00.0W)"`.
+  - Enables desktop shells supporting Ayatana AppIndicator (including KDE Plasma) to render real-time percentage and Watts directly beside the icon in the panel text font.
+
+### REQ-035.7: Full Native Context Menu Protocol (`com.canonical.dbusmenu`)
+- The client shall implement `/MenuBar` with `com.canonical.dbusmenu` protocol:
+  - Header Item 1 (Disabled, Bold): `⚡ 80% (Est: 4h 15m) | -14.2 W (On Battery)`
+  - Header Item 2 (Disabled): `🔋 Battery Health: 94.2% (95 cycles) | 63°C Fan 4300 RPM`
+  - Header Item 3 (Disabled): `🔥 Top 1: plasmashell (11.0 W) | Top 2: agy (5.9 W)`
+  - Separator
+  - Radio Item: `● Balanced (균형 모드)`
+  - Radio Item: `○ Power Saver (절전 모드)`
+  - Radio Item: `○ Ultra Endurance (초절전 모드)`
+  - Separator
+  - Action Item: `🔍 Rescan Now (지금 즉시 전력 정밀 분석)`
+  - Action Item: `📊 Open KDE System Monitor`
+
 ---
 
 ## 3. Non-Functional & Extreme Optimization Mandates
