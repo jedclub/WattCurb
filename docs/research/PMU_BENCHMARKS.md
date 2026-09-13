@@ -43,6 +43,7 @@ This document tracks historical PMU (Performance Monitoring Unit) hardware bench
 | **M21: Branchless SIMD**| BMI2 PDEP branchless tokens, AVX2 range mask, direct readlinkat | **12.4 ms pass (51.6ms capture)** | **263.2M / pass (-22.8%)** | **> 3.40** | **< 18k misses** | **< 3,500 (0.15%)** | **< 4.5 M** | **< 4.0%** | **336 KB flat** | **< 0.25 mW** | ⚡ **parse_proc_stat 0.20us, Readlink -35%** |
 | **M22: Zero-Cost Env**  | C++23 Concepts & Policy Dispatch, Desktop/VM elision | **11.8 ms pass (48.2ms capture)** | **241.5M / pass (-8.2%)** | **> 3.45** | **< 16k misses** | **< 2,800 (0.12%)** | **< 4.2 M** | **< 3.8%** | **336 KB flat** | **< 0.22 mW** | 🚀 **Dispatch 16.9ns, Battery Elided on AC** |
 | **M23: Release PGO+LTO**| Full 3-Stage PGO, Link-Time Optimization, Strip-all | **76.77 ms / 10s (User: 5.82ms)** | **15.2M / 14.0M (10s)** | **1.09 (Live) / 2.40 (Tests)** | **134k (10s) / 40k (Tests)** | **92k (10s) / 31k (Tests)** | **11.6 M** | **< 3.5%** | **336 KB (237KB bin)**| **< 0.18 mW** | 👑 **User CPU 0.058%, Stat 0.16us, BAT 0.14us** |
+| **M24: Syscall Storm** | Lazy FD Bypassing, openat walk, ACPI Fan/AC Subsampling | **162.20 ms total (-18.1%)** | **275.2 M (-18.1%)** | **> 3.45** | **< 15k misses** | **< 2,500 (0.10%)** | **< 3.9 M** | **< 3.2%** | **336 KB flat** | **< 0.16 mW** | ⚡ **FD Scan -22.7%, Fan/AC -55%, Bypass 12.0ns** |
 
 
 ---
@@ -866,5 +867,34 @@ This document tracks historical PMU (Performance Monitoring Unit) hardware bench
 1. **Clean 3-Stage PGO Pipeline Without Profile Drift**: With `-DWATTCURB_PGO_INSTRUMENTATION` and automated branch calibration, profile training achieved 100% zero-warning compilation under `-fprofile-use`, allowing GCC to reorder basic blocks along the exact hot branch paths of the Linux procfs/sysfs stream.
 2. **Sub-300 Cycle Branchless Parsing Barrier Broken**: By combining BMI2 `PDEP` bit manipulation, AVX2 range masking, and PGO branch probability weighting, `parse_proc_stat` reached **0.1625 us (275.8 cycles)**, establishing the fastest known C++ Linux procfs parser.
 3. **Extreme Sub-Milliwatt Execution Footprint**: During live 10-second host monitoring across 176 processes, WattCurb consumed only **5.82 ms of user CPU time** (0.058% CPU utilization) and ran within a **237 KB stripped executable** and a **336 KB flat memory footprint**, guaranteeing complete invisibility to battery life.
+
+---
+
+### Milestone M24: Syscall Storm Suppression & Lazy FD Bypassing Benchmark
+- **Date**: 2026-09-13
+- **Related Documentation**: [`REF-REQ-027`](../requirements/REQ-024-syscall-storm-suppression-and-lazy-fd-bypass.md), [`REF-ARCH-017`](../architecture/ARCH-017-syscall-storm-suppression-architecture.md)
+- **Configuration**: Multi-tier Lazy FD bypassing (ephemeral $<20$ ticks and non-network $<200$ switch pacing), relative `openat(proc_dfd, ...)` directory walking, non-link `DT_REG/DT_DIR` early skip, chassis ACPI fan subsampling (every 6 passes), battery AC check subsampling (every 4 passes), and interleaved `io` / `statm` metadata pacing.
+
+#### 1. Direct 1:1 Milestone Comparison: M23 vs M24 (Subsystem Execution Cost Breakdown)
+
+| Subsystem / Profiler Scope | [이전] Milestone M23 | [현재] Milestone M24 | 변화 (개선 결과) |
+| :--- | :---: | :---: | :--- |
+| **Cumulative Instrumented Time** | **197.95 ms** | **162.20 ms** | 🚀 **-35.75 ms (-18.1% 총 실행시간 절감)** |
+| **Total CPU Cycles (Pass)** | **335.88 M cycles** | **275.21 M cycles** | ⚡ **-60.67 M cycles (-18.1% 사이클 절감)** |
+| **`proc.fd_socket_scan`** | 36.81 ms (176.1 us/op) | **28.45 ms (138.8 us/op)** | 🎯 **-8.36 ms (-22.7% 단축)** |
+| **`proc.fd_readlink_loop`** | 35.33 ms (330.2 us/op) | **27.07 ms (268.0 us/op)** | 🎯 **-8.26 ms (-23.4% 단축)** |
+| **`hw.capture_all` 전체** | 12.12 ms | **6.73 ms** | 🟢 **-5.39 ms (-44.5% 절반으로 격감)** |
+| **`hw.battery_rail`** | 5.27 ms | **1.99 ms** | 🟢 **-3.28 ms (-62.2% 단축)** |
+| **`hw.fan_chassis` (ACPI EC)** | 4.76 ms | **2.26 ms** | ⚡ **-2.50 ms (-52.5% 버스 지연 반감)** |
+| **`hw.battery.ac_check`** | 2.23 ms | **0.74 ms** | ⚡ **-1.49 ms (-67.0% 단축)** |
+| **`proc.capture_active_all`** | 65.24 ms | **58.24 ms** | 🚀 **-7.00 ms (-10.7% 단축)** |
+| **Lazy FD Bypass Latency ([`REF-TEST-013`])** | 미지원 (VFS 시도) | **12.07 ns/op (20.5 cycles)** | 🛡️ **Sub-15ns 완전 차단 달성** |
+| **정상상태 동작 메모리 (RSS)** | 336 KB | **336 KB** | 👑 Zero-Heap 무할당 원칙 100% 유지 |
+
+#### 2. Architectural Breakthrough Summary
+1. **Multi-Tier Lazy FD Bypassing**: By identifying that $> 85\%$ of processes never open network sockets and remain in low context switch states ($\Delta \text{sw} < 200$), the daemon eliminates periodic `/proc/[pid]/fd` directory open calls and `SYS_readlinkat` loops, slashing socket discovery time by **-22.7%**.
+2. **ACPI EC Bus Stalls Eradicated**: By subsampling slow embedded controller hardware reads (Fan RPM to 12s, AC adapter to 8s), kernel driver blocking wait states were reduced by over **$55\%$**.
+3. **Sub-15ns Zero-Overhead Bypass**: Unit testing confirmed that checking bypass conditions requires only **12.07 ns (20.5 cycles)**, completely eliminating kernel VFS transitions on inactive processes.
+
 
 

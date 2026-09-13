@@ -841,8 +841,11 @@ HardwareSample HardwareProbe::capture_sample() const {
         {
             WATTCURB_PROFILE_SCOPE("hw.battery.ac_check");
             if (ac_online_fd_ >= 0) {
-                auto ac_val = read_uint32_fd(ac_online_fd_);
-                sample.is_ac_online = (ac_val.value_or(0) == 1);
+                if (!cached_battery_static_initialized_ || (sample_counter_ % 4 == 1)) {
+                    auto ac_val = read_uint32_fd(ac_online_fd_);
+                    cached_ac_online_ = (ac_val.value_or(0) == 1);
+                }
+                sample.is_ac_online = cached_ac_online_;
             }
         }
 
@@ -1201,8 +1204,8 @@ void HardwareProbe::capture_subsystems(HardwareSample& sample) const {
     // 5. Chassis & Mechanical Thermal
     {
         WATTCURB_PROFILE_SCOPE("hw.fan_chassis");
-        // Sub-sample slow ACPI EC fan queries (7~15ms EC bus stall)
-        if (!cached_fan_rpm_.has_value() || (sample_counter_ % 2 == 1)) {
+        // Sub-sample slow ACPI EC fan queries (7~15ms EC bus stall, REF-REQ-027)
+        if (!cached_fan_rpm_.has_value() || (sample_counter_ % 6 == 1)) {
             if (fan_rpm_fd_ >= 0) cached_fan_rpm_ = read_uint32_fd(fan_rpm_fd_);
             if (fan_pwm_fd_ >= 0) cached_fan_pwm_ = read_uint32_fd(fan_pwm_fd_);
             if (chassis_temp_fd_ >= 0) cached_chassis_temp_ = read_int32_fd(chassis_temp_fd_);

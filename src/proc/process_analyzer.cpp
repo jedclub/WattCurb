@@ -223,8 +223,18 @@ static void do_capture_active_processes(
                 }
             }
 
+            const uint64_t cur_ticks = sample.utime_ticks + sample.stime_ticks;
+            const uint64_t prev_ticks = (prev != nullptr) ? (prev->utime_ticks + prev->stime_ticks) : 0;
+            const uint64_t delta_ticks = (cur_ticks >= prev_ticks) ? (cur_ticks - prev_ticks) : 0;
+
             if (prev != nullptr && !prev->has_io_perm) {
                 sample.has_io_perm = false;
+            } else if (prev != nullptr && delta_ticks < 2 && (pass_counter % 2 == 1)) {
+                // Interleaved Pacing: Reuse previous I/O counters for low-delta processes (REF-REQ-027)
+                sample.read_bytes = prev->read_bytes;
+                sample.write_bytes = prev->write_bytes;
+                sample.io_syscalls = prev->io_syscalls;
+                sample.has_io_perm = prev->has_io_perm;
             } else {
                 WATTCURB_PROFILE_SCOPE("proc.io_read_parse");
                 format_pid_subpath(path_buf, pid, "/io", 3);
@@ -235,7 +245,11 @@ static void do_capture_active_processes(
                 }
             }
 
-            {
+            if (prev != nullptr && delta_ticks < 2 && (pass_counter % 2 == 0)) {
+                // Interleaved Pacing: Reuse memory footprint for low-delta processes (REF-REQ-027)
+                sample.pss_kib = prev->pss_kib;
+                sample.rss_kib = prev->rss_kib;
+            } else {
                 WATTCURB_PROFILE_SCOPE("proc.statm_read_parse");
                 format_pid_subpath(path_buf, pid, "/statm", 6);
                 if (read_fileat_to_stack_buf(proc_dfd, path_buf, read_buf, sizeof(read_buf), bytes)) {
@@ -257,7 +271,7 @@ static void do_capture_active_processes(
 
             {
                 WATTCURB_PROFILE_SCOPE("proc.fd_socket_scan");
-                analyzer.inspect_pid_fds(pid, sample, prev);
+                analyzer.inspect_pid_fds(pid, sample, prev, proc_dfd);
             }
 
             samples.push_back(std::move(sample));
@@ -335,14 +349,17 @@ bool ProcessAnalyzer::read_pid_details(int32_t pid, ProcessSample& sample) const
     return true;
 }
 
-void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample, const ProcessSample* prev) const {
-    // Fast bypass for ephemeral and low-CPU processes (REF-RES-007)
-    // Ephemeral or low-activity processes (< 5 ticks) never hold long-lived 3D DRM or sockets
-    // and querying their fd/ triggers kernel mmap_lock contention during fork/exec.
-    if (prev == nullptr && (sample.utime_ticks + sample.stime_ticks < 5)) {
-        sample.open_sockets = 0;
-        sample.pinned_drm_fd = -1;
-        return;
+void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample, const ProcessSample* prev, int proc_dfd) const {
+    // Fast bypass for ephemeral and low-activity processes (REF-REQ-027)
+    // GUI worker threads, compilers, and idle tools (< 20 total ticks & < 50 ctxt switches)
+    // almost never hold network sockets or DRM nodes.
+    if (prev == nullptr) {
+        if ((sample.utime_ticks + sample.stime_ticks < 20 && sample.voluntary_ctxt_switches < 50) ||
+            (sample.num_threads == 1 && sample.io_syscalls == 0 && sample.minflt == 0)) {
+            sample.open_sockets = 0;
+            sample.pinned_drm_fd = -1;
+            return;
+        }
     }
 
     // 1. Persistent DRM FD Pinning (REF-RES-006):
@@ -364,7 +381,7 @@ void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample, const 
         }
     }
 
-    // 2. Fast Socket and FD Bypass (REF-RES-006, REF-RES-007):
+    // 2. Fast Socket and FD Bypass (REF-RES-006, REF-RES-007, REF-REQ-027):
     // If previous sample exists, preserve socket count.
     // WiFi CAM attribution strictly requires wakeups_per_sec > 10 (delta_sw >= 20 over 2s).
     // Processes below this rate cannot hold WiFi radio in active mode; skip expensive fd inspection!
@@ -375,30 +392,34 @@ void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample, const 
             uint64_t prev_sw = prev->voluntary_ctxt_switches + prev->nonvoluntary_ctxt_switches;
             uint64_t delta_sw = (cur_sw >= prev_sw) ? (cur_sw - prev_sw) : 0;
 
-            if (delta_sw < 50 && prev->open_sockets == 0) {
-                return;
-            }
-            if (delta_sw < 30 && (pass_counter_ % 10 != 0)) {
-                return;
-            }
-            // Established network processes: rescan every 4 passes (~8s) to eliminate VFS readlink storms (REF-REQ-025)
-            if (prev->open_sockets > 0 && (pass_counter_ % 4 != 0)) {
-                return;
+            // If process had 0 sockets previously and no significant context switches or I/O, skip!
+            if (prev->open_sockets == 0) {
+                if (delta_sw < 200 && (pass_counter_ % 8 != 0)) {
+                    return;
+                }
+            } else {
+                // Established network processes: rescan every 6 passes (~12s) to eliminate VFS readlink storms (REF-REQ-027)
+                if (pass_counter_ % 6 != 0) {
+                    return;
+                }
             }
         }
     }
 
-    // 3. Direct SYS_getdents64 Directory Scan (Zero-Heap Allocation) (REF-RES-006)
+    // 3. Direct SYS_getdents64 Directory Scan via openat (Zero-Heap Allocation) (REF-RES-006, REF-REQ-027)
     char rel_fd_path[32];
     format_pid_subpath(rel_fd_path, pid, "/fd", 3);
-
-    char full_fd_path[128];
-    std::snprintf(full_fd_path, sizeof(full_fd_path), "%s/%s", procfs_root_.c_str(), rel_fd_path);
 
     int dfd = -1;
     {
         WATTCURB_PROFILE_SCOPE("proc.fd_opendir");
-        dfd = ::open(full_fd_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if (proc_dfd >= 0) {
+            dfd = ::openat(proc_dfd, rel_fd_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        } else {
+            char full_fd_path[128];
+            std::snprintf(full_fd_path, sizeof(full_fd_path), "%s/%s", procfs_root_.c_str(), rel_fd_path);
+            dfd = ::open(full_fd_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        }
     }
     if (dfd < 0) return;
 
@@ -425,6 +446,7 @@ void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample, const 
                 bpos += entry->d_reclen;
 
                 if (entry->d_name[0] < '0' || entry->d_name[0] > '9') continue;
+                if (entry->d_type == DT_REG || entry->d_type == DT_DIR) continue;
                 if (entry->d_type != DT_LNK && entry->d_type != DT_UNKNOWN) continue;
 
                 ssize_t len = ::syscall(SYS_readlinkat, dfd, entry->d_name, symlink_buf, sizeof(symlink_buf) - 1);

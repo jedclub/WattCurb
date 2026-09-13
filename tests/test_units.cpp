@@ -1301,6 +1301,74 @@ void test_zero_cost_environment_abstraction() {
     std::cout << " [PASS] test_zero_cost_environment_abstraction (REF-TEST-012)\n";
 }
 
+void test_syscall_storm_suppression_and_lazy_fd_bypass() {
+    std::cout << "--- [REF-TEST-013] Syscall Storm Suppression & Lazy FD Bypass Verification ---\n";
+
+    wattcurb::proc::ProcessAnalyzer analyzer;
+
+    // 1. First-Pass Ephemeral Process Bypass
+    wattcurb::ProcessSample sample_eph;
+    sample_eph.pid = 99999;
+    sample_eph.utime_ticks = 2;
+    sample_eph.stime_ticks = 1;
+    sample_eph.voluntary_ctxt_switches = 10;
+    analyzer.inspect_pid_fds(sample_eph.pid, sample_eph, nullptr, -1);
+    assert(sample_eph.open_sockets == 0 && "Ephemeral process must bypass socket scan");
+    assert(sample_eph.pinned_drm_fd == -1 && "Ephemeral process must bypass DRM scan");
+
+    // 2. Subsequent Pass Non-Network Process Bypass
+    wattcurb::ProcessSample sample_cur;
+    sample_cur.pid = 88888;
+    sample_cur.utime_ticks = 100;
+    sample_cur.stime_ticks = 50;
+    sample_cur.voluntary_ctxt_switches = 250;
+
+    wattcurb::ProcessSample sample_prev;
+    sample_prev.pid = 88888;
+    sample_prev.utime_ticks = 98;
+    sample_prev.stime_ticks = 50;
+    sample_prev.voluntary_ctxt_switches = 200; // delta_sw = 50 (< 200)
+    sample_prev.open_sockets = 0;
+    sample_prev.pinned_drm_fd = -1;
+
+    analyzer.increment_pass(); // Move pass_counter from 0 to 1 (steady-state non-rescan pass)
+    analyzer.inspect_pid_fds(sample_cur.pid, sample_cur, &sample_prev, -1);
+    assert(sample_cur.open_sockets == 0 && "Non-network process with low switch delta must bypass FD walk");
+
+    // 3. High-Throughput Bypass Micro-Benchmark (50,000 iterations)
+    constexpr size_t BENCH_COUNT = 50000;
+    auto t0 = std::chrono::steady_clock::now();
+    uint64_t tsc0 = wattcurb::core::hw_isa::read_tsc();
+
+    for (size_t i = 0; i < BENCH_COUNT; ++i) {
+        sample_cur.open_sockets = 999; // reset
+        analyzer.inspect_pid_fds(sample_cur.pid, sample_cur, &sample_prev, -1);
+    }
+
+    auto t1 = std::chrono::steady_clock::now();
+    uint64_t tsc1 = wattcurb::core::hw_isa::read_tsc();
+
+    auto total_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+    double avg_ns_op = static_cast<double>(total_ns) / static_cast<double>(BENCH_COUNT);
+    double cycles_op = static_cast<double>(tsc1 - tsc0) / static_cast<double>(BENCH_COUNT);
+
+    std::cout << " [ORACLE GATE] Lazy FD Bypass Latency (" << BENCH_COUNT << " iters):\n"
+              << "   * Average Latency : " << std::fixed << std::setprecision(2) << avg_ns_op << " ns/op\n"
+              << "   * Average Cycles  : " << std::setprecision(1) << cycles_op << " cycles/op\n";
+
+    assert(avg_ns_op < 50.0 && "Lazy FD bypass must complete under 50 ns/op!");
+
+    // 4. Hardware Probe Subsampling Cache Verification
+    wattcurb::hw::HardwareProbe probe;
+    auto s1 = probe.capture_sample();
+    auto s2 = probe.capture_sample();
+    // Subsequent immediate sample must match cached AC and fan metrics without blocking
+    assert(s1.is_ac_online == s2.is_ac_online);
+    assert(s1.fan_rpm == s2.fan_rpm);
+
+    std::cout << " [PASS] test_syscall_storm_suppression_and_lazy_fd_bypass (REF-TEST-013)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -1315,6 +1383,7 @@ int main() {
     test::test_battery_telemetry_profiling_scopes();
     test::test_branchless_simd_and_bmi2_pdep();
     test::test_zero_cost_environment_abstraction();
+    test::test_syscall_storm_suppression_and_lazy_fd_bypass();
     test::test_process_classifier();
     test::test_mitigation_engine();
     test::test_modular_battery_features();
