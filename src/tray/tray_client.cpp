@@ -149,10 +149,13 @@ bool TrayClient::send_daemon_command(const char* cmd) noexcept {
 
     struct sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
-    std::strncpy(addr.sun_path, "/tmp/wattcurb_lock.sock", sizeof(addr.sun_path) - 1);
+    addr.sun_path[0] = '\0';
+    const char lock_name[] = "wattcurb.lock";
+    std::memcpy(addr.sun_path + 1, lock_name, sizeof(lock_name) - 1);
+    socklen_t addr_len = static_cast<socklen_t>(sizeof(sa_family_t) + 1 + sizeof(lock_name) - 1);
 
     size_t len = std::strlen(cmd);
-    ssize_t sent = ::sendto(fd, cmd, len, 0, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr));
+    ssize_t sent = ::sendto(fd, cmd, len, 0, reinterpret_cast<struct sockaddr*>(&addr), addr_len);
     ::close(fd);
     return (sent > 0);
 }
