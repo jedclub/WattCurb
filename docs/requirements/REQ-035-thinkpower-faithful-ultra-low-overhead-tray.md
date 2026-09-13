@@ -59,10 +59,11 @@ The desktop tray client is the user's primary interface to WattCurb. It must fai
   - Header Item 2 (Disabled): `🔋 Battery Health: 94.2% (95 cycles) | 63°C Fan 4300 RPM`
   - Header Item 3 (Disabled): `🔥 Top 1: plasmashell (11.0 W) | Top 2: agy (5.9 W)`
   - Separator
-  - Radio Item: `● Performance (고성능 모드 - 4.1GHz Boost)`
-  - Radio Item: `● Balanced (균형 모드 - 기본 권장)`
-  - Radio Item: `○ Smart Save (스마트 절전 모드 - 1.7GHz)`
-  - Radio Item: `○ Ultra Save (초절전 모드 - 1.4GHz, 48Hz)`
+  - Radio Item: `Performance (고성능 모드 - 4.1GHz Boost)` (`toggle-type: radio`, mutually exclusive)
+  - Radio Item: `Balanced (균형 모드 - 기본 권장)` (`toggle-type: radio`, mutually exclusive)
+  - Radio Item: `Smart Save (스마트 절전 모드 - 1.7GHz)` (`toggle-type: radio`, mutually exclusive)
+  - Radio Item: `Ultra Save (초절전 모드 - 1.4GHz, 48Hz)` (`toggle-type: radio`, mutually exclusive)
+  - Note: Labels MUST NOT include manual Unicode bullet points (`●`/`○`) to prevent visual collision with KDE native radio buttons. Mutual exclusion MUST be enforced via immediate `LayoutUpdated(revision, 0)` signal emission upon selection.
   - Separator
   - Action Item: `🔍 지금 전력 소비 정밀 분석 (Rescan Now)`
   - Action Item: `📊 KDE 시스템 모니터 열기 (System Monitor)`

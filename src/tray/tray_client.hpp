@@ -87,6 +87,8 @@ private:
     const ipc::WattCurbSharedState* shm_state_{nullptr};
     bool running_{false};
     char service_name_[64]{0};
+    uint32_t menu_revision_{1};
+    int local_override_mode_{-1};
 };
 
 } // namespace wattcurb::tray

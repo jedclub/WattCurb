@@ -99,7 +99,11 @@ bool TrayClient::setup_shm() noexcept {
 
 bool TrayClient::read_state(ipc::WattCurbSharedState& out) const noexcept {
     if (!shm_state_) return false;
-    return shm_state_->read_atomic(out);
+    bool ok = shm_state_->read_atomic(out);
+    if (ok && local_override_mode_ >= 0) {
+        out.power_profile_mode = static_cast<uint8_t>(local_override_mode_);
+    }
+    return ok;
 }
 
 void TrayClient::render_tooltip(
@@ -428,7 +432,8 @@ int TrayClient::dbusmenu_property_get_status(sd_bus*, const char*, const char*, 
 }
 
 int TrayClient::dbusmenu_method_about_to_show(sd_bus_message* msg, void*, sd_bus_error*) {
-    return sd_bus_reply_method_return(msg, "b", 0);
+    // Return true (1) so KDE Plasma always queries the latest GetLayout
+    return sd_bus_reply_method_return(msg, "b", 1);
 }
 
 static void append_menu_node(
@@ -501,7 +506,7 @@ int TrayClient::dbusmenu_method_get_layout(sd_bus_message* msg, void* userdata, 
     if (r < 0) return r;
 
     // uint revision
-    sd_bus_message_append(reply, "u", 1);
+    sd_bus_message_append(reply, "u", self->menu_revision_);
 
     // root node: (ia{sv}av)
     sd_bus_message_open_container(reply, 'r', "ia{sv}av");
@@ -535,14 +540,16 @@ int TrayClient::dbusmenu_method_get_layout(sd_bus_message* msg, void* userdata, 
         sd_bus_message_close_container(reply);
     };
 
+    uint8_t cur_mode = state.power_profile_mode;
+
     add_item(1, h1, false);
     add_item(2, h2, false);
     add_item(3, h3, false);
     add_item(4, nullptr, true, "separator");
-    add_item(5, (state.power_profile_mode == 0 ? "● Performance (고성능 모드 - 4.1GHz Boost)" : "○ Performance (고성능 모드 - 4.1GHz Boost)"), true, nullptr, "radio", (state.power_profile_mode == 0 ? 1 : 0));
-    add_item(6, (state.power_profile_mode == 1 ? "● Balanced (균형 모드 - 기본 권장)" : "○ Balanced (균형 모드 - 기본 권장)"), true, nullptr, "radio", (state.power_profile_mode == 1 ? 1 : 0));
-    add_item(7, (state.power_profile_mode == 2 ? "● Smart Save (스마트 절전 모드 - 1.7GHz)" : "○ Smart Save (스마트 절전 모드 - 1.7GHz)"), true, nullptr, "radio", (state.power_profile_mode == 2 ? 1 : 0));
-    add_item(8, (state.power_profile_mode == 3 ? "● Ultra Save (초절전 모드 - 1.4GHz, 48Hz)" : "○ Ultra Save (초절전 모드 - 1.4GHz, 48Hz)"), true, nullptr, "radio", (state.power_profile_mode == 3 ? 1 : 0));
+    add_item(5, "Performance (고성능 모드 - 4.1GHz Boost)", true, nullptr, "radio", (cur_mode == 0 ? 1 : 0));
+    add_item(6, "Balanced (균형 모드 - 기본 권장)", true, nullptr, "radio", (cur_mode == 1 ? 1 : 0));
+    add_item(7, "Smart Save (스마트 절전 모드 - 1.7GHz)", true, nullptr, "radio", (cur_mode == 2 ? 1 : 0));
+    add_item(8, "Ultra Save (초절전 모드 - 1.4GHz, 48Hz)", true, nullptr, "radio", (cur_mode == 3 ? 1 : 0));
     add_item(9, nullptr, true, "separator");
     add_item(10, "🔍 지금 전력 소비 정밀 분석 (Rescan Now)");
     add_item(11, "📊 KDE 시스템 모니터 열기 (System Monitor)");
@@ -555,25 +562,29 @@ int TrayClient::dbusmenu_method_get_layout(sd_bus_message* msg, void* userdata, 
     return r;
 }
 
-int TrayClient::dbusmenu_method_event(sd_bus_message* msg, void*, sd_bus_error*) {
+int TrayClient::dbusmenu_method_event(sd_bus_message* msg, void* userdata, sd_bus_error*) {
+    auto* self = static_cast<TrayClient*>(userdata);
     int id = 0;
     const char* event_id = nullptr;
     int r = sd_bus_message_read(msg, "is", &id, &event_id);
     if (r < 0) return r;
 
     if (event_id && std::strcmp(event_id, "clicked") == 0) {
+        int selected_mode = -1;
+        const char* hw_mode = nullptr;
+
         if (id == 5) {
-            send_daemon_command("PROFILE 0\n");
-            apply_hardware_profile("performance");
+            selected_mode = 0;
+            hw_mode = "performance";
         } else if (id == 6) {
-            send_daemon_command("PROFILE 1\n");
-            apply_hardware_profile("balanced");
+            selected_mode = 1;
+            hw_mode = "balanced";
         } else if (id == 7) {
-            send_daemon_command("PROFILE 2\n");
-            apply_hardware_profile("save");
+            selected_mode = 2;
+            hw_mode = "save";
         } else if (id == 8) {
-            send_daemon_command("PROFILE 3\n");
-            apply_hardware_profile("ultra");
+            selected_mode = 3;
+            hw_mode = "ultra";
         } else if (id == 10) {
             send_daemon_command("RESCAN\n");
         } else if (id == 11) {
@@ -581,6 +592,20 @@ int TrayClient::dbusmenu_method_event(sd_bus_message* msg, void*, sd_bus_error*)
                 ::execlp("plasma-systemmonitor", "plasma-systemmonitor", nullptr);
                 ::_exit(0);
             }
+        }
+
+        if (selected_mode >= 0) {
+            self->local_override_mode_ = selected_mode;
+            char cmd[16];
+            std::snprintf(cmd, sizeof(cmd), "PROFILE %d\n", selected_mode);
+            send_daemon_command(cmd);
+            apply_hardware_profile(hw_mode);
+
+            // Notify KDE Plasma that layout changed immediately to update radio buttons and icon
+            ++self->menu_revision_;
+            sd_bus_emit_signal(self->bus_, "/MenuBar", "com.canonical.dbusmenu", "LayoutUpdated", "ui", self->menu_revision_, 0);
+            sd_bus_emit_signal(self->bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewIcon", nullptr);
+            sd_bus_emit_signal(self->bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewToolTip", nullptr);
         }
     }
     return sd_bus_reply_method_return(msg, "");
