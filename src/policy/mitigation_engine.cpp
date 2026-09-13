@@ -47,6 +47,15 @@ PowerProfileMode MitigationEngine::determine_profile(bool on_battery, double bat
 
     // REF-REQ-031 Sec 2.2: Hysteresis & Anti-Flapping Guards
     switch (m_current_profile) {
+    case PowerProfileMode::Performance:
+        if (battery_pct < 20.0) {
+            return PowerProfileMode::UltraEndurance;
+        }
+        if (battery_pct <= 50.0) {
+            return PowerProfileMode::PowerSaver;
+        }
+        return PowerProfileMode::Balanced;
+
     case PowerProfileMode::Balanced:
         if (battery_pct < 20.0) {
             return PowerProfileMode::UltraEndurance;
@@ -384,7 +393,10 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
     PowerProfileMode old_profile = m_current_profile;
 
     if (old_profile != target_profile) {
-        if (target_profile == PowerProfileMode::Balanced) {
+        if (target_profile == PowerProfileMode::Performance) {
+            rollback_all();
+            set_cpu_epp_policy("performance");
+        } else if (target_profile == PowerProfileMode::Balanced) {
             rollback_all();
         } else if (old_profile == PowerProfileMode::UltraEndurance && target_profile == PowerProfileMode::PowerSaver) {
             thaw_all_frozen();
@@ -404,6 +416,19 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
     }
 
     status.current_profile = m_current_profile;
+
+    // In Performance mode: zero throttling, zero freezes, maximum throughput
+    if (m_current_profile == PowerProfileMode::Performance) {
+        if (status.feature_summary_count < status.feature_summaries.size()) {
+            status.feature_summaries[status.feature_summary_count++] = "CPU: 4.1GHz Boost (Performance)";
+        }
+        if (status.feature_summary_count < status.feature_summaries.size()) {
+            status.feature_summaries[status.feature_summary_count++] = "Mitigations: All Off (Full Speed)";
+        }
+        status.active_summary = "Performance Mode (4.1GHz Boost, Unconstrained)";
+        report.mitigation_status = status;
+        return status;
+    }
 
     // 2. Add hardware feature summaries
     if (m_current_profile == PowerProfileMode::PowerSaver) {

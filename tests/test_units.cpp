@@ -1626,7 +1626,7 @@ void test_thinkpower_tray_client() {
     state.cpu_temp_c = 48;
     state.fan_rpm = 2100;
     state.battery_state = 1; // Discharging
-    state.power_profile_mode = 1; // PowerSaver
+    state.power_profile_mode = 2; // SmartSave
     state.active_mitigations = 2;
 
     std::strncpy(state.culprits[0].comm, "code", sizeof(state.culprits[0].comm) - 1);
@@ -1647,17 +1647,21 @@ void test_thinkpower_tray_client() {
     assert(std::string_view(desc).find("CPU: 7.5 W (48°C, Fan 2100 RPM) | GPU: 3.2 W") != std::string_view::npos);
     assert(std::string_view(desc).find("Top 1: code (4100 mW, PID 10101)") != std::string_view::npos);
     assert(std::string_view(desc).find("Top 2: kwin_wayland (1800 mW, PID 1200)") != std::string_view::npos);
-    assert(std::string_view(desc).find("Profile: PowerSaver | Active Gates: 2") != std::string_view::npos);
+    assert(std::string_view(desc).find("Profile: SmartSave | Active Gates: 2") != std::string_view::npos);
 
     // 2. Icon Name Resolution Test (Breeze 10% quantized battery + profile icons)
     char icon[64]{};
     state.battery_percent = 82; // rounds to 080
     state.battery_state = 1; // Discharging
-    state.power_profile_mode = 1; // PowerSaver
+    state.power_profile_mode = 2; // SmartSave
     TrayClient::resolve_icon_name(state, icon, sizeof(icon));
     assert(std::string_view(icon) == "battery-080-profile-powersave");
 
-    state.power_profile_mode = 0; // Balanced
+    state.power_profile_mode = 0; // Performance
+    TrayClient::resolve_icon_name(state, icon, sizeof(icon));
+    assert(std::string_view(icon) == "battery-080-profile-performance");
+
+    state.power_profile_mode = 1; // Balanced
     TrayClient::resolve_icon_name(state, icon, sizeof(icon));
     assert(std::string_view(icon) == "battery-080-profile-balanced");
 

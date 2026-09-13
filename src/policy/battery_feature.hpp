@@ -49,9 +49,11 @@ class FeatureManager {
 public:
     FeatureManager() noexcept;
 
-    // Feature Toggles
+    // Feature Toggles & Profile Override
     void set_feature_enabled(FeatureId id, bool enabled) noexcept;
     [[nodiscard]] bool is_feature_enabled(FeatureId id) const noexcept;
+    void set_override_profile(std::optional<PowerProfileMode> mode) noexcept { m_profile_override = mode; }
+    [[nodiscard]] std::optional<PowerProfileMode> override_profile() const noexcept { return m_profile_override; }
 
     // Get live metrics for all features (Zero-String)
     [[nodiscard]] const std::array<FeatureMetrics, static_cast<size_t>(FeatureId::Count)>& metrics() const noexcept {
@@ -84,6 +86,7 @@ private:
         uint64_t timestamp_sec{0};
     };
     core::FixedVector<TrackedMitigation, MAX_TRACKED_MITIGATIONS> m_tracked{};
+    std::optional<PowerProfileMode> m_profile_override{};
 };
 
 } // namespace wattcurb::policy

@@ -183,21 +183,40 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
         fm.detail_summary.clear();
     }
 
-    // Determine Aggressiveness Profile (REF-ARCH-008, REF-REQ-020)
+    // Determine Power Profile and Aggressiveness (REF-ARCH-008, REF-REQ-020, REF-REQ-035)
+    PowerProfileMode eff_profile = PowerProfileMode::Balanced;
+    if (m_profile_override.has_value()) {
+        eff_profile = *m_profile_override;
+    } else if (on_battery) {
+        if (battery_pct < 20.0) {
+            eff_profile = PowerProfileMode::UltraEndurance;
+        } else if (battery_pct <= 50.0) {
+            eff_profile = PowerProfileMode::PowerSaver;
+        } else {
+            eff_profile = PowerProfileMode::Balanced;
+        }
+    } else {
+        eff_profile = PowerProfileMode::Balanced;
+    }
+    status.current_profile = eff_profile;
+
+    if (eff_profile == PowerProfileMode::Performance) {
+        // Performance Mode: All features suppressed, max throughput
+        status.active_summary = "Performance Mode (Boost 4.1GHz, Zero Throttling)";
+        report.mitigation_status = status;
+        return status;
+    }
+
     enum class Aggressiveness {
         Conservative,
         Moderate,
         Progressive
     } profile = Aggressiveness::Conservative;
 
-    if (on_battery) {
-        if (battery_pct < 20.0) {
-            profile = Aggressiveness::Progressive;
-        } else if (battery_pct <= 50.0) {
-            profile = Aggressiveness::Moderate;
-        } else {
-            profile = Aggressiveness::Conservative;
-        }
+    if (eff_profile == PowerProfileMode::UltraEndurance) {
+        profile = Aggressiveness::Progressive;
+    } else if (eff_profile == PowerProfileMode::PowerSaver) {
+        profile = Aggressiveness::Moderate;
     } else {
         profile = Aggressiveness::Conservative;
     }

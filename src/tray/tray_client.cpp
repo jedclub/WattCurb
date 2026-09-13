@@ -116,9 +116,10 @@ void TrayClient::render_tooltip(
 
     std::snprintf(out_title, title_cap, "WattCurb: %u.%u W (%s)", sys_w, sys_frac, status_str);
 
-    const char* profile_name = "Balanced";
-    if (state.power_profile_mode == 1) profile_name = "PowerSaver";
-    else if (state.power_profile_mode == 2) profile_name = "UltraEndurance";
+    const char* profile_name = "Performance";
+    if (state.power_profile_mode == 1) profile_name = "Balanced";
+    else if (state.power_profile_mode == 2) profile_name = "SmartSave";
+    else if (state.power_profile_mode == 3) profile_name = "UltraSave";
 
     unsigned int cpu_w = state.cpu_drain_mw / 1000;
     unsigned int cpu_frac = (state.cpu_drain_mw % 1000) / 100;
@@ -147,7 +148,13 @@ void TrayClient::resolve_icon_name(
     const ipc::WattCurbSharedState& state,
     char* out_icon, size_t icon_cap
 ) noexcept {
-    const char* prof = (state.power_profile_mode == 1 || state.power_profile_mode == 2) ? "powersave" : "balanced";
+    const char* prof = "balanced";
+    if (state.power_profile_mode == 0) {
+        prof = "performance";
+    } else if (state.power_profile_mode == 2 || state.power_profile_mode == 3) {
+        prof = "powersave";
+    }
+
     uint8_t pct = state.battery_percent;
     if (pct > 100) pct = 100;
 
@@ -161,6 +168,29 @@ void TrayClient::resolve_icon_name(
     } else {
         // Discharging on battery
         std::snprintf(out_icon, icon_cap, "battery-%03u-profile-%s", rounded, prof);
+    }
+}
+
+static void apply_hardware_profile(const char* mode) noexcept {
+    if (!mode) return;
+    const char* home = ::getenv("HOME");
+    if (home) {
+        char path[256];
+        std::snprintf(path, sizeof(path), "%s/.cache/power_profile_mode", home);
+        int fd = ::open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        if (fd >= 0) {
+            ::write(fd, mode, std::strlen(mode));
+            ::write(fd, "\n", 1);
+            ::close(fd);
+        }
+    }
+
+    if (::access("/home/jedclub/.local/bin/power-profile-manager", X_OK) == 0) {
+        pid_t pid = ::fork();
+        if (pid == 0) {
+            ::execl("/home/jedclub/.local/bin/power-profile-manager", "power-profile-manager", mode, "--internal", nullptr);
+            ::_exit(0);
+        }
     }
 }
 
@@ -186,12 +216,16 @@ void TrayClient::cycle_power_profile() noexcept {
     ipc::WattCurbSharedState state{};
     read_state(state);
 
-    auto next_mode = static_cast<uint8_t>((state.power_profile_mode + 1) % 3);
-    const char* cmd = "PROFILE 0\n";
-    if (next_mode == 1) cmd = "PROFILE 1\n";
-    else if (next_mode == 2) cmd = "PROFILE 2\n";
-
+    auto next_mode = static_cast<uint8_t>((state.power_profile_mode + 1) % 4);
+    char cmd[16];
+    std::snprintf(cmd, sizeof(cmd), "PROFILE %u\n", next_mode);
     send_daemon_command(cmd);
+
+    const char* hw_mode = "performance";
+    if (next_mode == 1) hw_mode = "balanced";
+    else if (next_mode == 2) hw_mode = "save";
+    else if (next_mode == 3) hw_mode = "ultra";
+    apply_hardware_profile(hw_mode);
 }
 
 bool TrayClient::setup_dbus() noexcept {
@@ -505,12 +539,13 @@ int TrayClient::dbusmenu_method_get_layout(sd_bus_message* msg, void* userdata, 
     add_item(2, h2, false);
     add_item(3, h3, false);
     add_item(4, nullptr, true, "separator");
-    add_item(5, "● Balanced (균형 모드 - 기본 권장)", true, nullptr, "radio", (state.power_profile_mode == 0 ? 1 : 0));
-    add_item(6, "○ Power Saver (절전 모드)", true, nullptr, "radio", (state.power_profile_mode == 1 ? 1 : 0));
-    add_item(7, "○ Ultra Endurance (초절전 모드)", true, nullptr, "radio", (state.power_profile_mode == 2 ? 1 : 0));
-    add_item(8, nullptr, true, "separator");
-    add_item(9, "🔍 지금 전력 소비 정밀 분석 (Rescan Now)");
-    add_item(10, "📊 KDE 시스템 모니터 열기 (System Monitor)");
+    add_item(5, (state.power_profile_mode == 0 ? "● Performance (고성능 모드 - 4.1GHz Boost)" : "○ Performance (고성능 모드 - 4.1GHz Boost)"), true, nullptr, "radio", (state.power_profile_mode == 0 ? 1 : 0));
+    add_item(6, (state.power_profile_mode == 1 ? "● Balanced (균형 모드 - 기본 권장)" : "○ Balanced (균형 모드 - 기본 권장)"), true, nullptr, "radio", (state.power_profile_mode == 1 ? 1 : 0));
+    add_item(7, (state.power_profile_mode == 2 ? "● Smart Save (스마트 절전 모드 - 1.7GHz)" : "○ Smart Save (스마트 절전 모드 - 1.7GHz)"), true, nullptr, "radio", (state.power_profile_mode == 2 ? 1 : 0));
+    add_item(8, (state.power_profile_mode == 3 ? "● Ultra Save (초절전 모드 - 1.4GHz, 48Hz)" : "○ Ultra Save (초절전 모드 - 1.4GHz, 48Hz)"), true, nullptr, "radio", (state.power_profile_mode == 3 ? 1 : 0));
+    add_item(9, nullptr, true, "separator");
+    add_item(10, "🔍 지금 전력 소비 정밀 분석 (Rescan Now)");
+    add_item(11, "📊 KDE 시스템 모니터 열기 (System Monitor)");
 
     sd_bus_message_close_container(reply); // children av
     sd_bus_message_close_container(reply); // root r
@@ -527,11 +562,21 @@ int TrayClient::dbusmenu_method_event(sd_bus_message* msg, void*, sd_bus_error*)
     if (r < 0) return r;
 
     if (event_id && std::strcmp(event_id, "clicked") == 0) {
-        if (id == 5) send_daemon_command("PROFILE 0\n");
-        else if (id == 6) send_daemon_command("PROFILE 1\n");
-        else if (id == 7) send_daemon_command("PROFILE 2\n");
-        else if (id == 9) send_daemon_command("RESCAN\n");
-        else if (id == 10) {
+        if (id == 5) {
+            send_daemon_command("PROFILE 0\n");
+            apply_hardware_profile("performance");
+        } else if (id == 6) {
+            send_daemon_command("PROFILE 1\n");
+            apply_hardware_profile("balanced");
+        } else if (id == 7) {
+            send_daemon_command("PROFILE 2\n");
+            apply_hardware_profile("save");
+        } else if (id == 8) {
+            send_daemon_command("PROFILE 3\n");
+            apply_hardware_profile("ultra");
+        } else if (id == 10) {
+            send_daemon_command("RESCAN\n");
+        } else if (id == 11) {
             if (::fork() == 0) {
                 ::execlp("plasma-systemmonitor", "plasma-systemmonitor", nullptr);
                 ::_exit(0);

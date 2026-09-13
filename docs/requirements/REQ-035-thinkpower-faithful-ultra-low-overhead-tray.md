@@ -59,12 +59,13 @@ The desktop tray client is the user's primary interface to WattCurb. It must fai
   - Header Item 2 (Disabled): `🔋 Battery Health: 94.2% (95 cycles) | 63°C Fan 4300 RPM`
   - Header Item 3 (Disabled): `🔥 Top 1: plasmashell (11.0 W) | Top 2: agy (5.9 W)`
   - Separator
-  - Radio Item: `● Balanced (균형 모드)`
-  - Radio Item: `○ Power Saver (절전 모드)`
-  - Radio Item: `○ Ultra Endurance (초절전 모드)`
+  - Radio Item: `● Performance (고성능 모드 - 4.1GHz Boost)`
+  - Radio Item: `● Balanced (균형 모드 - 기본 권장)`
+  - Radio Item: `○ Smart Save (스마트 절전 모드 - 1.7GHz)`
+  - Radio Item: `○ Ultra Save (초절전 모드 - 1.4GHz, 48Hz)`
   - Separator
-  - Action Item: `🔍 Rescan Now (지금 즉시 전력 정밀 분석)`
-  - Action Item: `📊 Open KDE System Monitor`
+  - Action Item: `🔍 지금 전력 소비 정밀 분석 (Rescan Now)`
+  - Action Item: `📊 KDE 시스템 모니터 열기 (System Monitor)`
 
 ---
 

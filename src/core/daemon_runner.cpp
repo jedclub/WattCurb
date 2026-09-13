@@ -248,6 +248,25 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
         auto resp_str = ss.str();
         ::sendto(fd, resp_str.data(), resp_str.size(), 0,
                  reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+    } else if (req.rfind("PROFILE ", 0) == 0 && bytes >= 9) {
+        // Parse "PROFILE <mode>" (0=Performance, 1=Balanced, 2=PowerSaver, 3=UltraEndurance)
+        int mode_val = req[8] - '0';
+        if (mode_val >= 0 && mode_val <= 3) {
+            auto new_mode = static_cast<PowerProfileMode>(mode_val);
+            feature_manager_.set_override_profile(new_mode);
+            local_shared_state_.power_profile_mode = static_cast<uint8_t>(new_mode);
+            if (shm_state_) {
+                shm_state_->power_profile_mode = static_cast<uint8_t>(new_mode);
+            }
+        }
+        const char ack[] = "OK\n";
+        ::sendto(fd, ack, sizeof(ack) - 1, 0,
+                 reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+    } else if (req.find("RESCAN") != std::string_view::npos) {
+        collect_observation_window();
+        const char ack[] = "OK\n";
+        ::sendto(fd, ack, sizeof(ack) - 1, 0,
+                 reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
     } else {
         // High-Efficiency Binary Telemetry: Send 128-Byte Seqlock POD directly (0 allocations, 0 parsing)
         ::sendto(fd, &local_shared_state_, sizeof(local_shared_state_), 0,
