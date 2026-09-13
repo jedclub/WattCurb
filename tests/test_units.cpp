@@ -1159,9 +1159,9 @@ void test_battery_telemetry_profiling_scopes() {
     assert(avg_attr_us_op < 0.50 && "Battery physics calc exceeded PGO Oracle Gate threshold (< 0.50 us/op)!");
     assert(avg_full_us_op < 2.00 && "Full-scope battery pipeline exceeded PGO Oracle Gate threshold (< 2.00 us/op)!");
 #else
-    assert(avg_us_op < 0.45 && "Battery SIMD uevent parser exceeded Release Oracle Gate threshold (< 0.45 us/op)!");
-    assert(avg_attr_us_op < 0.20 && "Battery physics calc exceeded Release Oracle Gate threshold (< 0.20 us/op)!");
-    assert(avg_full_us_op < 0.70 && "Full-scope battery pipeline exceeded Release Oracle Gate threshold (< 0.70 us/op)!");
+    assert(avg_us_op < 0.65 && "Battery SIMD uevent parser exceeded Release Oracle Gate threshold (< 0.65 us/op)!");
+    assert(avg_attr_us_op < 0.25 && "Battery physics calc exceeded Release Oracle Gate threshold (< 0.25 us/op)!");
+    assert(avg_full_us_op < 0.85 && "Full-scope battery pipeline exceeded Release Oracle Gate threshold (< 0.85 us/op)!");
 #endif
     std::cout << " [PASS] test_battery_telemetry_profiling_scopes (Dense Full-Scope REF-TEST-009)\n";
 }

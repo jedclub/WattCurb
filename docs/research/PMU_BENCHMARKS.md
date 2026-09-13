@@ -954,6 +954,35 @@ This document tracks historical PMU (Performance Monitoring Unit) hardware bench
 2. **Zero-ELF Residue Release Pipeline**:
    - 배포 바이너리에서 `.eh_frame`, `.eh_frame_hdr`, `.sframe`, `.note.*`, `.comment` 섹션을 완벽하게 제거하여 바이너리 크기를 **204,216 바이트(199.4 KB)**로 압축, 200KB 벽을 돌파.
 
+---
+
+### Milestone M27: Ghost std Header Purge & Zero-Overhead Custom POSIX Layer
+- **Date**: 2026-09-13
+- **Configuration**: C++23, 3-Stage PGO, `-fno-exceptions`, `-fomit-frame-pointer`, LTO, Native Tuning, Custom POSIX fs, Zero-Allocation Data Types.
+- **Related Requirements**: [`REF-REQ-017`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-014-custom-containers.md), [`REF-REQ-030`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-027-custom-freestanding-primitives-and-std-purging.md)
+- **Related Architecture**: [`REF-ARCH-006`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-006-custom-containers.md), [`REF-ARCH-020`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-020-custom-posix-primitives-and-std-freestanding.md)
+
+#### 1. 1:1 Direct Milestone Comparison (M26 vs M27)
+
+| Metric / Binary Sector | [이전] Milestone M26 | [현재] Milestone M27 | 변화 (절감 및 최적화 결과) |
+| :--- | :---: | :---: | :--- |
+| **Stripped Production Binary** | **204,216 B (199.4 KB)** | **200,120 B (195.4 KB)** | 💎 **-4,096 B (-4.0 KB / -2.0% 추가 감축)** |
+| **`<unordered_map>` 헤더 의존성** | 인클루드 방치됨 | **100% 완전 제거 (0 B)** | 🎯 **유령 include 소멸** |
+| **`<fstream>` (`std::ifstream`)** | `main.cpp`, `env_profile` 사용 | **100% 완전 제거 (0 B)** | 🛡️ **iostream/locale 런타임 제거** |
+| **`<filesystem>` in `ProcessAnalyzer`** | `std::filesystem::path` 사용 | **`FixedString<64>` & `string_view`** | ⚡ **동적 경로 힙 할당 0회** |
+| **`HardwarePowerBreakdown` 5개 문자열**| `std::string` (동적 힙/SSO) | **`core::FixedString<32>` (0-alloc)** | 👑 **100% 무할당 인라인 데이터화** |
+| **정상상태 동작 메모리 (RSS)** | 336 KB | **336 KB** | 👑 Zero-Heap 무할당 원칙 100% 유지 |
+
+#### 2. Key Optimization Vectors
+1. **Ghost / Unused Includes Excision**:
+   - `attribution_engine.cpp`에 방치되어 있던 `<unordered_map>`과 `main.cpp`의 `<cmath>` 헤더를 완전히 제거.
+   - `types.hpp`에서 `<vector>`와 `<string>`을 제거하고 `core::FixedVector`, `core::FixedString`으로 대체.
+2. **Custom POSIX Filesystem Helpers (`core/posix_fs.hpp`)**:
+   - `std::filesystem::exists`를 단일 syscall `access(path, F_OK) == 0`으로 대체.
+   - `std::filesystem::directory_iterator`를 무할당 `opendir`/`readdir` 기반 `for_each_dir_entry`로 대체.
+   - `std::ifstream`을 스택 버퍼 기반 `read_small_file` / POSIX `read`로 대체.
+
+
 
 
 

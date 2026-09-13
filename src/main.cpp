@@ -10,11 +10,9 @@
 
 #include <atomic>
 #include <chrono>
-#include <cmath>
 #include <csignal>
 #include <cstdlib>
 #include <fcntl.h>
-#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <string_view>
@@ -60,13 +58,15 @@ int query_daemon_briefing() {
         return 0;
     }
 
-    // 2. Fallback to cached disk file if available
-    std::ifstream file("/tmp/wattcurb_briefing.txt");
-    if (file.is_open()) {
-        std::string line;
-        while (std::getline(file, line)) {
-            std::cout << line << "\n";
+    // 2. Fallback to cached disk file if available (Zero-Allocation POSIX read)
+    int file_fd = ::open("/tmp/wattcurb_briefing.txt", O_RDONLY | O_CLOEXEC);
+    if (file_fd >= 0) {
+        char buf[4096];
+        ssize_t n;
+        while ((n = ::read(file_fd, buf, sizeof(buf))) > 0) {
+            std::cout.write(buf, n);
         }
+        ::close(file_fd);
         return 0;
     }
 
@@ -200,7 +200,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (duration_sec > 0.0) {
-        sample_count = static_cast<size_t>(std::max<size_t>(1, static_cast<size_t>(std::round(duration_sec / interval_sec))));
+        sample_count = static_cast<size_t>(std::max<size_t>(1, static_cast<size_t>((duration_sec / interval_sec) + 0.5)));
     }
 
     wattcurb::hw::HardwareProbe hw_probe;

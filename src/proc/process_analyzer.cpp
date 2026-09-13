@@ -105,7 +105,7 @@ static void do_capture_active_processes(
     const ProcessAnalyzer& analyzer,
     OutputContainer& samples,
     const PrevContainer* prev_samples,
-    const std::filesystem::path& procfs_root,
+    std::string_view procfs_root,
     core::FixedVector<int32_t, 512>& kthread_pids,
     [[maybe_unused]] uint64_t pass_counter
 ) {
@@ -115,7 +115,12 @@ static void do_capture_active_processes(
     alignas(64) char read_buf[2048];
     char path_buf[128];
 
-    int proc_dfd = ::open(procfs_root.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    char root_buf[128];
+    size_t rlen = std::min(procfs_root.size(), sizeof(root_buf) - 1);
+    std::memcpy(root_buf, procfs_root.data(), rlen);
+    root_buf[rlen] = '\0';
+
+    int proc_dfd = ::open(root_buf, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (proc_dfd < 0) return;
 
     alignas(64) char dentry_buf[16384];
@@ -287,15 +292,15 @@ static void do_capture_active_processes(
     }
 }
 
-ProcessAnalyzer::ProcessAnalyzer(std::filesystem::path procfs_root)
-    : procfs_root_(std::move(procfs_root)) {}
+ProcessAnalyzer::ProcessAnalyzer(std::string_view procfs_root)
+    : procfs_root_(procfs_root) {}
 
 std::vector<ProcessSample> ProcessAnalyzer::capture_active_processes(
     const std::vector<ProcessSample>* prev_samples) const {
     ++pass_counter_;
     std::vector<ProcessSample> samples;
     samples.reserve(448);
-    do_capture_active_processes(*this, samples, prev_samples, procfs_root_, kthread_pids_, pass_counter_);
+    do_capture_active_processes(*this, samples, prev_samples, procfs_root_.view(), kthread_pids_, pass_counter_);
     return samples;
 }
 
@@ -303,7 +308,7 @@ void ProcessAnalyzer::capture_active_processes(
     ProcessSnapshot& out,
     const ProcessSnapshot* prev_samples) const {
     ++pass_counter_;
-    do_capture_active_processes(*this, out, prev_samples, procfs_root_, kthread_pids_, pass_counter_);
+    do_capture_active_processes(*this, out, prev_samples, procfs_root_.view(), kthread_pids_, pass_counter_);
 }
 
 ProcessSnapshot ProcessAnalyzer::capture_snapshot(

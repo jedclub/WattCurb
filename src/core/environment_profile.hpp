@@ -1,11 +1,10 @@
 #pragma once
 
 #include "core/cpu_features.hpp"
+#include "core/posix_fs.hpp"
 #include <concepts>
 #include <cstdint>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <linux/perf_event.h>
 #include <string_view>
 #include <sys/syscall.h>
@@ -207,29 +206,25 @@ struct EnvironmentProfile {
             p.isa_tier = CpuIsaTier::GenericV2;
         }
 
-        // 2. Detect Platform Form Factor (Check for BAT* power supplies)
-        std::error_code ec;
+        // 2. Detect Platform Form Factor (Check for BAT* power supplies via zero-allocation POSIX)
         bool found_battery = false;
-        if (std::filesystem::exists("/sys/class/power_supply", ec)) {
-            for (const auto& entry : std::filesystem::directory_iterator("/sys/class/power_supply", ec)) {
-                std::string fname = entry.path().filename().string();
-                if (fname.rfind("BAT", 0) == 0) {
+        if (core::fs::file_exists("/sys/class/power_supply")) {
+            core::fs::for_each_dir_entry("/sys/class/power_supply", [&](std::string_view name) {
+                if (name.rfind("BAT", 0) == 0) {
                     found_battery = true;
-                    break;
                 }
-            }
+            });
         }
         p.is_battery_present = found_battery;
 
-        // Detect Virtualization (DMI sys_vendor or hypervisor)
+        // Detect Virtualization (DMI sys_vendor or hypervisor via zero-allocation POSIX)
         bool is_vm = false;
-        std::ifstream dmi("/sys/class/dmi/id/sys_vendor");
-        if (dmi.is_open()) {
-            std::string vendor;
-            dmi >> vendor;
-            if (vendor.find("QEMU") != std::string::npos ||
-                vendor.find("VMware") != std::string::npos ||
-                vendor.find("KVM") != std::string::npos) {
+        char vendor_buf[128];
+        if (core::fs::read_small_file("/sys/class/dmi/id/sys_vendor", vendor_buf, sizeof(vendor_buf))) {
+            std::string_view vendor(vendor_buf);
+            if (vendor.find("QEMU") != std::string_view::npos ||
+                vendor.find("VMware") != std::string_view::npos ||
+                vendor.find("KVM") != std::string_view::npos) {
                 is_vm = true;
             }
         }

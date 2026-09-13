@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <unordered_map>
 
 namespace wattcurb::policy {
 
@@ -149,10 +148,13 @@ HardwarePowerBreakdown AttributionEngine::compute_hardware_power(
     hw.gpu_vram_total_mb = hw2.gpu_vram_total_bytes.has_value() ?
         (static_cast<double>(*hw2.gpu_vram_total_bytes) / (1024.0 * 1024.0)) : 0.0;
     if (hw2.gpu_pcie_link_speed[0] != '\0') {
-        hw.gpu_pcie_link = hw2.gpu_pcie_link_speed.data();
+        char link_buf[32];
         if (hw2.gpu_pcie_link_width.has_value()) {
-            hw.gpu_pcie_link += " x" + std::to_string(*hw2.gpu_pcie_link_width);
+            std::snprintf(link_buf, sizeof(link_buf), "%s x%u", hw2.gpu_pcie_link_speed.data(), *hw2.gpu_pcie_link_width);
+        } else {
+            std::snprintf(link_buf, sizeof(link_buf), "%s", hw2.gpu_pcie_link_speed.data());
         }
+        hw.gpu_pcie_link = link_buf;
     }
 
     // 3. Display / Backlight Subsystem (REF-REQ-010 Sec 2.6)
@@ -168,7 +170,8 @@ HardwarePowerBreakdown AttributionEngine::compute_hardware_power(
     hw.fan_rpm = hw2.fan_rpm.value_or(0);
     if (hw.fan_rpm > 500) {
         // Fan power scales with cube of RPM: P_fan ~= base + k * (RPM/4200)^3
-        hw.fan_estimated_watts = 0.05 + 1.7 * std::pow(static_cast<double>(hw.fan_rpm) / 4200.0, 3.0);
+        double rpm_ratio = static_cast<double>(hw.fan_rpm) / 4200.0;
+        hw.fan_estimated_watts = 0.05 + 1.7 * (rpm_ratio * rpm_ratio * rpm_ratio);
     }
     hw.kbdlight_level = hw2.kbdlight_level.value_or(0);
     hw.bluetooth_enabled = hw2.bluetooth_enabled.value_or(false);

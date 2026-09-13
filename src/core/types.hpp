@@ -5,8 +5,7 @@
 #include <cstdint>
 #include <cstring>
 #include <optional>
-#include <string>
-#include <vector>
+#include <string_view>
 #include "core/custom_containers.hpp"
 
 namespace wattcurb {
@@ -140,8 +139,8 @@ struct ProcessComm {
     [[nodiscard]] size_t size() const noexcept { return std::strlen(data.data()); }
     [[nodiscard]] bool empty() const noexcept { return data[0] == '\0'; }
 
-    [[nodiscard]] std::string substr(size_t pos = 0, size_t count = std::string_view::npos) const {
-        return std::string(view().substr(pos, count));
+    [[nodiscard]] std::string_view substr(size_t pos = 0, size_t count = std::string_view::npos) const noexcept {
+        return view().substr(pos, count);
     }
 
     bool operator==(std::string_view sv) const noexcept { return view() == sv; }
@@ -334,7 +333,7 @@ struct HardwarePowerBreakdown {
     double cpu_freq_avg_mhz{0.0};
     double cpu_freq_min_mhz{0.0};
     double cpu_freq_max_mhz{0.0};
-    std::string cpu_governor;
+    core::FixedString<32> cpu_governor{};
     double cstate_c0_active_percent{0.0};
     double cstate_c1_percent{0.0};
     double cstate_c2_percent{0.0};
@@ -348,10 +347,10 @@ struct HardwarePowerBreakdown {
     double gpu_vddsoc_v{0.0};
     double gpu_vram_used_mb{0.0};
     double gpu_vram_total_mb{0.0};
-    std::string gpu_pcie_link;
+    core::FixedString<32> gpu_pcie_link{};
 
     // Storage Telemetry
-    std::string nvme_status;
+    core::FixedString<32> nvme_status{};
     double nvme_temp_c{0.0};
     double disk_read_mb_per_sec{0.0};
     double disk_write_mb_per_sec{0.0};
@@ -363,9 +362,9 @@ struct HardwarePowerBreakdown {
 
     // Display & Wireless
     double display_brightness_percent{0.0};
-    std::string wifi_status;
+    core::FixedString<32> wifi_status{};
     double wifi_temp_c{0.0};
-    std::string aspm_policy;
+    core::FixedString<32> aspm_policy{};
 
     // Direct Syscall Hardware Telemetry (REF-REQ-015, REF-REQ-024)
     uint64_t pmu_instructions{0};

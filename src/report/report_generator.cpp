@@ -563,7 +563,7 @@ void ReportGenerator::render_terminal(const AnalysisReportData& r, std::ostream&
     out << "------------------------------------------------------------------------------------------------------------------------------------\n";
 
     for (const auto& p : r.top_processes) {
-        std::string comm_trunc = p.comm.size() > 13 ? p.comm.substr(0, 12) + "…" : std::string(p.comm.view());
+        std::string comm_trunc = p.comm.size() > 13 ? std::string(p.comm.view().substr(0, 12)) + "…" : std::string(p.comm.view());
         ProcRowBuffers buf;
         format_proc_buffers(p, buf);
 
@@ -602,7 +602,7 @@ void ReportGenerator::render_terminal(const AnalysisReportData& r, std::ostream&
 
             for (const auto& c : d.top_culprits) {
                 out << "   -> PID " << std::left << std::setw(7) << c.pid
-                    << std::setw(18) << (c.comm.size() > 16 ? c.comm.substr(0, 15) + "…" : std::string(c.comm.view()))
+                    << std::setw(18) << (c.comm.size() > 16 ? std::string(c.comm.view().substr(0, 15)) + "…" : std::string(c.comm.view()))
                     << std::right << std::fixed << std::setprecision(2)
                     << std::setw(7) << c.watts << " W "
                     << "(" << std::setw(5) << std::setprecision(1) << c.share_percent << "%) "
@@ -736,7 +736,7 @@ void ReportGenerator::render_extreme_profile(const AnalysisReportData& r, std::o
     size_t count = 0;
     for (const auto& p : r.top_processes) {
         if (count++ >= 12) break;
-        std::string comm_trunc = p.comm.size() > 14 ? p.comm.substr(0, 13) + "…" : std::string(p.comm.view());
+        std::string comm_trunc = p.comm.size() > 14 ? std::string(p.comm.view().substr(0, 13)) + "…" : std::string(p.comm.view());
         ProcRowBuffers buf;
         format_proc_buffers(p, buf);
         const char* tier_str = get_safety_tier_short_name(static_cast<policy::ProcessSafetyTier>(p.safety_tier));

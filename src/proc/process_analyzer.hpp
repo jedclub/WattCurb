@@ -1,7 +1,6 @@
 #pragma once
 
 #include "core/types.hpp"
-#include <filesystem>
 #include <vector>
 #include <string_view>
 
@@ -10,7 +9,7 @@ namespace wattcurb::proc {
 // Implements REF-REQ-004, REF-ARCH-002
 class ProcessAnalyzer {
 public:
-    explicit ProcessAnalyzer(std::filesystem::path procfs_root = "/proc");
+    explicit ProcessAnalyzer(std::string_view procfs_root = "/proc");
 
     [[nodiscard]] std::vector<ProcessSample> capture_active_processes(
         const std::vector<ProcessSample>* prev_samples = nullptr) const;
@@ -33,7 +32,7 @@ public:
     void increment_pass() const noexcept { ++pass_counter_; }
 
 private:
-    std::filesystem::path procfs_root_;
+    core::FixedString<64> procfs_root_{"/proc"};
     mutable core::FixedVector<int32_t, 512> kthread_pids_; // REF-RES-006: Cached kernel threads (ppid == 2)
     mutable uint64_t pass_counter_{0};
 
