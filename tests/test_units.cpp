@@ -8,6 +8,7 @@
 #include "policy/process_classifier.hpp"
 #include "policy/mitigation_engine.hpp"
 #include "policy/window_aware_governor.hpp"
+#include "policy/unified_rollback_coordinator.hpp"
 #include "policy/battery_feature.hpp"
 #include "report/report_generator.hpp"
 #include "ipc/tray_shared_state.hpp"
@@ -1570,6 +1571,45 @@ void test_window_aware_governor() {
               << elapsed_us << "us)\n";
 }
 
+void test_unified_rapid_rollback() {
+    using namespace wattcurb::policy;
+    MitigationEngine mitigation;
+    WindowAwareGovernor window_gov;
+
+    // 1. Simulate active power-saving state across multiple domains
+    // (a) Window governor tracking minimized apps
+    window_gov.on_window_state_changed(88881, true, false, 1000, false);
+    window_gov.on_window_state_changed(88882, true, false, 1000, false);
+    assert(window_gov.tracked_count() == 2);
+
+    // (b) Mitigation engine applying EPP & ASPM policies
+    MitigationEngine::set_cpu_epp_policy("power");
+
+    // 2. Trigger AC plug-in / Charge event: Execute Unified Rapid Rollback
+    auto start = std::chrono::high_resolution_clock::now();
+    bool ok = UnifiedRollbackCoordinator::execute_rapid_rollback(mitigation, window_gov, 1000000);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+
+    assert(ok == true);
+    assert(window_gov.tracked_count() == 0 && "All window throttles must be cleared");
+    assert(mitigation.tracked_count() == 0 && "All process mitigations must be cleared");
+    assert(UnifiedRollbackCoordinator::state().is_clean_baseline == true);
+    assert(elapsed_us < 5000 && "Full-sweep rollback must complete in < 5.0ms");
+
+    // 3. Test Idempotency: Immediate second call
+    auto start_idem = std::chrono::high_resolution_clock::now();
+    bool ok_idem = UnifiedRollbackCoordinator::execute_rapid_rollback(mitigation, window_gov, 2000000);
+    auto end_idem = std::chrono::high_resolution_clock::now();
+    auto elapsed_idem_us = std::chrono::duration_cast<std::chrono::microseconds>(end_idem - start_idem).count();
+
+    assert(ok_idem == true);
+    assert(elapsed_idem_us < 100 && "Idempotent second rollback must be sub-100us no-op");
+
+    std::cout << " [PASS] test_unified_rapid_rollback (AC Plug-in / Charge event full-sweep restoration verified: " 
+              << elapsed_us << "us, idem: " << elapsed_idem_us << "us)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -1587,6 +1627,7 @@ int main() {
     test::test_syscall_storm_suppression_and_lazy_fd_bypass();
     test::test_tray_binary_shared_state();
     test::test_window_aware_governor();
+    test::test_unified_rapid_rollback();
     test::test_process_classifier();
     test::test_mitigation_engine();
     test::test_adaptive_mitigation_and_rollback();
