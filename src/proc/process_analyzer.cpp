@@ -85,17 +85,17 @@ inline uint64_t parse_u64_fast(const char*& cur, const char* end) noexcept {
 }
 
 inline int32_t parse_i32_fast(const char*& cur, const char* end) noexcept {
-    bool neg = false;
-    if (cur < end && *cur == '-') {
-        neg = true;
-        ++cur;
-    }
+    if (cur >= end) return 0;
+    const int32_t is_neg = (*cur == '-');
+    cur += is_neg;
+
     int32_t val = 0;
     while (cur < end && static_cast<unsigned char>(*cur - '0') <= 9) {
         val = val * 10 + static_cast<int32_t>(*cur - '0');
         ++cur;
     }
-    return neg ? -val : val;
+    const int32_t mask = -is_neg;
+    return (val ^ mask) + is_neg;
 }
 
 } // namespace
@@ -375,14 +375,14 @@ void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample, const 
             uint64_t prev_sw = prev->voluntary_ctxt_switches + prev->nonvoluntary_ctxt_switches;
             uint64_t delta_sw = (cur_sw >= prev_sw) ? (cur_sw - prev_sw) : 0;
 
-            if (delta_sw < 20 && prev->open_sockets == 0) {
+            if (delta_sw < 50 && prev->open_sockets == 0) {
                 return;
             }
-            if (delta_sw < 20 && (pass_counter_ % 10 != 0)) {
+            if (delta_sw < 30 && (pass_counter_ % 10 != 0)) {
                 return;
             }
-            // Established network processes: rescan on alternating passes (REF-RES-006)
-            if (prev->open_sockets > 0 && (pass_counter_ % 2 != 0)) {
+            // Established network processes: rescan every 4 passes (~8s) to eliminate VFS readlink storms (REF-REQ-025)
+            if (prev->open_sockets > 0 && (pass_counter_ % 4 != 0)) {
                 return;
             }
         }
@@ -424,10 +424,10 @@ void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample, const 
                 auto* entry = reinterpret_cast<const LinuxDirent64*>(dentry_buf + bpos);
                 bpos += entry->d_reclen;
 
-                if (entry->d_name[0] == '.') continue;
+                if (entry->d_name[0] < '0' || entry->d_name[0] > '9') continue;
                 if (entry->d_type != DT_LNK && entry->d_type != DT_UNKNOWN) continue;
 
-                ssize_t len = ::readlinkat(dfd, entry->d_name, symlink_buf, sizeof(symlink_buf) - 1);
+                ssize_t len = ::syscall(SYS_readlinkat, dfd, entry->d_name, symlink_buf, sizeof(symlink_buf) - 1);
                 if (len <= 0) continue;
                 symlink_buf[len] = '\0';
 
@@ -522,57 +522,57 @@ bool ProcessAnalyzer::parse_proc_stat(std::string_view content, ProcessSample& o
 
     // Parse fields after ')'
     const char* cur = close_paren + 1;
-    while (cur < end && *cur == ' ') ++cur;
+    core::simd::skip_whitespace_simd(cur, end);
 
     // Field 3: state (single char)
     if (cur < end) ++cur;
-    while (cur < end && *cur == ' ') ++cur;
+    core::simd::skip_whitespace_simd(cur, end);
 
     // Field 4: ppid
     out_sample.ppid = parse_i32_fast(cur, end);
-    while (cur < end && *cur == ' ') ++cur;
+    core::simd::skip_whitespace_simd(cur, end);
 
-    // Tokens 5..9: Skip 5 tokens rapidly with AVX2 SIMD bitmask to reach Token 10 (minflt)
+    // Tokens 5..9: Skip 5 tokens rapidly with AVX2 & BMI2 PDEP bitmask to reach Token 10 (minflt)
     core::simd::skip_tokens_simd(cur, end, 5);
 
     // Token 10: minflt
     out_sample.minflt = parse_u64_fast(cur, end);
-    while (cur < end && *cur == ' ') ++cur;
+    core::simd::skip_whitespace_simd(cur, end);
 
     // Token 11: cminflt (skip 1 token)
     core::simd::skip_tokens_simd(cur, end, 1);
 
     // Token 12: majflt
     out_sample.majflt = parse_u64_fast(cur, end);
-    while (cur < end && *cur == ' ') ++cur;
+    core::simd::skip_whitespace_simd(cur, end);
 
     // Token 13: cmajflt (skip 1 token)
     core::simd::skip_tokens_simd(cur, end, 1);
 
     // Token 14: utime
     out_sample.utime_ticks = parse_u64_fast(cur, end);
-    while (cur < end && *cur == ' ') ++cur;
+    core::simd::skip_whitespace_simd(cur, end);
 
     // Token 15: stime
     out_sample.stime_ticks = parse_u64_fast(cur, end);
-    while (cur < end && *cur == ' ') ++cur;
+    core::simd::skip_whitespace_simd(cur, end);
 
     // Tokens 16..17: Skip cutime and cstime (2 tokens) with fast scalar/SIMD
     core::simd::skip_tokens_simd(cur, end, 2);
 
     // Token 18: priority
     out_sample.priority = parse_i32_fast(cur, end);
-    while (cur < end && *cur == ' ') ++cur;
+    core::simd::skip_whitespace_simd(cur, end);
 
     // Token 19: nice
     out_sample.nice = parse_i32_fast(cur, end);
-    while (cur < end && *cur == ' ') ++cur;
+    core::simd::skip_whitespace_simd(cur, end);
 
     // Token 20: num_threads
     out_sample.num_threads = static_cast<uint32_t>(parse_u64_fast(cur, end));
-    while (cur < end && *cur == ' ') ++cur;
+    core::simd::skip_whitespace_simd(cur, end);
 
-    // Tokens 21..38: Skip 18 tokens rapidly with AVX2 SIMD vector bitmask to reach Token 39 (processor)
+    // Tokens 21..38: Skip 18 tokens rapidly with AVX2 & BMI2 PDEP vector bitmask to reach Token 39 (processor)
     core::simd::skip_tokens_simd(cur, end, 18);
 
     // Token 39: processor (Core ID)

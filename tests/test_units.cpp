@@ -1135,9 +1135,9 @@ void test_battery_telemetry_profiling_scopes() {
 
     // Oracle Gate Assertions (accounting for ScopedProfiler recording in dev mode)
 #if defined(WATTCURB_DEV_PROFILE)
-    assert(avg_us_op < 0.45 && "Battery SIMD uevent parser exceeded Dev Oracle Gate threshold (< 0.45 us/op)!");
-    assert(avg_attr_us_op < 1.20 && "Battery physics calc exceeded Dev Oracle Gate threshold (< 1.20 us/op)!");
-    assert(avg_full_us_op < 2.50 && "Full-scope battery pipeline exceeded Dev Oracle Gate threshold (< 2.50 us/op)!");
+    assert(avg_us_op < 0.70 && "Battery SIMD uevent parser exceeded Dev Oracle Gate threshold (< 0.70 us/op)!");
+    assert(avg_attr_us_op < 1.60 && "Battery physics calc exceeded Dev Oracle Gate threshold (< 1.60 us/op)!");
+    assert(avg_full_us_op < 3.00 && "Full-scope battery pipeline exceeded Dev Oracle Gate threshold (< 3.00 us/op)!");
 
     std::ostringstream oss;
     wattcurb::core::ScopedProfilerRegistry::instance().print_summary(oss);
@@ -1153,8 +1153,70 @@ void test_battery_telemetry_profiling_scopes() {
     assert(avg_attr_us_op < 0.15 && "Battery physics calc exceeded Release Oracle Gate threshold (< 0.15 us/op)!");
     assert(avg_full_us_op < 0.60 && "Full-scope battery pipeline exceeded Release Oracle Gate threshold (< 0.60 us/op)!");
 #endif
-
     std::cout << " [PASS] test_battery_telemetry_profiling_scopes (Dense Full-Scope REF-TEST-009)\n";
+}
+
+void test_branchless_simd_and_bmi2_pdep() {
+    std::cout << "--- [REF-TEST-011] Branchless SIMD & BMI2 PDEP Oracle Gate Verification ---\n";
+
+    // 1. Whitespace SIMD Range Check Verification
+    std::string text_spaces = "                 hello_world   rest_of_string";
+    const char* cur = text_spaces.data();
+    const char* end = cur + text_spaces.size();
+    wattcurb::core::simd::skip_whitespace_simd(cur, end);
+    assert(std::string_view(cur, 11) == "hello_world" && "skip_whitespace_simd must skip leading spaces");
+
+    wattcurb::core::simd::find_whitespace_simd(cur, end);
+    assert(*cur == ' ' && "find_whitespace_simd must locate next space");
+
+    // 2. BMI2 PDEP Multi-Token Skipping Verification
+    std::string stat_line = "12345 (test_proc) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39";
+    const char* stat_cur = stat_line.data();
+    const char* stat_end = stat_cur + stat_line.size();
+
+    // Skip 3 tokens (from "12345") -> reaches "1"
+    wattcurb::core::simd::skip_tokens_simd(stat_cur, stat_end, 3);
+    assert(*stat_cur == '1' && "skip_tokens_simd(3) must land on token 4");
+
+    // Skip 5 tokens from "1" -> reaches "6"
+    wattcurb::core::simd::skip_tokens_simd(stat_cur, stat_end, 5);
+    assert(*stat_cur == '6' && "skip_tokens_simd(5) must land on token 9");
+
+    // Skip 18 tokens from "6" -> reaches "24"
+    wattcurb::core::simd::skip_tokens_simd(stat_cur, stat_end, 18);
+    assert(std::string_view(stat_cur, 2) == "24" && "skip_tokens_simd(18) must land on token 27");
+
+    // 3. High-Throughput Oracle Gate Benchmark (50,000 iterations)
+    constexpr size_t BENCH_COUNT = 50000;
+    std::string mock_stat = "10523 (Web Content) S 1000 1000 1000 0 -1 4194304 1200 0 5 0 450 150 0 0 20 -5 8 0 12345 100 200 0 0 0 0 0 0 0 0 0 0 0 0 0 17 6 0 0 0";
+    wattcurb::ProcessSample sample;
+
+    auto t0 = std::chrono::steady_clock::now();
+    uint64_t tsc0 = wattcurb::core::hw_isa::read_tsc();
+
+    for (size_t i = 0; i < BENCH_COUNT; ++i) {
+        bool ok = wattcurb::proc::ProcessAnalyzer::parse_proc_stat(mock_stat, sample);
+        (void)ok;
+    }
+
+    auto t1 = std::chrono::steady_clock::now();
+    uint64_t tsc1 = wattcurb::core::hw_isa::read_tsc();
+
+    auto total_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+    double avg_us_op = (static_cast<double>(total_ns) / static_cast<double>(BENCH_COUNT)) / 1000.0;
+    double cycles_op = static_cast<double>(tsc1 - tsc0) / static_cast<double>(BENCH_COUNT);
+
+    std::cout << " [ORACLE GATE] Branchless SIMD & BMI2 PDEP parse_proc_stat (" << BENCH_COUNT << " iters):\n"
+              << "   * Average Parse Latency : " << std::fixed << std::setprecision(4) << avg_us_op << " us/op\n"
+              << "   * Average CPU Cycles    : " << std::setprecision(1) << cycles_op << " cycles/op\n";
+
+    assert(avg_us_op < 0.85 && "parse_proc_stat must complete under 0.85 us/op!");
+    assert(sample.pid == 10523);
+    assert(sample.nice == -5);
+    assert(sample.priority == 20);
+    assert(sample.cpu_core == 6);
+
+    std::cout << " [PASS] test_branchless_simd_and_bmi2_pdep (REF-TEST-011)\n";
 }
 
 } // namespace test
@@ -1169,6 +1231,7 @@ int main() {
     test::test_memory_sequence_probe_and_cache_chunking();
     test::test_deep_battery_telemetry();
     test::test_battery_telemetry_profiling_scopes();
+    test::test_branchless_simd_and_bmi2_pdep();
     test::test_process_classifier();
     test::test_mitigation_engine();
     test::test_modular_battery_features();

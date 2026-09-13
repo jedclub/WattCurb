@@ -242,25 +242,53 @@ inline const char* find_char_fast(const char* start, const char* end, char targe
     }
 }
 
-// Skip spaces and tabs rapidly
+// Skip spaces and tabs rapidly with AVX2 vector range check & _tzcnt (REF-REQ-025, REF-ARCH-015)
 inline void skip_whitespace_simd(const char*& cur, const char* end) noexcept {
     // Fast path: if already pointing to non-whitespace, 0 cost
     if (cur < end && static_cast<unsigned char>(*cur) > ' ') {
         return;
     }
+#if defined(__AVX2__)
+    const __m256i space_floor = _mm256_set1_epi8(' ');
+    while (cur + 32 <= end) {
+        __m256i chunk = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(cur));
+        __m256i is_space = _mm256_cmpeq_epi8(chunk, _mm256_min_epu8(chunk, space_floor));
+        uint32_t mask = static_cast<uint32_t>(_mm256_movemask_epi8(is_space));
+        if (mask != 0xFFFFFFFFU) {
+            uint32_t offset = static_cast<uint32_t>(_tzcnt_u32(~mask));
+            cur += offset;
+            return;
+        }
+        cur += 32;
+    }
+#endif
     while (cur < end && static_cast<unsigned char>(*cur) <= ' ') {
         ++cur;
     }
 }
 
-// Find next whitespace rapidly
+// Find next whitespace rapidly with AVX2 vector range check & _tzcnt (REF-REQ-025, REF-ARCH-015)
 inline void find_whitespace_simd(const char*& cur, const char* end) noexcept {
+#if defined(__AVX2__)
+    const __m256i space_floor = _mm256_set1_epi8(' ');
+    while (cur + 32 <= end) {
+        __m256i chunk = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(cur));
+        __m256i is_space = _mm256_cmpeq_epi8(chunk, _mm256_min_epu8(chunk, space_floor));
+        uint32_t mask = static_cast<uint32_t>(_mm256_movemask_epi8(is_space));
+        if (mask != 0) {
+            uint32_t offset = static_cast<uint32_t>(_tzcnt_u32(mask));
+            cur += offset;
+            return;
+        }
+        cur += 32;
+    }
+#endif
     while (cur < end && static_cast<unsigned char>(*cur) > ' ') {
         ++cur;
     }
 }
 
-// Skip N space-separated tokens rapidly using AVX2 bitmask counting & BMI1 BLSR (REF-ARCH-005)
+// Skip N space-separated tokens rapidly using AVX2 & BMI2 PDEP branchless extraction (REF-REQ-025, REF-ARCH-015)
 inline void skip_tokens_simd(const char*& cur, const char* end, int count) noexcept {
     if (count <= 0 || cur >= end) return;
 
@@ -291,14 +319,19 @@ inline void skip_tokens_simd(const char*& cur, const char* end, int count) noexc
                 cur += 32;
             } else {
                 // Target token space is located inside this 32-byte vector!
-                // Clear the first (count - 1) spaces using hardware BMI1 BLSR
+                // Extract (count-th) space in O(1) branchless time using hardware BMI2 PDEP
+#if defined(__BMI2__)
+                uint32_t target_bit = _pdep_u32(1U << (count - 1), mask);
+                uint32_t offset = static_cast<uint32_t>(_tzcnt_u32(target_bit));
+#else
                 for (int i = 0; i < count - 1; ++i) {
                     mask &= (mask - 1);
                 }
                 uint32_t offset = static_cast<uint32_t>(std::countr_zero(mask));
+#endif
                 cur += offset;
                 // Skip the space itself and any trailing whitespace
-                while (cur < end && static_cast<unsigned char>(*cur) <= ' ') ++cur;
+                skip_whitespace_simd(cur, end);
                 return;
             }
         }
