@@ -201,7 +201,9 @@ void TrayClient::render_tooltip(
     }
 
     char mitig_buf[64]{};
-    if (state.active_mitigations > 0) {
+    if (state.power_profile_mode == 0) {
+        std::snprintf(mitig_buf, sizeof(mitig_buf), "전면 개방 (4.1G 풀파워 언락)");
+    } else if (state.active_mitigations > 0) {
         std::snprintf(mitig_buf, sizeof(mitig_buf), "실시간 가동 중 (%u개 제어)", state.active_mitigations);
     } else {
         std::snprintf(mitig_buf, sizeof(mitig_buf), "Zero-Wakeup ACTIVE");

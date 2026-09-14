@@ -201,7 +201,18 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
     status.current_profile = eff_profile;
 
     if (eff_profile == PowerProfileMode::Performance) {
-        // Performance Mode: All features suppressed, max throughput
+        // Performance Mode: All features suppressed, max throughput, zero throttling (REF-REQ-043)
+        for (const auto& tm : m_tracked) {
+            if (tm.applied_feature == FeatureId::CgroupFreezer) {
+                actuate_cgroup_freeze(tm.pid, false);
+                MitigationEngine::restore_sched_normal(tm.pid);
+            } else if (tm.applied_feature == FeatureId::SchedIdleThrottle) {
+                MitigationEngine::restore_sched_normal(tm.pid);
+            }
+            MitigationEngine::apply_timer_slack(tm.pid, 50'000ULL);
+        }
+        m_tracked.clear();
+
         status.active_summary = "Performance Mode (Boost 4.1GHz, Zero Throttling)";
         report.mitigation_status = status;
         return status;

@@ -360,6 +360,22 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
             if (shm_state_) {
                 shm_state_->power_profile_mode = static_cast<uint8_t>(new_mode);
             }
+
+            // Immediately actuate hardware limits via power-profile-manager (REF-REQ-043)
+            const char* hw_arg = "balanced";
+            if (new_mode == PowerProfileMode::Performance) hw_arg = "performance";
+            else if (new_mode == PowerProfileMode::PowerSaver) hw_arg = "save";
+            else if (new_mode == PowerProfileMode::UltraEndurance) hw_arg = "ultra";
+
+            pid_t pid = ::fork();
+            if (pid == 0) {
+                ::setsid();
+                const char* ppm = "/home/jedclub/.local/bin/power-profile-manager";
+                if (::access(ppm, X_OK) == 0) {
+                    ::execl(ppm, "power-profile-manager", hw_arg, "--internal", nullptr);
+                }
+                ::_exit(0);
+            }
         }
         const char ack[] = "OK\n";
         ::sendto(fd, ack, sizeof(ack) - 1, 0,
