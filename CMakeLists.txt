@@ -103,6 +103,31 @@ add_executable(wattcurb-tray
 target_include_directories(wattcurb-tray PRIVATE src ${SYSTEMD_INCLUDE_DIRS})
 target_link_libraries(wattcurb-tray PRIVATE ${SYSTEMD_LIBRARIES})
 
+# Native KDE Plasma 6 Matrix Dashboard (REF-REQ-036, REF-ARCH-026)
+find_package(Qt6 COMPONENTS Core Gui Qml Quick QuickControls2 QUIET)
+if(Qt6_FOUND)
+    message(STATUS "Qt6 found: Enabling wattcurb-dashboard target")
+    set(CMAKE_AUTOMOC ON)
+    set(CMAKE_AUTORCC ON)
+    add_executable(wattcurb-dashboard
+        src/ui/main_dashboard.cpp
+        src/ui/dashboard_backend.cpp
+        src/ui/dashboard_backend.hpp
+        src/ui/qml.qrc
+    )
+    target_include_directories(wattcurb-dashboard PRIVATE src)
+    target_link_libraries(wattcurb-dashboard PRIVATE
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Qml
+        Qt6::Quick
+        Qt6::QuickControls2
+    )
+    target_compile_options(wattcurb-dashboard PRIVATE -frtti -fexceptions)
+else()
+    message(WARNING "Qt6 not found: wattcurb-dashboard target will be skipped")
+endif()
+
 # Testing & Oracle Gate Suite
 enable_testing()
 add_executable(wattcurb_tests

@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/">
+        <file>qml/DashboardWindow.qml</file>
+    </qresource>
+</RCC>

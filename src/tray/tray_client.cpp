@@ -615,30 +615,20 @@ int TrayClient::dbusmenu_method_event(sd_bus_message* msg, void* userdata, sd_bu
             selected_mode = 3;
             hw_mode = "ultra";
         } else if (id == 10) {
+            // Non-blocking asynchronous daemon rescan trigger
             send_daemon_command("RESCAN\n");
 
-            // Fork child process to display desktop notification and launch executive power briefing terminal
+            // Instant zero-delay popup of native KDE Plasma 6 Dashboard (REF-REQ-036)
             pid_t pid = ::fork();
             if (pid == 0) {
-                // Inform user immediately via KDE desktop notification
-                ::system("notify-send -a 'WattCurb' -i 'utilities-system-monitor' -t 4000 "
-                         "'🔍 전력 소비 정밀 분석 시작' "
-                         "'하드웨어 RAPL/SMU 센서 및 프로세스 전력 측정을 진행 중입니다 (약 3~5초 소요)...'");
-
-                // Launch terminal with rich WattCurb executive briefing
-                const char* term_cmd =
-                    "konsole --title 'WattCurb 실시간 하드웨어별 전력 정밀 분석 보고서' -e bash -c "
-                    "\"echo '================================================================='; "
-                    "echo '        [WattCurb] 실시간 하드웨어 및 프로세스 전력 정밀 분석'; "
-                    "echo '================================================================='; "
-                    "echo '🔍 하드웨어 RAPL/SMU/DRM/I/O 관측 윈도우 수집 중... 잠시만 기다려주세요.'; "
-                    "sleep 2; "
-                    "/home/jedclub/.local/bin/wattcurb --briefing; "
-                    "echo ''; "
-                    "echo '-----------------------------------------------------------------'; "
-                    "read -p '엔터(Enter) 키를 누르면 창이 닫힙니다...' dummy\"";
-
-                ::system(term_cmd);
+                ::setsid();
+                ::system("pkill -f wattcurb-dashboard 2>/dev/null");
+                const char* dash_bin = "/home/jedclub/.local/bin/wattcurb-dashboard";
+                if (::access(dash_bin, X_OK) == 0) {
+                    ::execl(dash_bin, "wattcurb-dashboard", nullptr);
+                } else {
+                    ::execlp("wattcurb-dashboard", "wattcurb-dashboard", nullptr);
+                }
                 ::_exit(0);
             }
 
