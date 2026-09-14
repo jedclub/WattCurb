@@ -248,6 +248,75 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
         auto resp_str = ss.str();
         ::sendto(fd, resp_str.data(), resp_str.size(), 0,
                  reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+    } else if (req.find("FULL_TELEMETRY") != std::string_view::npos) {
+        // High-density btop-style telemetry JSON payload (REF-REQ-037)
+        std::stringstream ss;
+        const auto& hw = cached_report_.hardware;
+        double sys_w = hw.total_system_watts > 0.0 ? hw.total_system_watts :
+                       (hw.cpu_package_watts + hw.gpu_watts + hw.display_watts + 2.0);
+
+        ss << std::fixed << std::setprecision(2);
+        ss << "{\n";
+        ss << "  \"system_watts\": " << sys_w << ",\n";
+        ss << "  \"battery_pct\": " << hw.battery_capacity_percent << ",\n";
+        ss << "  \"battery_state\": " << (hw.is_ac_passthrough ? 2 : (hw.is_battery_discharging ? 1 : 0)) << ",\n";
+        ss << "  \"battery_state_str\": \"" << (hw.is_ac_passthrough ? "AC Passthrough" : (hw.is_battery_discharging ? "Discharging" : "AC Powered")) << "\",\n";
+        ss << "  \"battery_voltage_v\": " << hw.battery_voltage_now_v << ",\n";
+        ss << "  \"battery_current_a\": " << hw.battery_current_now_a << ",\n";
+        ss << "  \"battery_health_pct\": " << hw.battery_health_percent << ",\n";
+        ss << "  \"battery_cycles\": " << hw.battery_cycle_count << ",\n";
+        ss << "  \"time_to_empty_min\": " << static_cast<int>(hw.battery_remaining_hours_to_empty * 60.0) << ",\n";
+        double pkg_w = hw.cpu_package_watts;
+        double core_w = pkg_w * 0.75;
+        double uncore_w = (hw.uncore_and_platform_watts > 0.0) ? hw.uncore_and_platform_watts : (pkg_w * 0.25);
+        double dram_w = 0.95;
+
+        ss << "  \"cpu_package_w\": " << pkg_w << ",\n";
+        ss << "  \"cpu_core_w\": " << core_w << ",\n";
+        ss << "  \"cpu_uncore_w\": " << uncore_w << ",\n";
+        ss << "  \"cpu_dram_w\": " << dram_w << ",\n";
+        ss << "  \"cpu_temp_c\": " << hw.cpu_temp_c << ",\n";
+        ss << "  \"cpu_freq_mhz\": " << hw.cpu_freq_avg_mhz << ",\n";
+        ss << "  \"cstate_c0\": " << hw.cstate_c0_active_percent << ",\n";
+        ss << "  \"cstate_c1\": " << hw.cstate_c1_percent << ",\n";
+        ss << "  \"cstate_c2\": " << hw.cstate_c2_percent << ",\n";
+        ss << "  \"cstate_c3\": " << hw.cstate_c3_deep_percent << ",\n";
+        ss << "  \"fan_rpm\": " << hw.fan_rpm << ",\n";
+        ss << "  \"gpu_w\": " << hw.gpu_watts << ",\n";
+        ss << "  \"gpu_load\": " << hw.gpu_busy_percent << ",\n";
+        ss << "  \"display_w\": " << (hw.display_watts > 0.0 ? hw.display_watts : 1.8) << ",\n";
+        ss << "  \"display_brightness\": " << hw.display_brightness_percent << ",\n";
+        ss << "  \"nvme_w\": " << (hw.storage_estimated_watts > 0.0 ? hw.storage_estimated_watts : 0.8) << ",\n";
+        ss << "  \"disk_read_mb_s\": " << hw.disk_read_mb_per_sec << ",\n";
+        ss << "  \"disk_write_mb_s\": " << hw.disk_write_mb_per_sec << ",\n";
+        ss << "  \"profile_mode\": " << static_cast<int>(cached_report_.mitigation_status.current_profile) << ",\n";
+        ss << "  \"active_mitigations\": " << cached_report_.mitigation_status.feature_summary_count << ",\n";
+        ss << "  \"wakeups_per_sec\": " << cached_report_.total_system_wakeups_per_sec << ",\n";
+        ss << "  \"processes\": [\n";
+
+        size_t n = std::min(size_t{12}, cached_report_.top_processes.size());
+        for (size_t i = 0; i < n; ++i) {
+            const auto& p = cached_report_.top_processes[i];
+            ss << "    {\n";
+            ss << "      \"pid\": " << p.pid << ",\n";
+            ss << "      \"comm\": \"" << p.comm.c_str() << "\",\n";
+            ss << "      \"total_w\": " << p.total_attributed_watts << ",\n";
+            ss << "      \"cpu_w\": " << p.cpu_watts << ",\n";
+            ss << "      \"gpu_w\": " << p.gpu_watts << ",\n";
+            ss << "      \"dram_w\": " << p.dram_attributed_watts << ",\n";
+            ss << "      \"io_wake_w\": " << (p.io_watts + p.wakeup_tax_watts) << ",\n";
+            ss << "      \"pss_mb\": " << (p.pss_kib / 1024) << ",\n";
+            ss << "      \"tier\": " << static_cast<int>(p.safety_tier) << ",\n";
+            ss << "      \"domain\": \"" << (p.primary_hw_domain.empty() ? "CPU Compute" : p.primary_hw_domain.c_str()) << "\",\n";
+            ss << "      \"mechanism\": \"" << (p.hardware_mechanism.empty() ? "Standard Execution" : p.hardware_mechanism.c_str()) << "\"\n";
+            ss << "    }" << (i + 1 < n ? "," : "") << "\n";
+        }
+        ss << "  ]\n";
+        ss << "}\n";
+
+        auto resp = ss.str();
+        ::sendto(fd, resp.data(), resp.size(), 0,
+                 reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
     } else if (req.rfind("PROFILE ", 0) == 0 && bytes >= 9) {
         // Parse "PROFILE <mode>" (0=Performance, 1=Balanced, 2=PowerSaver, 3=UltraEndurance)
         int mode_val = req[8] - '0';

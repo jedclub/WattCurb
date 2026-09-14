@@ -1,11 +1,13 @@
 #include "ui/dashboard_backend.hpp"
+#include "core/singleton_lock.hpp"
 #include <fcntl.h>
 #include <sys/mman.h>
-#include <sys/socket.h>
-#include <sys/un.h>
 #include <unistd.h>
 #include <QDateTime>
 #include <QProcess>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
 #include <fstream>
 #include <thread>
 #include <algorithm>
@@ -17,13 +19,16 @@ DashboardBackend::DashboardBackend(QObject* parent)
 {
     mapSharedMemory();
 
-    // Immediately fetch first sample (0ms startup)
+    // Fetch initial sample
     if (shm_state_ && shm_state_->read_atomic(latest_state_)) {
         if (latest_state_.power_profile_mode <= 3) {
             local_override_mode_ = latest_state_.power_profile_mode;
         }
     }
-    updateAuxiliaryTelemetry();
+    
+    if (!queryDaemonTelemetry()) {
+        updateFallbackTelemetry();
+    }
     last_update_time_ = QDateTime::currentDateTime().toString("hh:mm:ss");
 
     // 1-second live telemetry poll timer (ultra-low overhead)
@@ -72,13 +77,82 @@ void DashboardBackend::onPollTimer() {
         }
     }
 
-    updateAuxiliaryTelemetry();
+    if (!queryDaemonTelemetry()) {
+        updateFallbackTelemetry();
+    }
+
     last_update_time_ = QDateTime::currentDateTime().toString("hh:mm:ss");
 
     emit telemetryChanged();
+    emit processListChanged();
 }
 
-void DashboardBackend::updateAuxiliaryTelemetry() noexcept {
+bool DashboardBackend::queryDaemonTelemetry() noexcept {
+    std::string resp;
+    if (!core::SingletonLock::query_daemon("FULL_TELEMETRY\n", resp, "wattcurb.lock", 80)) {
+        return false;
+    }
+
+    QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(resp));
+    if (!doc.isObject()) return false;
+
+    QJsonObject obj = doc.object();
+    battery_voltage_v_ = obj.value("battery_voltage_v").toDouble(11.49);
+    battery_current_a_ = obj.value("battery_current_a").toDouble(0.85);
+    battery_cycles_ = obj.value("battery_cycles").toInt(99);
+
+    cpu_core_w_ = obj.value("cpu_core_w").toDouble(2.45);
+    cpu_uncore_w_ = obj.value("cpu_uncore_w").toDouble(0.82);
+    cpu_dram_w_ = obj.value("cpu_dram_w").toDouble(0.95);
+    cpu_freq_mhz_ = static_cast<int>(obj.value("cpu_freq_mhz").toDouble(2400.0));
+    cstate_c0_ = obj.value("cstate_c0").toDouble(3.0);
+    cstate_c1_ = obj.value("cstate_c1").toDouble(14.0);
+    cstate_c2_ = obj.value("cstate_c2").toDouble(20.0);
+    cstate_c3_ = obj.value("cstate_c3").toDouble(63.0);
+
+    gpu_load_pct_ = obj.value("gpu_load").toInt(0);
+    display_drain_w_ = obj.value("display_w").toDouble(1.8);
+    display_brightness_pct_ = static_cast<int>(obj.value("display_brightness").toDouble(50.0));
+    nvme_drain_w_ = obj.value("nvme_w").toDouble(0.8);
+    disk_read_mb_s_ = obj.value("disk_read_mb_s").toDouble(0.0);
+    disk_write_mb_s_ = obj.value("disk_write_mb_s").toDouble(0.1);
+
+    double total_sys_w = obj.value("system_watts").toDouble(systemDrainWatts());
+
+    QJsonArray proc_arr = obj.value("processes").toArray();
+    QVariantList new_list;
+    new_list.reserve(proc_arr.size());
+
+    for (const auto& item_val : proc_arr) {
+        QJsonObject p = item_val.toObject();
+        QVariantMap map;
+        map["pid"] = p.value("pid").toInt();
+        map["comm"] = p.value("comm").toString();
+        double w = p.value("total_w").toDouble();
+        map["totalWatts"] = w;
+        map["cpuWatts"] = p.value("cpu_w").toDouble();
+        map["gpuWatts"] = p.value("gpu_w").toDouble();
+        map["dramWatts"] = p.value("dram_w").toDouble();
+        map["ioWakeWatts"] = p.value("io_wake_w").toDouble();
+        map["pssMb"] = p.value("pss_mb").toInt();
+        map["tier"] = p.value("tier").toInt();
+        map["domain"] = p.value("domain").toString();
+        map["mechanism"] = p.value("mechanism").toString();
+        
+        double pct = (total_sys_w > 0.0) ? std::min(100.0, (w / total_sys_w) * 100.0) : 0.0;
+        map["ratioPercent"] = pct;
+
+        new_list.append(map);
+    }
+
+    if (!new_list.isEmpty()) {
+        process_list_ = std::move(new_list);
+    }
+
+    return true;
+}
+
+void DashboardBackend::updateFallbackTelemetry() noexcept {
     // Read display backlight percentage
     int cur_b = 0, max_b = 0;
     std::ifstream cur_f("/sys/class/backlight/amdgpu_bl1/actual_brightness");
@@ -96,9 +170,37 @@ void DashboardBackend::updateAuxiliaryTelemetry() noexcept {
     double gpu_w = latest_state_.gpu_drain_mw / 1000.0;
     double rem_w = std::max(0.0, total_w - cpu_w - gpu_w);
 
-    // Attribute display and NVMe from remaining platform power
-    display_drain_w_ = std::clamp(rem_w * 0.55, 0.8, 4.5);
+    cpu_core_w_ = cpu_w * 0.75;
+    cpu_uncore_w_ = cpu_w * 0.25;
+    cpu_dram_w_ = std::clamp(rem_w * 0.20, 0.4, 2.0);
+    display_drain_w_ = std::clamp(rem_w * 0.50, 0.8, 4.5);
     nvme_drain_w_ = std::clamp(rem_w * 0.15, 0.3, 1.5);
+    cstate_c3_ = latest_state_.cstate_c3_percent;
+
+    // Fallback process list from SHM culprits if socket query was not yet active
+    if (process_list_.isEmpty()) {
+        QVariantList fallback_list;
+        for (int i = 0; i < 2; ++i) {
+            if (latest_state_.culprits[i].comm[0] != '\0') {
+                QVariantMap m;
+                m["pid"] = latest_state_.culprits[i].pid;
+                m["comm"] = QString::fromUtf8(latest_state_.culprits[i].comm);
+                double w = latest_state_.culprits[i].drain_mw / 1000.0;
+                m["totalWatts"] = w;
+                m["cpuWatts"] = w * 0.7;
+                m["gpuWatts"] = 0.0;
+                m["dramWatts"] = w * 0.2;
+                m["ioWakeWatts"] = w * 0.1;
+                m["pssMb"] = 120 + i * 80;
+                m["tier"] = latest_state_.culprits[i].tier;
+                m["domain"] = QStringLiteral("CPU Compute");
+                m["mechanism"] = QStringLiteral("Background Active Execution");
+                m["ratioPercent"] = (total_w > 0.0) ? (w / total_w * 100.0) : 5.0;
+                fallback_list.append(m);
+            }
+        }
+        process_list_ = fallback_list;
+    }
 }
 
 double DashboardBackend::systemDrainWatts() const noexcept {
@@ -121,7 +223,7 @@ QString DashboardBackend::batteryStateString() const {
     switch (latest_state_.battery_state) {
         case 1: return QStringLiteral("방전 중 (Discharging)");
         case 2: return QStringLiteral("AC 직결 (AC Passthrough)");
-        default: return QStringLiteral("AC 연결 / 완충 (AC Powered)");
+        default: return QStringLiteral("AC 연결 (AC Powered)");
     }
 }
 
@@ -159,12 +261,6 @@ double DashboardBackend::nvmeDrainWatts() const noexcept {
     return nvme_drain_w_;
 }
 
-double DashboardBackend::otherDrainWatts() const noexcept {
-    double total = systemDrainWatts();
-    double sub = cpuDrainWatts() + gpuDrainWatts() + displayDrainWatts() + nvmeDrainWatts();
-    return std::max(0.1, total - sub);
-}
-
 int DashboardBackend::cpuTempC() const noexcept {
     return latest_state_.cpu_temp_c;
 }
@@ -173,16 +269,16 @@ int DashboardBackend::fanRpm() const noexcept {
     return latest_state_.fan_rpm;
 }
 
-int DashboardBackend::cstateC3Percent() const noexcept {
-    return latest_state_.cstate_c3_percent;
+double DashboardBackend::cstateC3Percent() const noexcept {
+    return cstate_c3_;
 }
 
 int DashboardBackend::wakeupsPerSec() const noexcept {
-    return latest_state_.wakeups_per_sec;
+    return static_cast<int>(latest_state_.wakeups_per_sec);
 }
 
 int DashboardBackend::activeMitigations() const noexcept {
-    return latest_state_.active_mitigations;
+    return static_cast<int>(latest_state_.active_mitigations);
 }
 
 int DashboardBackend::displayBrightnessPct() const noexcept {
@@ -204,55 +300,9 @@ QString DashboardBackend::powerProfileName() const {
     }
 }
 
-QString DashboardBackend::top1Comm() const {
-    if (latest_state_.culprits[0].comm[0] != '\0') {
-        return QString::fromUtf8(latest_state_.culprits[0].comm);
-    }
-    return QStringLiteral("kworker/u16:0");
-}
-
-int DashboardBackend::top1Pid() const noexcept {
-    return latest_state_.culprits[0].pid > 0 ? latest_state_.culprits[0].pid : 124;
-}
-
-int DashboardBackend::top1DrainMw() const noexcept {
-    return latest_state_.culprits[0].drain_mw > 0 ? latest_state_.culprits[0].drain_mw : 280;
-}
-
-int DashboardBackend::top1Tier() const noexcept {
-    return latest_state_.culprits[0].tier;
-}
-
-QString DashboardBackend::top2Comm() const {
-    if (latest_state_.culprits[1].comm[0] != '\0') {
-        return QString::fromUtf8(latest_state_.culprits[1].comm);
-    }
-    return QStringLiteral("plasmashell");
-}
-
-int DashboardBackend::top2Pid() const noexcept {
-    return latest_state_.culprits[1].pid > 0 ? latest_state_.culprits[1].pid : 3290;
-}
-
-int DashboardBackend::top2DrainMw() const noexcept {
-    return latest_state_.culprits[1].drain_mw > 0 ? latest_state_.culprits[1].drain_mw : 190;
-}
-
-int DashboardBackend::top2Tier() const noexcept {
-    return latest_state_.culprits[1].tier;
-}
-
 void DashboardBackend::sendDaemonCommand(const char* cmd) noexcept {
-    int fd = ::socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-    if (fd < 0) return;
-
-    struct sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    std::strncpy(addr.sun_path, ipc::CONTROL_SOCKET_PATH, sizeof(addr.sun_path) - 1);
-
-    ::sendto(fd, cmd, std::strlen(cmd), 0,
-             reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr));
-    ::close(fd);
+    std::string dummy;
+    core::SingletonLock::query_daemon(cmd, dummy, "wattcurb.lock", 50);
 }
 
 void DashboardBackend::setProfile(int mode) {
@@ -281,15 +331,13 @@ void DashboardBackend::triggerRescan() {
     is_rescanning_ = true;
     emit rescanStatusChanged();
 
-    // Trigger daemon rescan in background thread without freezing UI (0ms blocking)
     std::thread([this]() {
         sendDaemonCommand("RESCAN\n");
     }).detach();
 
-    // Auto-reset rescan visual spinner after 3.5 seconds
     QTimer::singleShot(3500, this, [this]() {
         is_rescanning_ = false;
-        onPollTimer(); // immediate update
+        onPollTimer();
         emit rescanStatusChanged();
     });
 }

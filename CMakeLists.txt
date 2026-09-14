@@ -113,6 +113,7 @@ if(Qt6_FOUND)
         src/ui/main_dashboard.cpp
         src/ui/dashboard_backend.cpp
         src/ui/dashboard_backend.hpp
+        src/core/singleton_lock.cpp
         src/ui/qml.qrc
     )
     target_include_directories(wattcurb-dashboard PRIVATE src)
