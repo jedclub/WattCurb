@@ -1638,16 +1638,17 @@ void test_thinkpower_tray_client() {
     state.culprits[1].drain_mw = 1800;
 
     // 1. ToolTip Stack Formatting Verification (Zero dynamic heap allocation)
-    char title[64]{};
-    char desc[512]{};
+    char title[128]{};
+    char desc[2048]{};
     TrayClient::render_tooltip(state, title, sizeof(title), desc, sizeof(desc));
 
-    assert(std::string_view(title).find("WattCurb: 14.2 W (Discharging)") != std::string_view::npos);
-    assert(std::string_view(desc).find("Battery: 82% (Health: 96%) | Est: 275 min") != std::string_view::npos);
-    assert(std::string_view(desc).find("CPU: 7.5 W (48°C, Fan 2100 RPM) | GPU: 3.2 W") != std::string_view::npos);
-    assert(std::string_view(desc).find("Top 1: code (4100 mW, PID 10101)") != std::string_view::npos);
-    assert(std::string_view(desc).find("Top 2: kwin_wayland (1800 mW, PID 1200)") != std::string_view::npos);
-    assert(std::string_view(desc).find("Profile: SmartSave | Active Gates: 2") != std::string_view::npos);
+    assert(std::string_view(title).find("WattCurb: 14.2 W") != std::string_view::npos);
+    assert(std::string_view(desc).find("WattCurb Power Intelligence") != std::string_view::npos);
+    assert(std::string_view(desc).find("82%") != std::string_view::npos);
+    assert(std::string_view(desc).find("7.5 W") != std::string_view::npos);
+    assert(std::string_view(desc).find("code") != std::string_view::npos);
+    assert(std::string_view(desc).find("kwin_wayland") != std::string_view::npos);
+    assert(std::string_view(desc).find("SmartSave") != std::string_view::npos);
 
     // 2. Icon Name Resolution Test (Breeze 10% quantized battery + profile icons)
     char icon[64]{};

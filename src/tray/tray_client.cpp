@@ -117,34 +117,81 @@ void TrayClient::render_tooltip(
     unsigned int sys_w = state.system_drain_mw / 1000;
     unsigned int sys_frac = (state.system_drain_mw % 1000) / 100;
 
-    const char* status_str = state.battery_state == 1 ? "Discharging" : 
-                            (state.battery_state == 2 ? "AC Passthrough" : "AC / Charging");
+    const char* status_kr = state.battery_state == 1 ? "방전 중" : 
+                           (state.battery_state == 2 ? "AC 패스스루" : "AC 충전 중");
 
-    std::snprintf(out_title, title_cap, "WattCurb: %u.%u W (%s)", sys_w, sys_frac, status_str);
+    std::snprintf(out_title, title_cap, "⚡ WattCurb: %u.%u W (%s)", sys_w, sys_frac, status_kr);
 
-    const char* profile_name = "Performance";
-    if (state.power_profile_mode == 1) profile_name = "Balanced";
-    else if (state.power_profile_mode == 2) profile_name = "SmartSave";
-    else if (state.power_profile_mode == 3) profile_name = "UltraSave";
+    const char* profile_name = "Performance (고성능 4.1G)";
+    if (state.power_profile_mode == 1) profile_name = "Balanced (기본 균형)";
+    else if (state.power_profile_mode == 2) profile_name = "SmartSave (스마트 절전 1.7G)";
+    else if (state.power_profile_mode == 3) profile_name = "UltraSave (극저전력 1.4G)";
 
     unsigned int cpu_w = state.cpu_drain_mw / 1000;
     unsigned int cpu_frac = (state.cpu_drain_mw % 1000) / 100;
     unsigned int gpu_w = state.gpu_drain_mw / 1000;
     unsigned int gpu_frac = (state.gpu_drain_mw % 1000) / 100;
 
+    // Remaining time format
+    char time_buf[32]{};
+    if (state.battery_state == 1) {
+        if (state.time_to_empty_min >= 60) {
+            std::snprintf(time_buf, sizeof(time_buf), "%u시간 %02u분 남음", state.time_to_empty_min / 60, state.time_to_empty_min % 60);
+        } else if (state.time_to_empty_min > 0) {
+            std::snprintf(time_buf, sizeof(time_buf), "%u분 남음", state.time_to_empty_min);
+        } else {
+            std::snprintf(time_buf, sizeof(time_buf), "측정 중...");
+        }
+    } else if (state.battery_state == 2) {
+        std::snprintf(time_buf, sizeof(time_buf), "패스스루 (마모 0%%)");
+    } else {
+        std::snprintf(time_buf, sizeof(time_buf), "AC 연결됨");
+    }
+
+    // Top process format strings
+    char top1_buf[96]{};
+    char top2_buf[96]{};
+    if (state.culprits[0].comm[0]) {
+        unsigned int c1_w = state.culprits[0].drain_mw / 1000;
+        unsigned int c1_f = (state.culprits[0].drain_mw % 1000) / 100;
+        std::snprintf(top1_buf, sizeof(top1_buf), "• <b>%s</b>: <font color=\"#f43f5e\"><b>%u.%u W</b></font> (PID %d, Tier %u)",
+                      state.culprits[0].comm, c1_w, c1_f, state.culprits[0].pid, state.culprits[0].tier);
+    } else {
+        std::snprintf(top1_buf, sizeof(top1_buf), "• <i>(부하 프로세스 없음)</i>");
+    }
+
+    if (state.culprits[1].comm[0]) {
+        unsigned int c2_w = state.culprits[1].drain_mw / 1000;
+        unsigned int c2_f = (state.culprits[1].drain_mw % 1000) / 100;
+        std::snprintf(top2_buf, sizeof(top2_buf), "• <b>%s</b>: <font color=\"#fb923c\"><b>%u.%u W</b></font> (PID %d, Tier %u)",
+                      state.culprits[1].comm, c2_w, c2_f, state.culprits[1].pid, state.culprits[1].tier);
+    } else {
+        std::snprintf(top2_buf, sizeof(top2_buf), "• <i>(부하 프로세스 없음)</i>");
+    }
+
     std::snprintf(out_desc, desc_cap,
-        "Battery: %u%% (Health: %u%%) | Est: %u min\n"
-        "CPU: %u.%u W (%u°C, Fan %u RPM) | GPU: %u.%u W\n"
-        "Top 1: %s (%u mW, PID %d)\n"
-        "Top 2: %s (%u mW, PID %d)\n"
-        "Profile: %s | Active Gates: %u",
-        state.battery_percent, state.battery_health_percent, state.time_to_empty_min,
+        "<b><font color=\"#00d2ff\">⚡ WattCurb Power Intelligence</font></b><br>"
+        "<hr>"
+        "<b>배터리:</b> <font color=\"#10b981\"><b>%u%%</b></font> (%s) | 건강도: <b>%u%%</b> | <b>%s</b><br>"
+        "<b>총 소비 전력:</b> <font color=\"#f59e0b\"><b>%u.%u W</b></font><br>"
+        "<hr>"
+        "<b>물리 하드웨어 전력 분해:</b><br>"
+        "• CPU 연산: <font color=\"#38bdf8\"><b>%u.%u W</b></font> (%u°C, 팬 %u RPM)<br>"
+        "• GPU 실리콘: <font color=\"#34d399\"><b>%u.%u W</b></font><br>"
+        "• C3 절전 수면율: <font color=\"#a78bfa\"><b>%u%%</b></font> | 웨이크업: <b>%u /s</b><br>"
+        "<hr>"
+        "<b>실시간 최고 전력 소모 프로세스:</b><br>"
+        "%s<br>"
+        "%s<br>"
+        "<hr>"
+        "<b>전력 모드:</b> <font color=\"#00d2ff\"><b>%s</b></font> | 활성 제어 게이트: <b>%u개</b>",
+        state.battery_percent, status_kr, state.battery_health_percent, time_buf,
+        sys_w, sys_frac,
         cpu_w, cpu_frac, state.cpu_temp_c, state.fan_rpm,
         gpu_w, gpu_frac,
-        state.culprits[0].comm[0] ? state.culprits[0].comm : "none",
-        state.culprits[0].drain_mw, state.culprits[0].pid,
-        state.culprits[1].comm[0] ? state.culprits[1].comm : "none",
-        state.culprits[1].drain_mw, state.culprits[1].pid,
+        state.cstate_c3_percent, state.wakeups_per_sec,
+        top1_buf,
+        top2_buf,
         profile_name,
         state.active_mitigations
     );
@@ -369,8 +416,8 @@ int TrayClient::property_get_tooltip(sd_bus*, const char*, const char*, const ch
     char icon[64]{};
     resolve_icon_name(state, icon, sizeof(icon));
 
-    char title[64]{};
-    char desc[512]{};
+    char title[128]{};
+    char desc[2048]{};
     render_tooltip(state, title, sizeof(title), desc, sizeof(desc));
 
     // Open structure (sa(iiay)ss)
