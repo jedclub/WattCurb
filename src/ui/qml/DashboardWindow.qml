@@ -512,12 +512,15 @@ ApplicationWindow {
                             width: procListView.width
                             height: 26
                             radius: 3
-                            color: rowMa.containsMouse ? "#202838" : (index % 2 === 0 ? root.bgRowAlt : root.bgPanel)
+                            color: rowMa.containsMouse ? "#222f42" : (index % 2 === 0 ? root.bgRowAlt : root.bgPanel)
+                            border.color: rowMa.containsMouse ? root.colCyan : "transparent"
+                            border.width: 1
 
                             MouseArea {
                                 id: rowMa
                                 anchors.fill: parent
                                 hoverEnabled: true
+                                z: 10
                                 onEntered: {
                                     var pos = mapToItem(root.contentItem, mouseX, mouseY);
                                     root.hoverTargetX = pos.x;
@@ -802,9 +805,9 @@ ApplicationWindow {
     // =============================================================
     Rectangle {
         id: hoverCard
-        visible: root.hoverVisible
+        visible: root.hoverVisible || opacity > 0.01
         opacity: root.hoverVisible ? 1.0 : 0.0
-        Behavior on opacity { NumberAnimation { duration: 120 } }
+        Behavior on opacity { NumberAnimation { duration: 80 } }
         z: 9999
 
         // Dimensions
@@ -814,11 +817,18 @@ ApplicationWindow {
         // Pass through mouse events so hoverCard never steals focus from underlying rows
         enabled: false
 
-        // Smart Edge Clamping & Cursor-relative Offset: Ensure card never overlaps the mouse cursor
-        x: root.hoverType === "process" 
-           ? Math.max(16, root.hoverTargetX - width - 20)
-           : Math.min(root.width - width - 16, root.hoverTargetX + 25)
-        y: Math.min(root.height - height - 16, Math.max(16, root.hoverTargetY - height / 2))
+        // Smart Cursor-Following Tooltip Position (Near Cursor, Strictly In-Bounds)
+        // 1. Try displaying to the right of the cursor (mouseX + 16)
+        // 2. If it would exceed window width, flip to the left of the cursor (mouseX - width - 16)
+        x: (root.hoverTargetX + width + 24 < root.width) 
+           ? (root.hoverTargetX + 16) 
+           : Math.max(12, root.hoverTargetX - width - 16)
+
+        // 1. Try displaying slightly below the cursor (mouseY + 16)
+        // 2. If it would exceed window height, flip above the cursor (mouseY - height - 16)
+        y: (root.hoverTargetY + height + 24 < root.height)
+           ? (root.hoverTargetY + 16)
+           : Math.max(12, root.hoverTargetY - height - 16)
 
         // Modern Glassmorphism Cyber Card
         color: "#151b24"
