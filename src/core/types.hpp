@@ -441,7 +441,7 @@ enum class PowerProfileMode : uint8_t {
     Performance = 0,     // Full 4.1GHz boost, zero throttling, SMU 25W unlocked
     Balanced = 1,        // Dynamic clock, standard CFS, runaway mitigation only
     PowerSaver = 2,      // Smart Save: 1.7GHz cap, SCHED_IDLE on background workers
-    UltraEndurance = 3   // Ultra Save: 1.4GHz, cgroup freeze, 48Hz panel, max savings
+    UltraEndurance = 3   // Ultra Save: 1.4GHz, SCHED_IDLE graceful throttle, 48Hz panel, zero-kill non-halting safety (REF-REQ-044)
 };
 
 struct ActiveMitigationStatus {

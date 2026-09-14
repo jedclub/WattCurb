@@ -629,7 +629,7 @@ void test_process_classifier() {
     auto c_baloo = ProcessClassifierDB::classify("baloo_file");
     assert(c_baloo.tier == ProcessSafetyTier::BackgroundWorker);
     assert(c_baloo.can_throttle_scheduler == true);
-    assert(c_baloo.can_freeze == true);
+    assert(c_baloo.can_freeze == false); // REF-REQ-044: Freezing strictly prohibited for all tiers
 
     auto c_tracker = ProcessClassifierDB::classify("tracker-miner-fs-3");
     assert(c_tracker.tier == ProcessSafetyTier::BackgroundWorker);

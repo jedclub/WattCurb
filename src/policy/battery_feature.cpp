@@ -55,11 +55,11 @@ FeatureDescriptor FeatureManager::descriptor(FeatureId id) noexcept {
                 .feature_code = "FEAT-004",
                 .name = "CgroupFreezer",
                 .target_domain = "Cgroup Subsystem",
-                .kernel_mechanism = "cgroup v2 cgroup.freeze = 1 (or SIGSTOP as fallback)",
-                .power_saving_rationale = "Halts all thread execution and timer callbacks completely, eliminating 100% of CPU instructions, memory bus accesses, and wakeups for idle heavy tasks.",
-                .safety_constraints = "Tier 0, 1, and 2 immune. Requires battery < 20% and extreme WDI score (>8.0).",
-                .description = "Freezes runaway background indexers/heavy workers via cgroup v2 freeze under critical battery",
-                .default_enabled = true
+                .kernel_mechanism = "Strictly Disabled by REF-REQ-044 (Zero-Kill & Non-Halting Invariant). Fallback to SchedIdle.",
+                .power_saving_rationale = "Disabled to prevent desktop hangs and process killing. Background tasks throttled via SCHED_IDLE instead.",
+                .safety_constraints = "Prohibited under all profiles to preserve system stability and user responsiveness.",
+                .description = "Disabled: Process freezing prohibited by REF-REQ-044 Zero-Kill invariant",
+                .default_enabled = false
             };
         case FeatureId::ZenCcxAffinityPinning:
             return FeatureDescriptor{
@@ -339,29 +339,14 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
             }
         }
 
-        // Feature 4: CgroupFreezer
+        // Feature 4: CgroupFreezer (Disabled & Replaced by Non-Halting Graceful Throttle per REF-REQ-044)
         if (is_feature_enabled(FeatureId::CgroupFreezer)) {
-            bool should_freeze = false;
-            if (profile == Aggressiveness::Progressive) {
-                if (tier == ProcessSafetyTier::BackgroundWorker && proc.wdi_score > 8.0) {
-                    should_freeze = true;
-                } else if (tier == ProcessSafetyTier::RunawayCandidate && proc.wdi_score > 20.0) {
-                    should_freeze = true;
-                }
-            }
-
-            if (should_freeze) {
-                if (actuate_cgroup_freeze(proc.pid, true)) {
-                    auto& m = m_metrics[static_cast<size_t>(FeatureId::CgroupFreezer)];
-                    ++m.actions_taken;
-                    double savings = proc.total_attributed_watts * 0.9;
-                    m.estimated_power_saved_watts += savings;
-                    if (m.targeted_pid_count < m.targeted_pids.size()) {
-                        m.targeted_pids[m.targeted_pid_count++] = proc.pid;
-                    }
-                    ++status.frozen_count;
-                    status.estimated_savings_watts += savings;
-                }
+            // REF-REQ-044: Processes must NEVER be frozen or killed!
+            // Graceful non-halting throttle fallback only
+            if (profile == Aggressiveness::Progressive &&
+                (tier == ProcessSafetyTier::BackgroundWorker || tier == ProcessSafetyTier::RunawayCandidate)) {
+                actuate_sched_idle(proc.pid);
+                actuate_timer_slack(proc.pid, 100'000'000ULL);
             }
         }
 

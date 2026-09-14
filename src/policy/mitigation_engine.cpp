@@ -229,11 +229,18 @@ bool MitigationEngine::apply_memory_reclaim(int32_t pid, uint64_t bytes) noexcep
 bool MitigationEngine::apply_cgroup_freeze(int32_t pid, bool freeze) noexcept {
     if (pid <= 1) return false;
 
-    // Self-Freeze Prevention Invariant: Never freeze the daemon itself or its parent
-    if (freeze && (pid == ::getpid() || pid == ::getppid())) {
-        return false;
+    // REF-REQ-044 & REF-RES-015: Absolute Zero-Kill & Zero-Freeze Invariant
+    // Freezing user/system processes (cgroup.freeze = 1) causes D-Bus IPC deadlocks,
+    // tree-wide application freezes, and process termination. WattCurb strictly forbids
+    // freezing processes under any circumstance!
+    if (freeze) {
+        // Fallback safely to non-halting graceful idle throttling
+        apply_sched_idle(pid);
+        apply_timer_slack(pid, 100'000'000ULL);
+        return false; // Prohibit cgroup freeze
     }
 
+    // Thawing (unfreezing) is safely executed to recover any previously frozen process
     char cg_path[256];
     if (!resolve_cgroup_path(pid, cg_path, sizeof(cg_path))) {
         return false;
@@ -245,8 +252,7 @@ bool MitigationEngine::apply_cgroup_freeze(int32_t pid, bool freeze) noexcept {
     int fd = ::open(freeze_path, O_WRONLY | O_CLOEXEC);
     if (fd < 0) return false;
 
-    const char* val = freeze ? "1\n" : "0\n";
-    ssize_t written = ::write(fd, val, 2);
+    ssize_t written = ::write(fd, "0\n", 2);
     ::close(fd);
 
     return (written > 0);
@@ -483,10 +489,10 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
         }
 
         // Mitigation candidate evaluation based on profile and WDI / wakeup score
+        // REF-REQ-044: Non-Halting & Zero-Kill Invariant. Processes are NEVER frozen or killed!
         bool should_throttle = false;
         bool should_relax_timer = false;
         bool should_reclaim = false;
-        bool should_freeze = false;
 
         if (tier == ProcessSafetyTier::BackgroundWorker) {
             // Background indexing/sync tasks (baloo, tracker, updatedb, etc.)
@@ -494,9 +500,6 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
                 should_throttle = true;
                 should_relax_timer = true;
                 should_reclaim = (proc.pss_kib > 50 * 1024);
-                if (proc.wdi_score > 6.0) {
-                    should_freeze = true;
-                }
             } else if (m_current_profile == PowerProfileMode::PowerSaver) {
                 should_throttle = (proc.wdi_score > 3.0 || proc.wakeups_per_sec > 50);
                 should_relax_timer = (proc.wakeups_per_sec > 100);
@@ -506,15 +509,12 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
                 should_relax_timer = (proc.wakeups_per_sec > 250);
             }
         } else if (tier == ProcessSafetyTier::RunawayCandidate) {
-            // General worker or runaway candidate
-            if (proc.is_runaway_candidate || proc.wdi_score > 12.0) {
+            // General worker or runaway candidate - graceful throttling only, never killed
+            if (proc.is_runaway_candidate || proc.wdi_score > 10.0) {
                 should_throttle = true;
                 should_relax_timer = true;
                 if (m_current_profile == PowerProfileMode::UltraEndurance) {
                     should_reclaim = true;
-                    if (proc.wdi_score > 20.0) {
-                        should_freeze = true;
-                    }
                 }
             }
         } else if (tier == ProcessSafetyTier::UserInteractive) {
@@ -527,22 +527,8 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
             }
         }
 
-        // Apply Actuations
-        if (should_freeze && !already_tracked) {
-            if (apply_cgroup_freeze(proc.pid, true)) {
-                ++status.frozen_count;
-                status.estimated_savings_watts += (proc.total_attributed_watts * 0.9);
-                if (m_tracked.size() < MAX_TRACKED_MITIGATIONS) {
-                    m_tracked.push_back(TrackedMitigation{
-                        .pid = proc.pid,
-                        .tier = tier,
-                        .current_action = MitigationAction::CgroupFreeze,
-                        .applied_timestamp_sec = 0,
-                        .original_timerslack_ns = proc.timerslack_ns
-                    });
-                }
-            }
-        } else if (should_throttle && !already_tracked) {
+        // Apply Actuations (Zero-Freeze: Only SchedIdle, TimerSlack, MemoryReclaim)
+        if (should_throttle && !already_tracked) {
             if (apply_sched_idle(proc.pid)) {
                 ++status.throttled_count;
                 status.estimated_savings_watts += (proc.cpu_watts * 0.4);

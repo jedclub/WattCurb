@@ -63,7 +63,7 @@ ProcessClassification ProcessClassifierDB::classify(std::string_view comm) noexc
             .category = "Background Indexer/Sync",
             .can_throttle_scheduler = true,
             .can_reclaim_memory = true,
-            .can_freeze = true
+            .can_freeze = false // REF-REQ-044: Freezing strictly disabled
         };
     }
 
@@ -82,7 +82,7 @@ ProcessClassification ProcessClassifierDB::classify(std::string_view comm) noexc
             .category = "Interactive App",
             .can_throttle_scheduler = true,
             .can_reclaim_memory = true,
-            .can_freeze = true
+            .can_freeze = false // REF-REQ-044: Freezing strictly disabled
         };
     }
 
@@ -93,7 +93,7 @@ ProcessClassification ProcessClassifierDB::classify(std::string_view comm) noexc
         .category = "General / Worker",
         .can_throttle_scheduler = true,
         .can_reclaim_memory = true,
-        .can_freeze = true
+        .can_freeze = false // REF-REQ-044: Freezing strictly disabled
     };
 }
 
@@ -115,8 +115,8 @@ const char* ProcessClassifierDB::action_name(MitigationAction action) noexcept {
         case MitigationAction::SchedIdle:      return "SCHED_IDLE";
         case MitigationAction::RelaxTimerSlack:return "Relax Timer Slack";
         case MitigationAction::MemoryReclaim:  return "Reclaim Memory";
-        case MitigationAction::CgroupFreeze:   return "Freeze Cgroup";
-        case MitigationAction::Terminate:      return "Terminate";
+        case MitigationAction::CgroupFreeze:   return "Freeze Cgroup (Disabled)";
+        case MitigationAction::Terminate:      return "Terminate (Prohibited)";
     }
     return "Unknown";
 }
