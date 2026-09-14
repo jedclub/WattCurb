@@ -132,6 +132,12 @@ void TrayClient::render_tooltip(
     unsigned int gpu_w = state.gpu_drain_mw / 1000;
     unsigned int gpu_frac = (state.gpu_drain_mw % 1000) / 100;
 
+    // Platform & DRAM / I/O derived power
+    uint32_t comp_drain = state.cpu_drain_mw + state.gpu_drain_mw;
+    uint32_t plat_drain = state.system_drain_mw > comp_drain ? (state.system_drain_mw - comp_drain) : 0;
+    unsigned int plat_w = plat_drain / 1000;
+    unsigned int plat_frac = (plat_drain % 1000) / 100;
+
     // Remaining time format
     char time_buf[32]{};
     if (state.battery_state == 1) {
@@ -143,57 +149,142 @@ void TrayClient::render_tooltip(
             std::snprintf(time_buf, sizeof(time_buf), "측정 중...");
         }
     } else if (state.battery_state == 2) {
-        std::snprintf(time_buf, sizeof(time_buf), "패스스루 (마모 0%%)");
+        std::snprintf(time_buf, sizeof(time_buf), "마모 방지 0%%");
     } else {
-        std::snprintf(time_buf, sizeof(time_buf), "AC 연결됨");
+        std::snprintf(time_buf, sizeof(time_buf), "완충 시 자동보호");
     }
 
+    // Dynamic 10-bar Unicode battery gauge
+    char bat_bar[64]{};
+    int filled = std::clamp(static_cast<int>((state.battery_percent + 5) / 10), 0, 10);
+    size_t bar_pos = 0;
+    for (int i = 0; i < 10; ++i) {
+        if (i < filled) {
+            std::memcpy(bat_bar + bar_pos, "\xE2\x96\xB0", 3); // ▰
+        } else {
+            std::memcpy(bat_bar + bar_pos, "\xE2\x96\xB1", 3); // ▱
+        }
+        bar_pos += 3;
+    }
+    bat_bar[bar_pos] = '\0';
+
+    const char* bat_color = (state.battery_percent >= 60) ? "#10b981" :
+                           ((state.battery_percent >= 25) ? "#f59e0b" : "#ef4444");
+
+    const char* temp_color = (state.cpu_temp_c < 65) ? "#94a3b8" :
+                            ((state.cpu_temp_c < 80) ? "#fb923c" : "#f43f5e");
+
+    const char* gpu_status = (state.gpu_drain_mw > 500) ? "활성 렌더링" : "절전 대기 (D3Cold)";
+
     // Top process format strings
-    char top1_buf[96]{};
-    char top2_buf[96]{};
+    char top1_buf[320]{};
+    char top2_buf[320]{};
     if (state.culprits[0].comm[0]) {
         unsigned int c1_w = state.culprits[0].drain_mw / 1000;
         unsigned int c1_f = (state.culprits[0].drain_mw % 1000) / 100;
-        std::snprintf(top1_buf, sizeof(top1_buf), "• <b>%s</b>: <font color=\"#f43f5e\"><b>%u.%u W</b></font> (PID %d, Tier %u)",
-                      state.culprits[0].comm, c1_w, c1_f, state.culprits[0].pid, state.culprits[0].tier);
+        unsigned int c1_pct = (state.system_drain_mw > 0) ? (state.culprits[0].drain_mw * 100 / state.system_drain_mw) : 0;
+        std::snprintf(top1_buf, sizeof(top1_buf),
+            "<tr><td><b style=\"color: #ffffff; font-size: 11px;\">1. %s</b> <span style=\"color: #64748b; font-size: 10px;\">(PID %d)</span></td>"
+            "<td align=\"right\"><b style=\"color: #f43f5e; font-size: 12px;\">%u.%u W</b> <span style=\"color: #cbd5e1; font-size: 10px;\">(%u%%)</span></td></tr>",
+            state.culprits[0].comm, state.culprits[0].pid, c1_w, c1_f, c1_pct);
     } else {
-        std::snprintf(top1_buf, sizeof(top1_buf), "• <i>(부하 프로세스 없음)</i>");
+        std::snprintf(top1_buf, sizeof(top1_buf),
+            "<tr><td colspan=\"2\"><span style=\"color: #94a3b8; font-size: 10px;\"><i>시스템 안정 상태 (과다 점유 프로세스 없음)</i></span></td></tr>");
     }
 
     if (state.culprits[1].comm[0]) {
         unsigned int c2_w = state.culprits[1].drain_mw / 1000;
         unsigned int c2_f = (state.culprits[1].drain_mw % 1000) / 100;
-        std::snprintf(top2_buf, sizeof(top2_buf), "• <b>%s</b>: <font color=\"#fb923c\"><b>%u.%u W</b></font> (PID %d, Tier %u)",
-                      state.culprits[1].comm, c2_w, c2_f, state.culprits[1].pid, state.culprits[1].tier);
+        unsigned int c2_pct = (state.system_drain_mw > 0) ? (state.culprits[1].drain_mw * 100 / state.system_drain_mw) : 0;
+        std::snprintf(top2_buf, sizeof(top2_buf),
+            "<tr><td><b style=\"color: #ffffff; font-size: 11px;\">2. %s</b> <span style=\"color: #64748b; font-size: 10px;\">(PID %d)</span></td>"
+            "<td align=\"right\"><b style=\"color: #fb923c; font-size: 12px;\">%u.%u W</b> <span style=\"color: #cbd5e1; font-size: 10px;\">(%u%%)</span></td></tr>",
+            state.culprits[1].comm, state.culprits[1].pid, c2_w, c2_f, c2_pct);
+    }
+
+    char mitig_buf[64]{};
+    if (state.active_mitigations > 0) {
+        std::snprintf(mitig_buf, sizeof(mitig_buf), "실시간 가동 중 (%u개 제어)", state.active_mitigations);
     } else {
-        std::snprintf(top2_buf, sizeof(top2_buf), "• <i>(부하 프로세스 없음)</i>");
+        std::snprintf(mitig_buf, sizeof(mitig_buf), "정상 감시 (Zero-Wakeup)");
     }
 
     std::snprintf(out_desc, desc_cap,
-        "<b><font color=\"#00d2ff\">⚡ WattCurb Power Intelligence</font></b><br>"
-        "<hr>"
-        "<b>배터리:</b> <font color=\"#10b981\"><b>%u%%</b></font> (%s) | 건강도: <b>%u%%</b> | <b>%s</b><br>"
-        "<b>총 소비 전력:</b> <font color=\"#f59e0b\"><b>%u.%u W</b></font><br>"
-        "<hr>"
-        "<b>물리 하드웨어 전력 분해:</b><br>"
-        "• CPU 연산: <font color=\"#38bdf8\"><b>%u.%u W</b></font> (%u°C, 팬 %u RPM)<br>"
-        "• GPU 실리콘: <font color=\"#34d399\"><b>%u.%u W</b></font><br>"
-        "• C3 절전 수면율: <font color=\"#a78bfa\"><b>%u%%</b></font> | 웨이크업: <b>%u /s</b><br>"
-        "<hr>"
-        "<b>실시간 최고 전력 소모 프로세스:</b><br>"
-        "%s<br>"
-        "%s<br>"
-        "<hr>"
-        "<b>전력 모드:</b> <font color=\"#00d2ff\"><b>%s</b></font> | 활성 제어 게이트: <b>%u개</b>",
-        state.battery_percent, status_kr, state.battery_health_percent, time_buf,
+        "<table width=\"100%%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse: collapse;\">"
+        "<tr><td style=\"padding: 6px 10px; background-color: #111c33; border: 1px solid #1e3a5f; border-radius: 6px;\">"
+        "<table width=\"100%%\" cellspacing=\"0\" cellpadding=\"0\">"
+        "<tr><td>"
+        "<span style=\"color: #64748b; font-size: 10px; font-weight: bold;\">⚡ WattCurb Power Intelligence &nbsp;•&nbsp; 전원 상태</span><br/>"
+        "<b style=\"color: %s; font-size: 14px;\">%u%%</b> "
+        "<span style=\"color: %s; font-size: 11px;\">[%s]</span>"
+        "<b style=\"color: #38bdf8; font-size: 11px;\"> &nbsp;%s</b>"
+        "<span style=\"color: #94a3b8; font-size: 10px;\"> (건강도 %u%% · %s)</span>"
+        "</td>"
+        "<td align=\"right\" valign=\"center\">"
+        "<span style=\"color: #64748b; font-size: 10px;\">총 소비 전력</span><br/>"
+        "<b style=\"color: #f59e0b; font-size: 15px;\">%u.%u W</b>"
+        "</td></tr>"
+        "</table>"
+        "</td></tr>"
+        "<tr><td height=\"5\"></td></tr>"
+        "<tr><td>"
+        "<table width=\"100%%\" cellspacing=\"3\" cellpadding=\"4\" style=\"border-collapse: separate;\">"
+        "<tr>"
+        "<td width=\"50%%\" style=\"background-color: #0f172a; border: 1px solid #1e293b; border-radius: 4px;\">"
+        "<span style=\"color: #64748b; font-size: 10px; font-weight: bold;\">CPU 연산 도메인</span><br/>"
+        "<b style=\"color: #38bdf8; font-size: 13px;\">%u.%u W</b>"
+        "<span style=\"color: %s; font-size: 10px;\"> &nbsp;(%u°C · %u RPM)</span>"
+        "</td>"
+        "<td width=\"50%%\" style=\"background-color: #0f172a; border: 1px solid #1e293b; border-radius: 4px;\">"
+        "<span style=\"color: #64748b; font-size: 10px; font-weight: bold;\">GPU 실리콘</span><br/>"
+        "<b style=\"color: #34d399; font-size: 13px;\">%u.%u W</b>"
+        "<span style=\"color: #94a3b8; font-size: 10px;\"> &nbsp;(%s)</span>"
+        "</td>"
+        "</tr>"
+        "<tr>"
+        "<td width=\"50%%\" style=\"background-color: #0f172a; border: 1px solid #1e293b; border-radius: 4px;\">"
+        "<span style=\"color: #64748b; font-size: 10px; font-weight: bold;\">플랫폼 & DRAM / IO</span><br/>"
+        "<b style=\"color: #e2e8f0; font-size: 13px;\">%u.%u W</b>"
+        "<span style=\"color: #94a3b8; font-size: 10px;\"> &nbsp;(LPDDR / APST 절전)</span>"
+        "</td>"
+        "<td width=\"50%%\" style=\"background-color: #0f172a; border: 1px solid #1e293b; border-radius: 4px;\">"
+        "<span style=\"color: #64748b; font-size: 10px; font-weight: bold;\">C-State 심층 수면율</span><br/>"
+        "<b style=\"color: #a78bfa; font-size: 13px;\">%u%% C3</b>"
+        "<span style=\"color: #94a3b8; font-size: 10px;\"> &nbsp;(웨이크업 %u/s)</span>"
+        "</td>"
+        "</tr>"
+        "</table>"
+        "</td></tr>"
+        "<tr><td height=\"5\"></td></tr>"
+        "<tr><td style=\"padding: 5px 8px; background-color: #1a1025; border: 1px solid #4a1d48; border-radius: 5px;\">"
+        "<span style=\"color: #f43f5e; font-size: 10px; font-weight: bold;\">⚡ 실시간 전력 최다 점유 프로세스 (Top Culprits)</span>"
+        "<table width=\"100%%\" cellspacing=\"0\" cellpadding=\"1\" style=\"margin-top: 2px;\">"
+        "%s"
+        "%s"
+        "</table>"
+        "</td></tr>"
+        "<tr><td height=\"5\"></td></tr>"
+        "<tr><td style=\"padding: 2px 4px;\">"
+        "<table width=\"100%%\" cellspacing=\"0\" cellpadding=\"0\">"
+        "<tr><td>"
+        "<span style=\"color: #64748b; font-size: 10px;\">전원 프로필: </span>"
+        "<b style=\"color: #00e5ff; font-size: 11px;\">%s</b>"
+        "</td>"
+        "<td align=\"right\">"
+        "<span style=\"color: #64748b; font-size: 10px;\">스마트 억제 엔진: </span>"
+        "<b style=\"color: #10b981; font-size: 11px;\">%s</b>"
+        "</td></tr>"
+        "</table>"
+        "</td></tr>"
+        "</table>",
+        bat_color, state.battery_percent, bat_color, bat_bar, status_kr, state.battery_health_percent, time_buf,
         sys_w, sys_frac,
-        cpu_w, cpu_frac, state.cpu_temp_c, state.fan_rpm,
-        gpu_w, gpu_frac,
+        cpu_w, cpu_frac, temp_color, state.cpu_temp_c, state.fan_rpm,
+        gpu_w, gpu_frac, gpu_status,
+        plat_w, plat_frac,
         state.cstate_c3_percent, state.wakeups_per_sec,
-        top1_buf,
-        top2_buf,
-        profile_name,
-        state.active_mitigations
+        top1_buf, top2_buf,
+        profile_name, mitig_buf
     );
 }
 
@@ -417,7 +508,7 @@ int TrayClient::property_get_tooltip(sd_bus*, const char*, const char*, const ch
     resolve_icon_name(state, icon, sizeof(icon));
 
     char title[128]{};
-    char desc[2048]{};
+    char desc[4096]{};
     render_tooltip(state, title, sizeof(title), desc, sizeof(desc));
 
     // Open structure (sa(iiay)ss)

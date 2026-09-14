@@ -1639,7 +1639,7 @@ void test_thinkpower_tray_client() {
 
     // 1. ToolTip Stack Formatting Verification (Zero dynamic heap allocation)
     char title[128]{};
-    char desc[2048]{};
+    char desc[4096]{};
     TrayClient::render_tooltip(state, title, sizeof(title), desc, sizeof(desc));
 
     assert(std::string_view(title).find("WattCurb: 14.2 W") != std::string_view::npos);
