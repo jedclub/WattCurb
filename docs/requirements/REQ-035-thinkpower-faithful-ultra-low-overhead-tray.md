@@ -65,8 +65,12 @@ The desktop tray client is the user's primary interface to WattCurb. It must fai
   - Radio Item: `Ultra Save (초절전 모드 - 1.4GHz, 48Hz)` (`toggle-type: radio`, mutually exclusive)
   - Note: Labels MUST NOT include manual Unicode bullet points (`●`/`○`) to prevent visual collision with KDE native radio buttons. Mutual exclusion MUST be enforced via immediate `LayoutUpdated(revision, 0)` signal emission upon selection.
   - Separator
-  - Action Item: `🔍 지금 전력 소비 정밀 분석 (Rescan Now)`
+  - Action Item: `🔍 지금 전력 소비 정밀 분석 (Rescan Now)`: Must send `RESCAN` to daemon, pop up desktop notification (`notify-send`), launch interactive `konsole` window displaying `wattcurb --briefing` executive power report, and immediately emit D-Bus change signals.
   - Action Item: `📊 KDE 시스템 모니터 열기 (System Monitor)`
+
+### REQ-035.8: Real-Time Periodic State Sync (3-Second Interval)
+- The tray main loop MUST wake up at least every 3 seconds (`sd_bus_wait(bus, 3'000'000)`) to sample the 128-byte Seqlock SHM.
+- If battery percent, system wattage, battery charge state, or power profile changes, the client shall immediately emit `NewIcon`, `NewToolTip`, `XAyatanaNewLabel`, and `LayoutUpdated` to guarantee the panel indicator never freezes or stays stale.
 
 ---
 

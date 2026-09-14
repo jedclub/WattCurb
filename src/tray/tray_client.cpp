@@ -5,6 +5,8 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <cstdio>
+#include <cstdlib>
+#include <cmath>
 #include <cstring>
 #include <algorithm>
 
@@ -282,14 +284,41 @@ bool TrayClient::initialize() noexcept {
 
 int TrayClient::run() noexcept {
     running_ = true;
+    ipc::WattCurbSharedState prev_state{};
+    read_state(prev_state);
+
     while (running_) {
         int r = sd_bus_process(bus_, nullptr);
         if (r < 0) break;
         if (r > 0) continue; // More work to do immediately
 
-        // Pure event-driven sleep in epoll: 0% CPU consumption
-        r = sd_bus_wait(bus_, static_cast<uint64_t>(-1));
+        // Sleep with 3-second timeout (3'000'000 us):
+        // Wakes up on D-Bus events instantly, or at least once every 3s to sync live telemetry
+        r = sd_bus_wait(bus_, 3'000'000ULL);
         if (r < 0 && r != -EINTR) break;
+
+        // Periodic state check: read 128-byte Seqlock SHM (< 50ns, zero-allocation)
+        ipc::WattCurbSharedState cur_state{};
+        if (read_state(cur_state)) {
+            bool changed = (cur_state.battery_percent != prev_state.battery_percent) ||
+                           (cur_state.battery_state != prev_state.battery_state) ||
+                           (std::abs(static_cast<int>(cur_state.system_drain_mw) - static_cast<int>(prev_state.system_drain_mw)) > 200) ||
+                           (cur_state.power_profile_mode != prev_state.power_profile_mode);
+
+            if (changed) {
+                prev_state = cur_state;
+                sd_bus_emit_signal(bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewIcon", nullptr);
+                sd_bus_emit_signal(bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewToolTip", nullptr);
+
+                char label[32]{};
+                unsigned int sys_w = cur_state.system_drain_mw / 1000;
+                unsigned int sys_frac = (cur_state.system_drain_mw % 1000) / 100;
+                char sign = (cur_state.battery_state == 2) ? '+' : '-';
+                std::snprintf(label, sizeof(label), "%u%% (%c%u.%uW)", cur_state.battery_percent, sign, sys_w, sys_frac);
+                sd_bus_emit_signal(bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "XAyatanaNewLabel", "ss", label, "");
+                sd_bus_emit_signal(bus_, "/MenuBar", "com.canonical.dbusmenu", "LayoutUpdated", "ui", ++menu_revision_, 0);
+            }
+        }
     }
     return 0;
 }
@@ -587,6 +616,36 @@ int TrayClient::dbusmenu_method_event(sd_bus_message* msg, void* userdata, sd_bu
             hw_mode = "ultra";
         } else if (id == 10) {
             send_daemon_command("RESCAN\n");
+
+            // Fork child process to display desktop notification and launch executive power briefing terminal
+            pid_t pid = ::fork();
+            if (pid == 0) {
+                // Inform user immediately via KDE desktop notification
+                ::system("notify-send -a 'WattCurb' -i 'utilities-system-monitor' -t 4000 "
+                         "'🔍 전력 소비 정밀 분석 시작' "
+                         "'하드웨어 RAPL/SMU 센서 및 프로세스 전력 측정을 진행 중입니다 (약 3~5초 소요)...'");
+
+                // Launch terminal with rich WattCurb executive briefing
+                const char* term_cmd =
+                    "konsole --title 'WattCurb 실시간 하드웨어별 전력 정밀 분석 보고서' -e bash -c "
+                    "\"echo '================================================================='; "
+                    "echo '        [WattCurb] 실시간 하드웨어 및 프로세스 전력 정밀 분석'; "
+                    "echo '================================================================='; "
+                    "echo '🔍 하드웨어 RAPL/SMU/DRM/I/O 관측 윈도우 수집 중... 잠시만 기다려주세요.'; "
+                    "sleep 2; "
+                    "/home/jedclub/.local/bin/wattcurb --briefing; "
+                    "echo ''; "
+                    "echo '-----------------------------------------------------------------'; "
+                    "read -p '엔터(Enter) 키를 누르면 창이 닫힙니다...' dummy\"";
+
+                ::system(term_cmd);
+                ::_exit(0);
+            }
+
+            // Also emit signals immediately to update tray
+            sd_bus_emit_signal(self->bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewIcon", nullptr);
+            sd_bus_emit_signal(self->bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewToolTip", nullptr);
+            sd_bus_emit_signal(self->bus_, "/MenuBar", "com.canonical.dbusmenu", "LayoutUpdated", "ui", ++self->menu_revision_, 0);
         } else if (id == 11) {
             if (::fork() == 0) {
                 ::execlp("plasma-systemmonitor", "plasma-systemmonitor", nullptr);
