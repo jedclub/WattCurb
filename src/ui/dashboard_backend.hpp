@@ -56,7 +56,23 @@ class DashboardBackend : public QObject {
     Q_PROPERTY(int powerProfileMode READ powerProfileMode NOTIFY profileChanged)
     Q_PROPERTY(QString powerProfileName READ powerProfileName NOTIFY profileChanged)
 
-    // btop-Style Detailed Process List (Top 10)
+    // Deep Hardware & PMU Telemetry (REF-REQ-038)
+    Q_PROPERTY(QString cpuGovernor READ cpuGovernor NOTIFY telemetryChanged)
+    Q_PROPERTY(double pmuIpc READ pmuIpc NOTIFY telemetryChanged)
+    Q_PROPERTY(qlonglong pmuInstructions READ pmuInstructions NOTIFY telemetryChanged)
+    Q_PROPERTY(qlonglong pmuCycles READ pmuCycles NOTIFY telemetryChanged)
+    Q_PROPERTY(qlonglong pmuLlcMisses READ pmuLlcMisses NOTIFY telemetryChanged)
+    Q_PROPERTY(qlonglong pmuBranchMisses READ pmuBranchMisses NOTIFY telemetryChanged)
+    Q_PROPERTY(double pmuEwr READ pmuEwr NOTIFY telemetryChanged)
+    Q_PROPERTY(QString batteryMfg READ batteryMfg NOTIFY telemetryChanged)
+    Q_PROPERTY(QString batteryModel READ batteryModel NOTIFY telemetryChanged)
+    Q_PROPERTY(QString batteryTech READ batteryTech NOTIFY telemetryChanged)
+    Q_PROPERTY(double batteryDesignWh READ batteryDesignWh NOTIFY telemetryChanged)
+    Q_PROPERTY(double batteryFullWh READ batteryFullWh NOTIFY telemetryChanged)
+    Q_PROPERTY(double batteryNowWh READ batteryNowWh NOTIFY telemetryChanged)
+    Q_PROPERTY(QString aspmPolicy READ aspmPolicy NOTIFY telemetryChanged)
+
+    // btop-Style Detailed Process List (Top 12 with Exhaustive Hover Telemetry)
     Q_PROPERTY(QVariantList processList READ processList NOTIFY processListChanged)
 
     // Status / Metadata
@@ -105,6 +121,21 @@ public:
     int powerProfileMode() const noexcept;
     QString powerProfileName() const;
 
+    QString cpuGovernor() const { return cpu_governor_; }
+    double pmuIpc() const noexcept { return pmu_ipc_; }
+    qlonglong pmuInstructions() const noexcept { return pmu_instructions_; }
+    qlonglong pmuCycles() const noexcept { return pmu_cycles_; }
+    qlonglong pmuLlcMisses() const noexcept { return pmu_llc_misses_; }
+    qlonglong pmuBranchMisses() const noexcept { return pmu_branch_misses_; }
+    double pmuEwr() const noexcept { return pmu_ewr_; }
+    QString batteryMfg() const { return battery_mfg_; }
+    QString batteryModel() const { return battery_model_; }
+    QString batteryTech() const { return battery_tech_; }
+    double batteryDesignWh() const noexcept { return battery_design_wh_; }
+    double batteryFullWh() const noexcept { return battery_full_wh_; }
+    double batteryNowWh() const noexcept { return battery_now_wh_; }
+    QString aspmPolicy() const { return aspm_policy_; }
+
     QVariantList processList() const { return process_list_; }
 
     bool isRescanning() const noexcept { return is_rescanning_; }
@@ -145,20 +176,37 @@ private:
     double battery_voltage_v_{11.49};
     double battery_current_a_{0.85};
     int battery_cycles_{99};
+    QString battery_mfg_{"SMP"};
+    QString battery_model_{"LNV-5B10W13895"};
+    QString battery_tech_{"Li-poly"};
+    double battery_design_wh_{45.28};
+    double battery_full_wh_{42.65};
+    double battery_now_wh_{31.91};
+
     double cpu_core_w_{2.45};
     double cpu_uncore_w_{0.82};
     double cpu_dram_w_{0.95};
     int cpu_freq_mhz_{2400};
+    QString cpu_governor_{"powersave"};
     double cstate_c0_{3.0};
     double cstate_c1_{14.0};
     double cstate_c2_{20.0};
     double cstate_c3_{63.0};
+
+    double pmu_ipc_{1.45};
+    qlonglong pmu_instructions_{45000000};
+    qlonglong pmu_cycles_{31000000};
+    qlonglong pmu_llc_misses_{1200};
+    qlonglong pmu_branch_misses_{4500};
+    double pmu_ewr_{8.5};
+
     int gpu_load_pct_{0};
     double display_drain_w_{1.8};
     int display_brightness_pct_{50};
     double nvme_drain_w_{0.8};
     double disk_read_mb_s_{0.0};
     double disk_write_mb_s_{0.1};
+    QString aspm_policy_{"powersave"};
 
     QVariantList process_list_{};
 };

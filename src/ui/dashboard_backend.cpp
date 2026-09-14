@@ -100,15 +100,29 @@ bool DashboardBackend::queryDaemonTelemetry() noexcept {
     battery_voltage_v_ = obj.value("battery_voltage_v").toDouble(11.49);
     battery_current_a_ = obj.value("battery_current_a").toDouble(0.85);
     battery_cycles_ = obj.value("battery_cycles").toInt(99);
+    battery_mfg_ = obj.value("battery_mfg").toString("SMP");
+    battery_model_ = obj.value("battery_model").toString("LNV-5B10W");
+    battery_tech_ = obj.value("battery_tech").toString("Li-poly");
+    battery_design_wh_ = obj.value("battery_design_wh").toDouble(45.28);
+    battery_full_wh_ = obj.value("battery_full_wh").toDouble(42.65);
+    battery_now_wh_ = obj.value("battery_now_wh").toDouble(31.91);
 
     cpu_core_w_ = obj.value("cpu_core_w").toDouble(2.45);
     cpu_uncore_w_ = obj.value("cpu_uncore_w").toDouble(0.82);
     cpu_dram_w_ = obj.value("cpu_dram_w").toDouble(0.95);
     cpu_freq_mhz_ = static_cast<int>(obj.value("cpu_freq_mhz").toDouble(2400.0));
+    cpu_governor_ = obj.value("cpu_governor").toString("powersave");
     cstate_c0_ = obj.value("cstate_c0").toDouble(3.0);
     cstate_c1_ = obj.value("cstate_c1").toDouble(14.0);
     cstate_c2_ = obj.value("cstate_c2").toDouble(20.0);
     cstate_c3_ = obj.value("cstate_c3").toDouble(63.0);
+
+    pmu_ipc_ = obj.value("pmu_ipc").toDouble(1.45);
+    pmu_instructions_ = obj.value("pmu_instructions").toInteger(45000000);
+    pmu_cycles_ = obj.value("pmu_cycles").toInteger(31000000);
+    pmu_llc_misses_ = obj.value("pmu_llc_misses").toInteger(1200);
+    pmu_branch_misses_ = obj.value("pmu_branch_misses").toInteger(4500);
+    pmu_ewr_ = obj.value("pmu_ewr").toDouble(8.5);
 
     gpu_load_pct_ = obj.value("gpu_load").toInt(0);
     display_drain_w_ = obj.value("display_w").toDouble(1.8);
@@ -116,6 +130,7 @@ bool DashboardBackend::queryDaemonTelemetry() noexcept {
     nvme_drain_w_ = obj.value("nvme_w").toDouble(0.8);
     disk_read_mb_s_ = obj.value("disk_read_mb_s").toDouble(0.0);
     disk_write_mb_s_ = obj.value("disk_write_mb_s").toDouble(0.1);
+    aspm_policy_ = obj.value("aspm_policy").toString("powersave");
 
     double total_sys_w = obj.value("system_watts").toDouble(systemDrainWatts());
 
@@ -128,14 +143,33 @@ bool DashboardBackend::queryDaemonTelemetry() noexcept {
         QVariantMap map;
         map["pid"] = p.value("pid").toInt();
         map["comm"] = p.value("comm").toString();
+        map["uid"] = p.value("uid").toInt();
         double w = p.value("total_w").toDouble();
         map["totalWatts"] = w;
         map["cpuWatts"] = p.value("cpu_w").toDouble();
         map["gpuWatts"] = p.value("gpu_w").toDouble();
         map["dramWatts"] = p.value("dram_w").toDouble();
         map["ioWakeWatts"] = p.value("io_wake_w").toDouble();
+        map["ioWatts"] = p.value("io_w").toDouble();
+        map["wakeTaxWatts"] = p.value("wake_tax_w").toDouble();
+        map["fanWatts"] = p.value("fan_w").toDouble();
+        map["wifiWatts"] = p.value("wifi_w").toDouble();
+        map["wdiScore"] = p.value("wdi_score").toDouble();
         map["pssMb"] = p.value("pss_mb").toInt();
         map["tier"] = p.value("tier").toInt();
+        map["cpuCore"] = p.value("cpu_core").toInt();
+        map["threads"] = p.value("threads").toInt(1);
+        map["crossCcx"] = p.value("cross_ccx").toInt(0);
+        map["nice"] = p.value("nice").toInt(0);
+        map["priority"] = p.value("priority").toInt(0);
+        map["wakeupsSec"] = p.value("wakeups_sec").toInteger(0);
+        map["timerslackNs"] = p.value("timerslack_ns").toInteger(50000);
+        map["vramMb"] = p.value("vram_mb").toDouble(0.0);
+        map["ioMbSec"] = p.value("io_mb_s").toDouble(0.0);
+        map["minfltSec"] = p.value("minflt_s").toInteger(0);
+        map["majfltSec"] = p.value("majflt_s").toInteger(0);
+        map["openSockets"] = p.value("open_sockets").toInt(0);
+        map["action"] = p.value("action").toInt(0);
         map["domain"] = p.value("domain").toString();
         map["mechanism"] = p.value("mechanism").toString();
         
