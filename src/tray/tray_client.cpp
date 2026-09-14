@@ -154,131 +154,133 @@ void TrayClient::render_tooltip(
         std::snprintf(time_buf, sizeof(time_buf), "완충 시 자동보호");
     }
 
-    // Dynamic 10-bar Unicode battery gauge
-    char bat_bar[64]{};
-    int filled = std::clamp(static_cast<int>((state.battery_percent + 5) / 10), 0, 10);
-    size_t bar_pos = 0;
-    for (int i = 0; i < 10; ++i) {
-        if (i < filled) {
-            std::memcpy(bat_bar + bar_pos, "\xE2\x96\xB0", 3); // ▰
-        } else {
-            std::memcpy(bat_bar + bar_pos, "\xE2\x96\xB1", 3); // ▱
-        }
-        bar_pos += 3;
-    }
-    bat_bar[bar_pos] = '\0';
-
+    // Dynamic SVG Battery Gauge
+    unsigned int bat_w = std::clamp(static_cast<unsigned int>(state.battery_percent) * 260 / 100, 0u, 260u);
     const char* bat_color = (state.battery_percent >= 60) ? "#10b981" :
                            ((state.battery_percent >= 25) ? "#f59e0b" : "#ef4444");
+    const char* bat_svg_color = (state.battery_percent >= 60) ? "%2310b981" :
+                               ((state.battery_percent >= 25) ? "%23f59e0b" : "%23ef4444");
+    char bat_svg[512]{};
+    std::snprintf(bat_svg, sizeof(bat_svg),
+        "<img src=\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='260' height='10'><rect width='260' height='10' fill='%%230f172a' rx='2'/><rect width='%u' height='10' fill='%s' rx='2'/></svg>\"/>",
+        bat_w, bat_svg_color);
 
-    const char* temp_color = (state.cpu_temp_c < 65) ? "#94a3b8" :
+    const char* temp_color = (state.cpu_temp_c < 65) ? "#00f0ff" :
                             ((state.cpu_temp_c < 80) ? "#fb923c" : "#f43f5e");
 
     const char* gpu_status = (state.gpu_drain_mw > 500) ? "활성 렌더링" : "절전 대기 (D3Cold)";
 
-    // Top process format strings
-    char top1_buf[320]{};
-    char top2_buf[320]{};
+    // Top process format strings with SVG share bars
+    char top1_buf[1024]{};
+    char top2_buf[1024]{};
     if (state.culprits[0].comm[0]) {
         unsigned int c1_w = state.culprits[0].drain_mw / 1000;
         unsigned int c1_f = (state.culprits[0].drain_mw % 1000) / 100;
         unsigned int c1_pct = (state.system_drain_mw > 0) ? (state.culprits[0].drain_mw * 100 / state.system_drain_mw) : 0;
+        unsigned int c1_bar_w = std::clamp(c1_pct * 140 / 100, 2u, 140u);
         std::snprintf(top1_buf, sizeof(top1_buf),
-            "<tr><td><b style=\"color: #ffffff; font-size: 11px;\">1. %s</b> <span style=\"color: #64748b; font-size: 10px;\">(PID %d)</span></td>"
-            "<td align=\"right\"><b style=\"color: #f43f5e; font-size: 12px;\">%u.%u W</b> <span style=\"color: #cbd5e1; font-size: 10px;\">(%u%%)</span></td></tr>",
-            state.culprits[0].comm, state.culprits[0].pid, c1_w, c1_f, c1_pct);
+            "<tr><td width=\"36%%\"><b style=\"color: #ffffff; font-size: 11px;\">1. %s</b> <span style=\"color: #64748b; font-size: 9px;\">PID %d</span></td>"
+            "<td width=\"38%%\"><img src=\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='7'><rect width='140' height='7' fill='%%232d1233' rx='2'/><rect width='%u' height='7' fill='%%23f43f5e' rx='2'/></svg>\"/></td>"
+            "<td align=\"right\" width=\"26%%\"><b style=\"color: #f43f5e; font-size: 11px;\">%u.%u W</b> <span style=\"color: #cbd5e1; font-size: 10px;\">(%u%%)</span></td></tr>",
+            state.culprits[0].comm, state.culprits[0].pid, c1_bar_w, c1_w, c1_f, c1_pct);
     } else {
         std::snprintf(top1_buf, sizeof(top1_buf),
-            "<tr><td colspan=\"2\"><span style=\"color: #94a3b8; font-size: 10px;\"><i>시스템 안정 상태 (과다 점유 프로세스 없음)</i></span></td></tr>");
+            "<tr><td colspan=\"3\"><span style=\"color: #94a3b8; font-size: 10px;\"><i>시스템 안정 상태 (과다 점유 프로세스 없음)</i></span></td></tr>");
     }
 
     if (state.culprits[1].comm[0]) {
         unsigned int c2_w = state.culprits[1].drain_mw / 1000;
         unsigned int c2_f = (state.culprits[1].drain_mw % 1000) / 100;
         unsigned int c2_pct = (state.system_drain_mw > 0) ? (state.culprits[1].drain_mw * 100 / state.system_drain_mw) : 0;
+        unsigned int c2_bar_w = std::clamp(c2_pct * 140 / 100, 2u, 140u);
         std::snprintf(top2_buf, sizeof(top2_buf),
-            "<tr><td><b style=\"color: #ffffff; font-size: 11px;\">2. %s</b> <span style=\"color: #64748b; font-size: 10px;\">(PID %d)</span></td>"
-            "<td align=\"right\"><b style=\"color: #fb923c; font-size: 12px;\">%u.%u W</b> <span style=\"color: #cbd5e1; font-size: 10px;\">(%u%%)</span></td></tr>",
-            state.culprits[1].comm, state.culprits[1].pid, c2_w, c2_f, c2_pct);
+            "<tr><td><b style=\"color: #ffffff; font-size: 11px;\">2. %s</b> <span style=\"color: #64748b; font-size: 9px;\">PID %d</span></td>"
+            "<td><img src=\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='7'><rect width='140' height='7' fill='%%232d1233' rx='2'/><rect width='%u' height='7' fill='%%23fb923c' rx='2'/></svg>\"/></td>"
+            "<td align=\"right\"><b style=\"color: #fb923c; font-size: 11px;\">%u.%u W</b> <span style=\"color: #cbd5e1; font-size: 10px;\">(%u%%)</span></td></tr>",
+            state.culprits[1].comm, state.culprits[1].pid, c2_bar_w, c2_w, c2_f, c2_pct);
     }
 
     char mitig_buf[64]{};
     if (state.active_mitigations > 0) {
         std::snprintf(mitig_buf, sizeof(mitig_buf), "실시간 가동 중 (%u개 제어)", state.active_mitigations);
     } else {
-        std::snprintf(mitig_buf, sizeof(mitig_buf), "정상 감시 (Zero-Wakeup)");
+        std::snprintf(mitig_buf, sizeof(mitig_buf), "Zero-Wakeup ACTIVE");
     }
 
     std::snprintf(out_desc, desc_cap,
-        "<table width=\"100%%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse: collapse;\">"
-        "<tr><td style=\"padding: 6px 10px; background-color: #111c33; border: 1px solid #1e3a5f; border-radius: 6px;\">"
-        "<table width=\"100%%\" cellspacing=\"0\" cellpadding=\"0\">"
-        "<tr><td>"
-        "<span style=\"color: #64748b; font-size: 10px; font-weight: bold;\">⚡ WattCurb Power Intelligence &nbsp;•&nbsp; 전원 상태</span><br/>"
-        "<b style=\"color: %s; font-size: 14px;\">%u%%</b> "
-        "<span style=\"color: %s; font-size: 11px;\">[%s]</span>"
-        "<b style=\"color: #38bdf8; font-size: 11px;\"> &nbsp;%s</b>"
-        "<span style=\"color: #94a3b8; font-size: 10px;\"> (건강도 %u%% · %s)</span>"
+        "<table width=\"100%%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse: collapse; font-family: 'Segoe UI', Noto Sans, sans-serif;\">"
+        "<tr><td style=\"padding-bottom: 4px;\">"
+        "<table width=\"100%%\" cellspacing=\"0\" cellpadding=\"0\"><tr>"
+        "<td><span style=\"color: #00f0ff; font-weight: 900; font-size: 13px; letter-spacing: 1px;\">⚡ WATTCURB // CYBER HUD</span>"
+        "&nbsp;<span style=\"color: #10b981; font-weight: bold; font-size: 9px; background: #064e3b; padding: 2px 5px; border-radius: 3px;\">● REALTIME</span></td>"
+        "<td align=\"right\"><span style=\"color: #64748b; font-size: 10px; font-weight: bold;\">TOTAL: </span>"
+        "<span style=\"color: #f59e0b; font-size: 15px; font-weight: 900;\">%u.%u W</span></td>"
+        "</tr></table>"
+        "</td></tr>"
+        "<tr><td style=\"background: #111a2e; padding: 5px 8px; border: 1px solid #1e3a5f; border-radius: 5px;\">"
+        "<table width=\"100%%\" cellspacing=\"0\" cellpadding=\"0\"><tr>"
+        "<td width=\"65%%\">"
+        "<span style=\"color: #64748b; font-size: 9px; font-weight: bold;\">⚡ WattCurb Power Intelligence &nbsp;•&nbsp; 배터리</span><br/>"
+        "%s"
         "</td>"
         "<td align=\"right\" valign=\"center\">"
-        "<span style=\"color: #64748b; font-size: 10px;\">총 소비 전력</span><br/>"
-        "<b style=\"color: #f59e0b; font-size: 15px;\">%u.%u W</b>"
+        "<b style=\"color: %s; font-size: 13px;\">%u%%</b>"
+        "<span style=\"color: #38bdf8; font-size: 10px; font-weight: bold;\"> &nbsp;%s</span><br/>"
+        "<span style=\"color: #94a3b8; font-size: 9px;\">건강도 %u%% · %s</span>"
+        "</td>"
+        "</tr></table>"
         "</td></tr>"
-        "</table>"
-        "</td></tr>"
-        "<tr><td height=\"5\"></td></tr>"
+        "<tr><td height=\"4\"></td></tr>"
         "<tr><td>"
-        "<table width=\"100%%\" cellspacing=\"3\" cellpadding=\"4\" style=\"border-collapse: separate;\">"
+        "<table width=\"100%%\" cellspacing=\"2\" cellpadding=\"3\" style=\"border-collapse: separate;\">"
         "<tr>"
-        "<td width=\"50%%\" style=\"background-color: #0f172a; border: 1px solid #1e293b; border-radius: 4px;\">"
-        "<span style=\"color: #64748b; font-size: 10px; font-weight: bold;\">CPU 연산 도메인</span><br/>"
-        "<b style=\"color: #38bdf8; font-size: 13px;\">%u.%u W</b>"
-        "<span style=\"color: %s; font-size: 10px;\"> &nbsp;(%u°C · %u RPM)</span>"
+        "<td width=\"50%%\" style=\"background: #0d1527; border: 1px solid #1e293b; border-left: 3px solid #00f0ff; border-radius: 4px;\">"
+        "<span style=\"color: #64748b; font-size: 9px; font-weight: bold;\">CPU 연산 도메인</span><br/>"
+        "<b style=\"color: #00f0ff; font-size: 13px;\">%u.%u W</b>"
+        "<span style=\"color: %s; font-size: 10px; font-weight: bold;\"> &nbsp;%u°C</span>"
+        "<span style=\"color: #64748b; font-size: 10px;\"> · %u RPM</span>"
         "</td>"
-        "<td width=\"50%%\" style=\"background-color: #0f172a; border: 1px solid #1e293b; border-radius: 4px;\">"
-        "<span style=\"color: #64748b; font-size: 10px; font-weight: bold;\">GPU 실리콘</span><br/>"
-        "<b style=\"color: #34d399; font-size: 13px;\">%u.%u W</b>"
-        "<span style=\"color: #94a3b8; font-size: 10px;\"> &nbsp;(%s)</span>"
+        "<td width=\"50%%\" style=\"background: #0d1527; border: 1px solid #1e293b; border-left: 3px solid #10b981; border-radius: 4px;\">"
+        "<span style=\"color: #64748b; font-size: 9px; font-weight: bold;\">GPU 실리콘 도메인</span><br/>"
+        "<b style=\"color: #10b981; font-size: 13px;\">%u.%u W</b>"
+        "<span style=\"color: #38bdf8; font-size: 10px; font-weight: bold;\"> &nbsp;%s</span>"
         "</td>"
         "</tr>"
         "<tr>"
-        "<td width=\"50%%\" style=\"background-color: #0f172a; border: 1px solid #1e293b; border-radius: 4px;\">"
-        "<span style=\"color: #64748b; font-size: 10px; font-weight: bold;\">플랫폼 & DRAM / IO</span><br/>"
+        "<td width=\"50%%\" style=\"background: #0d1527; border: 1px solid #1e293b; border-left: 3px solid #a855f7; border-radius: 4px;\">"
+        "<span style=\"color: #64748b; font-size: 9px; font-weight: bold;\">플랫폼 & DRAM / IO</span><br/>"
         "<b style=\"color: #e2e8f0; font-size: 13px;\">%u.%u W</b>"
-        "<span style=\"color: #94a3b8; font-size: 10px;\"> &nbsp;(LPDDR / APST 절전)</span>"
+        "<span style=\"color: #64748b; font-size: 10px;\"> &nbsp;LPDDR5X / APST</span>"
         "</td>"
-        "<td width=\"50%%\" style=\"background-color: #0f172a; border: 1px solid #1e293b; border-radius: 4px;\">"
-        "<span style=\"color: #64748b; font-size: 10px; font-weight: bold;\">C-State 심층 수면율</span><br/>"
-        "<b style=\"color: #a78bfa; font-size: 13px;\">%u%% C3</b>"
-        "<span style=\"color: #94a3b8; font-size: 10px;\"> &nbsp;(웨이크업 %u/s)</span>"
+        "<td width=\"50%%\" style=\"background: #0d1527; border: 1px solid #1e293b; border-left: 3px solid #6366f1; border-radius: 4px;\">"
+        "<span style=\"color: #64748b; font-size: 9px; font-weight: bold;\">심층 수면 & 웨이크업</span><br/>"
+        "<b style=\"color: #a855f7; font-size: 13px;\">%u%% C3</b>"
+        "<span style=\"color: #64748b; font-size: 10px;\"> &nbsp;%u/s · RAPL</span>"
         "</td>"
         "</tr>"
         "</table>"
         "</td></tr>"
-        "<tr><td height=\"5\"></td></tr>"
-        "<tr><td style=\"padding: 5px 8px; background-color: #1a1025; border: 1px solid #4a1d48; border-radius: 5px;\">"
-        "<span style=\"color: #f43f5e; font-size: 10px; font-weight: bold;\">⚡ 실시간 전력 최다 점유 프로세스 (Top Culprits)</span>"
+        "<tr><td height=\"4\"></td></tr>"
+        "<tr><td style=\"padding: 5px 8px; background: #160d24; border: 1px solid #4a1d48; border-radius: 5px;\">"
+        "<span style=\"color: #f43f5e; font-size: 9px; font-weight: 900; letter-spacing: 0.5px;\">⚡ ENERGY DRAIN CULPRITS (실시간 최다 소비)</span>"
         "<table width=\"100%%\" cellspacing=\"0\" cellpadding=\"1\" style=\"margin-top: 2px;\">"
         "%s"
         "%s"
         "</table>"
         "</td></tr>"
-        "<tr><td height=\"5\"></td></tr>"
+        "<tr><td height=\"4\"></td></tr>"
         "<tr><td style=\"padding: 2px 4px;\">"
-        "<table width=\"100%%\" cellspacing=\"0\" cellpadding=\"0\">"
-        "<tr><td>"
-        "<span style=\"color: #64748b; font-size: 10px;\">전원 프로필: </span>"
-        "<b style=\"color: #00e5ff; font-size: 11px;\">%s</b>"
-        "</td>"
-        "<td align=\"right\">"
-        "<span style=\"color: #64748b; font-size: 10px;\">스마트 억제 엔진: </span>"
-        "<b style=\"color: #10b981; font-size: 11px;\">%s</b>"
-        "</td></tr>"
-        "</table>"
+        "<table width=\"100%%\" cellspacing=\"0\" cellpadding=\"0\"><tr>"
+        "<td><span style=\"color: #64748b; font-size: 9px; font-weight: bold;\">PROFILE: </span>"
+        "<b style=\"color: #00f0ff; font-size: 10px;\">%s</b></td>"
+        "<td align=\"right\"><span style=\"color: #64748b; font-size: 9px; font-weight: bold;\">ENGINE: </span>"
+        "<b style=\"color: #10b981; font-size: 10px;\">%s</b></td>"
+        "</tr></table>"
         "</td></tr>"
         "</table>",
-        bat_color, state.battery_percent, bat_color, bat_bar, status_kr, state.battery_health_percent, time_buf,
         sys_w, sys_frac,
+        bat_svg,
+        bat_color, state.battery_percent, status_kr, state.battery_health_percent, time_buf,
         cpu_w, cpu_frac, temp_color, state.cpu_temp_c, state.fan_rpm,
         gpu_w, gpu_frac, gpu_status,
         plat_w, plat_frac,
@@ -508,7 +510,7 @@ int TrayClient::property_get_tooltip(sd_bus*, const char*, const char*, const ch
     resolve_icon_name(state, icon, sizeof(icon));
 
     char title[128]{};
-    char desc[4096]{};
+    char desc[8192]{};
     render_tooltip(state, title, sizeof(title), desc, sizeof(desc));
 
     // Open structure (sa(iiay)ss)
@@ -573,7 +575,19 @@ int TrayClient::property_get_xayatana_label_guide(sd_bus*, const char*, const ch
 
 int TrayClient::method_activate(sd_bus_message*, void* userdata, sd_bus_error*) {
     auto* self = static_cast<TrayClient*>(userdata);
-    self->cycle_power_profile();
+    (void)self;
+    // Instant launch/focus of native KDE Plasma 6 Dashboard on Left-Click (REF-REQ-042)
+    pid_t pid = ::fork();
+    if (pid == 0) {
+        ::setsid();
+        const char* dash_bin = "/home/jedclub/.local/bin/wattcurb-dashboard";
+        if (::access(dash_bin, X_OK) == 0) {
+            ::execl(dash_bin, "wattcurb-dashboard", nullptr);
+        } else {
+            ::execlp("wattcurb-dashboard", "wattcurb-dashboard", nullptr);
+        }
+        ::_exit(0);
+    }
     return 0;
 }
 
