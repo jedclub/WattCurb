@@ -72,6 +72,12 @@ class DashboardBackend : public QObject {
     Q_PROPERTY(double batteryNowWh READ batteryNowWh NOTIFY telemetryChanged)
     Q_PROPERTY(QString aspmPolicy READ aspmPolicy NOTIFY telemetryChanged)
 
+    // Real-Time Hardware Telemetry History Streams (REF-REQ-040)
+    Q_PROPERTY(QVariantList systemHistory READ systemHistory NOTIFY historyChanged)
+    Q_PROPERTY(QVariantList cpuHistory READ cpuHistory NOTIFY historyChanged)
+    Q_PROPERTY(QVariantList gpuHistory READ gpuHistory NOTIFY historyChanged)
+    Q_PROPERTY(double peakSystemWatts READ peakSystemWatts NOTIFY historyChanged)
+
     // btop-Style Detailed Process List (Top 12 with Exhaustive Hover Telemetry)
     Q_PROPERTY(QVariantList processList READ processList NOTIFY processListChanged)
 
@@ -82,6 +88,11 @@ class DashboardBackend : public QObject {
 public:
     explicit DashboardBackend(QObject* parent = nullptr);
     ~DashboardBackend() override;
+
+    QVariantList systemHistory() const { return system_history_; }
+    QVariantList cpuHistory() const { return cpu_history_; }
+    QVariantList gpuHistory() const { return gpu_history_; }
+    double peakSystemWatts() const noexcept { return peak_system_w_; }
 
     // Getters
     double systemDrainWatts() const noexcept;
@@ -152,6 +163,7 @@ signals:
     void profileChanged();
     void processListChanged();
     void rescanStatusChanged();
+    void historyChanged();
 
 private slots:
     void onPollTimer();
@@ -171,6 +183,12 @@ private:
     QTimer* poll_timer_{nullptr};
     bool is_rescanning_{false};
     QString last_update_time_{"Just now"};
+
+    // Telemetry History Window (REF-REQ-040)
+    QVariantList system_history_{};
+    QVariantList cpu_history_{};
+    QVariantList gpu_history_{};
+    double peak_system_w_{15.0};
 
     // Extended Telemetry Cache
     double battery_voltage_v_{11.49};

@@ -31,6 +31,17 @@ DashboardBackend::DashboardBackend(QObject* parent)
     }
     last_update_time_ = QDateTime::currentDateTime().toString("hh:mm:ss");
 
+    // Initialize 35-sample history streams (REF-REQ-040)
+    double init_sys = systemDrainWatts();
+    double init_cpu = cpuDrainWatts();
+    double init_gpu = gpuDrainWatts();
+    peak_system_w_ = std::max(15.0, init_sys * 1.2);
+    for (int i = 0; i < 35; ++i) {
+        system_history_.append(init_sys);
+        cpu_history_.append(init_cpu);
+        gpu_history_.append(init_gpu);
+    }
+
     // 1-second live telemetry poll timer (ultra-low overhead)
     poll_timer_ = new QTimer(this);
     connect(poll_timer_, &QTimer::timeout, this, &DashboardBackend::onPollTimer);
@@ -83,8 +94,26 @@ void DashboardBackend::onPollTimer() {
 
     last_update_time_ = QDateTime::currentDateTime().toString("hh:mm:ss");
 
+    // Update live history sliding windows (35 samples)
+    double cur_sys_w = systemDrainWatts();
+    double cur_cpu_w = cpuDrainWatts();
+    double cur_gpu_w = gpuDrainWatts();
+
+    if (cur_sys_w > peak_system_w_) {
+        peak_system_w_ = cur_sys_w;
+    }
+
+    system_history_.append(cur_sys_w);
+    cpu_history_.append(cur_cpu_w);
+    gpu_history_.append(cur_gpu_w);
+
+    while (system_history_.size() > 35) system_history_.removeFirst();
+    while (cpu_history_.size() > 35) cpu_history_.removeFirst();
+    while (gpu_history_.size() > 35) gpu_history_.removeFirst();
+
     emit telemetryChanged();
     emit processListChanged();
+    emit historyChanged();
 }
 
 bool DashboardBackend::queryDaemonTelemetry() noexcept {
