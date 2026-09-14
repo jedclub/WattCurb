@@ -29,39 +29,12 @@ ApplicationWindow {
     readonly property color colPurple: "#a855f7"
     readonly property color colBlue: "#3b82f6"
 
-    // Hover & Pinned Deep Inspection State (REF-REQ-038)
+    // Pure Responsive Hover Inspection State (REF-REQ-038)
     property bool hoverVisible: false
-    property bool hoverPinned: false
     property string hoverType: "" // "process", "cpu", "battery", "gpu"
     property var hoverData: null
     property real hoverTargetX: 0
     property real hoverTargetY: 0
-
-    Shortcut {
-        sequence: "Escape"
-        onActivated: {
-            root.hoverPinned = false;
-            root.hoverVisible = false;
-        }
-    }
-
-    // Initial inspection for top runaway process (REF-REQ-038)
-    Timer {
-        id: autoInspectTimer
-        interval: 350
-        running: true
-        repeat: false
-        onTriggered: {
-            if (backend.processList.length > 0 && !root.hoverVisible) {
-                root.hoverType = "process";
-                root.hoverData = backend.processList[0];
-                root.hoverTargetX = root.width * 0.52;
-                root.hoverTargetY = 220;
-                root.hoverVisible = true;
-                root.hoverPinned = true;
-            }
-        }
-    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -203,40 +176,20 @@ ApplicationWindow {
                         id: cpuMa
                         anchors.fill: parent
                         hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            if (root.hoverPinned && root.hoverType === "cpu") {
-                                root.hoverPinned = false;
-                                root.hoverVisible = false;
-                            } else {
-                                var pos = mapToItem(root.contentItem, mouseX, mouseY);
-                                root.hoverTargetX = pos.x;
-                                root.hoverTargetY = pos.y;
-                                root.hoverType = "cpu";
-                                root.hoverVisible = true;
-                                root.hoverPinned = true;
-                            }
-                        }
                         onEntered: {
-                            if (!root.hoverPinned) {
-                                var pos = mapToItem(root.contentItem, mouseX, mouseY);
-                                root.hoverTargetX = pos.x;
-                                root.hoverTargetY = pos.y;
-                                root.hoverType = "cpu";
-                                root.hoverVisible = true;
-                            }
+                            var pos = mapToItem(root.contentItem, mouseX, mouseY);
+                            root.hoverTargetX = pos.x;
+                            root.hoverTargetY = pos.y;
+                            root.hoverType = "cpu";
+                            root.hoverVisible = true;
                         }
                         onPositionChanged: {
-                            if (!root.hoverPinned) {
-                                var pos = mapToItem(root.contentItem, mouseX, mouseY);
-                                root.hoverTargetX = pos.x;
-                                root.hoverTargetY = pos.y;
-                            }
+                            var pos = mapToItem(root.contentItem, mouseX, mouseY);
+                            root.hoverTargetX = pos.x;
+                            root.hoverTargetY = pos.y;
                         }
                         onExited: {
-                            if (!root.hoverPinned) {
-                                root.hoverVisible = false;
-                            }
+                            root.hoverVisible = false;
                         }
                     }
 
@@ -362,40 +315,20 @@ ApplicationWindow {
                         id: batMa
                         anchors.fill: parent
                         hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            if (root.hoverPinned && root.hoverType === "battery") {
-                                root.hoverPinned = false;
-                                root.hoverVisible = false;
-                            } else {
-                                var pos = mapToItem(root.contentItem, mouseX, mouseY);
-                                root.hoverTargetX = pos.x;
-                                root.hoverTargetY = pos.y;
-                                root.hoverType = "battery";
-                                root.hoverVisible = true;
-                                root.hoverPinned = true;
-                            }
-                        }
                         onEntered: {
-                            if (!root.hoverPinned) {
-                                var pos = mapToItem(root.contentItem, mouseX, mouseY);
-                                root.hoverTargetX = pos.x;
-                                root.hoverTargetY = pos.y;
-                                root.hoverType = "battery";
-                                root.hoverVisible = true;
-                            }
+                            var pos = mapToItem(root.contentItem, mouseX, mouseY);
+                            root.hoverTargetX = pos.x;
+                            root.hoverTargetY = pos.y;
+                            root.hoverType = "battery";
+                            root.hoverVisible = true;
                         }
                         onPositionChanged: {
-                            if (!root.hoverPinned) {
-                                var pos = mapToItem(root.contentItem, mouseX, mouseY);
-                                root.hoverTargetX = pos.x;
-                                root.hoverTargetY = pos.y;
-                            }
+                            var pos = mapToItem(root.contentItem, mouseX, mouseY);
+                            root.hoverTargetX = pos.x;
+                            root.hoverTargetY = pos.y;
                         }
                         onExited: {
-                            if (!root.hoverPinned) {
-                                root.hoverVisible = false;
-                            }
+                            root.hoverVisible = false;
                         }
                     }
 
@@ -585,42 +518,21 @@ ApplicationWindow {
                                 id: rowMa
                                 anchors.fill: parent
                                 hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    if (root.hoverPinned && root.hoverType === "process" && root.hoverData === modelData) {
-                                        root.hoverPinned = false;
-                                        root.hoverVisible = false;
-                                    } else {
-                                        var pos = mapToItem(root.contentItem, mouseX, mouseY);
-                                        root.hoverTargetX = pos.x;
-                                        root.hoverTargetY = pos.y;
-                                        root.hoverType = "process";
-                                        root.hoverData = modelData;
-                                        root.hoverVisible = true;
-                                        root.hoverPinned = true;
-                                    }
-                                }
                                 onEntered: {
-                                    if (!root.hoverPinned) {
-                                        var pos = mapToItem(root.contentItem, mouseX, mouseY);
-                                        root.hoverTargetX = pos.x;
-                                        root.hoverTargetY = pos.y;
-                                        root.hoverType = "process";
-                                        root.hoverData = modelData;
-                                        root.hoverVisible = true;
-                                    }
+                                    var pos = mapToItem(root.contentItem, mouseX, mouseY);
+                                    root.hoverTargetX = pos.x;
+                                    root.hoverTargetY = pos.y;
+                                    root.hoverType = "process";
+                                    root.hoverData = modelData;
+                                    root.hoverVisible = true;
                                 }
                                 onPositionChanged: {
-                                    if (!root.hoverPinned) {
-                                        var pos = mapToItem(root.contentItem, mouseX, mouseY);
-                                        root.hoverTargetX = pos.x;
-                                        root.hoverTargetY = pos.y;
-                                    }
+                                    var pos = mapToItem(root.contentItem, mouseX, mouseY);
+                                    root.hoverTargetX = pos.x;
+                                    root.hoverTargetY = pos.y;
                                 }
                                 onExited: {
-                                    if (!root.hoverPinned) {
-                                        root.hoverVisible = false;
-                                    }
+                                    root.hoverVisible = false;
                                 }
                             }
 
@@ -899,9 +811,14 @@ ApplicationWindow {
         width: root.hoverType === "process" ? 440 : 380
         height: root.hoverType === "process" ? 300 : 210
 
-        // Smart Edge Clamping: Ensure hover card never overflows the window borders
-        x: Math.min(root.width - width - 12, Math.max(12, root.hoverTargetX - (root.hoverTargetX > root.width * 0.6 ? (width + 10) : -15)))
-        y: Math.min(root.height - height - 12, Math.max(12, root.hoverTargetY - (root.hoverTargetY > root.height * 0.6 ? (height + 10) : -15)))
+        // Pass through mouse events so hoverCard never steals focus from underlying rows
+        enabled: false
+
+        // Smart Edge Clamping & Cursor-relative Offset: Ensure card never overlaps the mouse cursor
+        x: root.hoverType === "process" 
+           ? Math.max(16, root.hoverTargetX - width - 20)
+           : Math.min(root.width - width - 16, root.hoverTargetX + 25)
+        y: Math.min(root.height - height - 16, Math.max(16, root.hoverTargetY - height / 2))
 
         // Modern Glassmorphism Cyber Card
         color: "#151b24"
@@ -919,51 +836,6 @@ ApplicationWindow {
             border.width: 1
             opacity: 0.4
             z: -1
-        }
-
-        // Pinned Indicator & Close Button (REF-REQ-038)
-        RowLayout {
-            anchors.top: parent.top
-            anchors.right: parent.right
-            anchors.margins: 6
-            spacing: 4
-            z: 1000
-
-            Rectangle {
-                visible: root.hoverPinned
-                width: 58; height: 16; radius: 3
-                color: "#2a1e12"
-                border.color: root.colOrange
-                Text {
-                    anchors.centerIn: parent
-                    text: "📌 PINNED"
-                    color: root.colOrange
-                    font.pixelSize: 8
-                    font.bold: true
-                }
-            }
-
-            Rectangle {
-                width: 16; height: 16; radius: 3
-                color: closeHoverMa.containsMouse ? "#ef4444" : "#222a36"
-                Text {
-                    anchors.centerIn: parent
-                    text: "✕"
-                    color: "#ffffff"
-                    font.pixelSize: 9
-                    font.bold: true
-                }
-                MouseArea {
-                    id: closeHoverMa
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        root.hoverPinned = false;
-                        root.hoverVisible = false;
-                    }
-                }
-            }
         }
 
         // =========================================================
