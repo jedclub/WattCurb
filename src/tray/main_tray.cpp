@@ -24,6 +24,7 @@ int main(int argc, char* argv[]) {
     sigaction(SIGINT, &sa, nullptr);
     sigaction(SIGTERM, &sa, nullptr);
     sigaction(SIGHUP, &sa, nullptr);
+    std::signal(SIGCHLD, SIG_IGN); // Automatically reap forked children
 
     wattcurb::tray::TrayClient client;
     g_tray_client = &client;
