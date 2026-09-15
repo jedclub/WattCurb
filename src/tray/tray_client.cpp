@@ -275,11 +275,15 @@ void TrayClient::render_tooltip(
     char cpu_bar[48]{};
     build_unicode_bar(cpu_bar, sizeof(cpu_bar), cpu_pct, 8);
 
+    unsigned int gpu_pct = std::clamp(static_cast<unsigned int>(state.gpu_drain_mw * 100 / sys_mw), 0u, 100u);
+    char gpu_bar[48]{};
+    build_unicode_bar(gpu_bar, sizeof(gpu_bar), gpu_pct, 8);
+
     char sign = (state.battery_state == 2) ? '+' : (state.battery_state == 0 ? '+' : '-');
     unsigned int freq_ghz = state.cpu_freq_mhz / 1000;
     unsigned int freq_mhz_frac = (state.cpu_freq_mhz % 1000) / 10;
 
-    // Top 2 processes in single line
+    // Top 2 processes in single compact line
     char culprits_line[512]{};
     if (state.culprits[0].comm[0] && state.culprits[1].comm[0]) {
         unsigned int c1_w = state.culprits[0].drain_mw / 1000;
@@ -287,56 +291,49 @@ void TrayClient::render_tooltip(
         unsigned int c2_w = state.culprits[1].drain_mw / 1000;
         unsigned int c2_f = (state.culprits[1].drain_mw % 1000) / 100;
         std::snprintf(culprits_line, sizeof(culprits_line),
-            "• 톱소비: <font color=\"#ffffff\"><b>%.12s</b></font> <font color=\"#f43f5e\"><b>%u.%u W</b></font> | <font color=\"#ffffff\"><b>%.12s</b></font> <font color=\"#fb923c\"><b>%u.%u W</b></font>",
+            "<font color=\"#ffffff\"><b>%.12s</b></font> <font color=\"#f43f5e\">%u.%u W</font> <font color=\"#475569\">·</font> <font color=\"#ffffff\"><b>%.12s</b></font> <font color=\"#fb923c\">%u.%u W</font>",
             state.culprits[0].comm, c1_w, c1_f, state.culprits[1].comm, c2_w, c2_f);
     } else if (state.culprits[0].comm[0]) {
         unsigned int c1_w = state.culprits[0].drain_mw / 1000;
         unsigned int c1_f = (state.culprits[0].drain_mw % 1000) / 100;
         std::snprintf(culprits_line, sizeof(culprits_line),
-            "• 톱소비: <font color=\"#ffffff\"><b>%.12s</b></font> <font color=\"#f43f5e\"><b>%u.%u W</b></font> (단독 부하)",
+            "<font color=\"#ffffff\"><b>%.12s</b></font> <font color=\"#f43f5e\">%u.%u W</font>",
             state.culprits[0].comm, c1_w, c1_f);
     } else {
         std::snprintf(culprits_line, sizeof(culprits_line),
-            "• 톱소비: <font color=\"#94a3b8\"><i>시스템 유휴 안정 (특이 누수 없음)</i></font>");
+            "<font color=\"#94a3b8\"><i>유휴 안정 (누수 없음)</i></font>");
     }
 
-    char bat_detail[128]{};
+    char bat_detail[64]{};
     if (state.battery_state == 1) {
         if (state.time_to_empty_min > 0) {
-            std::snprintf(bat_detail, sizeof(bat_detail), "%u분 남음 · 수명 %u%% · %u RPM",
-                          state.time_to_empty_min, state.battery_health_percent, state.fan_rpm);
+            std::snprintf(bat_detail, sizeof(bat_detail), "%u분 남음", state.time_to_empty_min);
         } else {
-            std::snprintf(bat_detail, sizeof(bat_detail), "방전 중 · 수명 %u%% · %u RPM",
-                          state.battery_health_percent, state.fan_rpm);
+            std::snprintf(bat_detail, sizeof(bat_detail), "방전 중");
         }
     } else if (state.battery_state == 2) {
-        std::snprintf(bat_detail, sizeof(bat_detail), "완충 AC 직결 · 수명 %u%% · %u RPM",
-                      state.battery_health_percent, state.fan_rpm);
+        std::snprintf(bat_detail, sizeof(bat_detail), "완충 AC 직결");
     } else {
-        std::snprintf(bat_detail, sizeof(bat_detail), "충전 중 (완충 시 자동보호) · %u RPM",
-                      state.fan_rpm);
+        std::snprintf(bat_detail, sizeof(bat_detail), "충전 중");
     }
 
-    // Exact 6 lines formatted to guarantee 0 line-wraps inside Plasma 6's maximumLineCount: 8 limit:
-    // Line 1: HUD Live Title & Total Watts
-    // Line 2: Battery Level, Bar, Detail (Charging/Discharging/AC Direct, Health, RPM)
-    // Line 3: CPU Wattage, %, Bar, Clock GHz, Temp °C
-    // Line 4: GPU & Platform Wattage & C3 Sleep %
-    // Line 5: Top 2 Energy Drain Culprits
-    // Line 6: Active Profile & PipeWire Audio Realtime Status
+    // Ref-Req-050: Clean, fixed-column progressive bar layout.
+    // Every line starts with a fixed-width 4-character prefix (BAT , CPU , GPU , TOP , SYS ),
+    // immediately followed by the fixed-width progressive bar [████░░░░], preventing any horizontal jitter.
+    // Wrapped in <nobr> to strictly eliminate word-wrapping in KDE Plasma.
     std::snprintf(out_desc, desc_cap,
-        "<div style=\"font-family: 'JetBrains Mono', 'Hack', monospace; font-size: 11px; line-height: 1.25;\"><font size=\"2\">"
-        "<b><font color=\"#00f0ff\">⚡ WATTCURB CYBER HUD</font></b> <font color=\"#10b981\"><b>● LIVE</b></font> | <b><font color=\"#f59e0b\">%c%u.%u W</font></b><br/>"
-        "• 배터리: <font color=\"%s\"><b>%u%%</b></font> <font color=\"%s\"><b>[%s]</b></font> (%s)<br/>"
-        "• CPU연산: <b><font color=\"#00f0ff\">%u.%u W</font></b> <font color=\"#64748b\">(%2u%%)</font> <font color=\"#00f0ff\"><b>[%s]</b></font> <b><font color=\"#38bdf8\">%u.%02u GHz</font></b> <font color=\"%s\"><b>%u°C</b></font><br/>"
-        "• GPU/IO : <b><font color=\"#10b981\">%u.%u W GPU</font></b> | <b><font color=\"#e2e8f0\">%u.%u W IO</font></b> | <font color=\"#a855f7\"><b>%u%% C3슬립</b></font><br/>"
-        "%s<br/>"
-        "• 모드/RT: <b><font color=\"#00f0ff\">%s</font></b> | <font color=\"#10b981\"><b>PipeWire RT(-12)</b></font>"
+        "<div style=\"font-family: 'JetBrains Mono', 'Hack', monospace; font-size: 11px; line-height: 1.35;\"><font size=\"2\">"
+        "<nobr><b><font color=\"#00f0ff\">⚡ WATTCURB CYBER HUD</font></b> &nbsp;<font color=\"#10b981\">● LIVE</font> &nbsp;<font color=\"#475569\">|</font> &nbsp;<b><font color=\"#f59e0b\">%c%u.%u W</font></b></nobr><br/>"
+        "<nobr><font color=\"#64748b\">BAT</font> <font color=\"%s\"><b>[%s]</b></font> <font color=\"#ffffff\"><b>%2u%%</b></font> <font color=\"#475569\">·</font> <font color=\"%s\">%s</font> <font color=\"#475569\">·</font> <font color=\"#94a3b8\">%urpm</font></nobr><br/>"
+        "<nobr><font color=\"#64748b\">CPU</font> <font color=\"#00f0ff\"><b>[%s]</b></font> <font color=\"#ffffff\"><b>%2u%%</b></font> <font color=\"#475569\">·</font> <b><font color=\"#00f0ff\">%u.%u W</font></b> <font color=\"#475569\">·</font> <font color=\"#38bdf8\">%u.%02uGHz</font> <font color=\"%s\">%u°C</font></nobr><br/>"
+        "<nobr><font color=\"#64748b\">GPU</font> <font color=\"#a855f7\"><b>[%s]</b></font> <b><font color=\"#a855f7\">%u.%u W</font></b> <font color=\"#475569\">·</font> <font color=\"#cbd5e1\">C3 %u%%</font> <font color=\"#475569\">·</font> <font color=\"#94a3b8\">IO %u.%u W</font></nobr><br/>"
+        "<nobr><font color=\"#64748b\">TOP</font> %s</nobr><br/>"
+        "<nobr><font color=\"#64748b\">SYS</font> <b><font color=\"#00f0ff\">%s</font></b> <font color=\"#475569\">|</font> <font color=\"#10b981\">PipeWire RT(-12)</font></nobr>"
         "</font></div>",
         sign, sys_w, sys_frac,
-        bat_color, state.battery_percent, bat_color, bat_bar, bat_detail,
-        cpu_w, cpu_frac, cpu_pct, cpu_bar, freq_ghz, freq_mhz_frac, temp_color, state.cpu_temp_c,
-        gpu_w, gpu_frac, plat_w, plat_frac, state.cstate_c3_percent,
+        bat_color, bat_bar, state.battery_percent, bat_color, bat_detail, state.fan_rpm,
+        cpu_bar, cpu_pct, cpu_w, cpu_frac, freq_ghz, freq_mhz_frac, temp_color, state.cpu_temp_c,
+        gpu_bar, gpu_w, gpu_frac, state.cstate_c3_percent, plat_w, plat_frac,
         culprits_line,
         profile_short
     );

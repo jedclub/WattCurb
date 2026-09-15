@@ -25,20 +25,22 @@ Users observed that mouse-hovering over the WattCurb tray indicator failed to re
    - **CPU Core Frequency**: Real-time active clock read from `/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq`.
 2. All probing executes with zero dynamic heap allocation in < 5.0µs, guaranteeing instantaneous live feedback without latency.
 
-### 2.2 KDE Plasma 6 ToolTip Line Limit & Dense Monospace 6-Line Cyber HUD
-1. **KDE Plasma 6 `maximumLineCount: 8` Constraint**:
-   - Forensic analysis of `/usr/lib/qt6/qml/org/kde/plasma/core/DefaultToolTip.qml` revealed that KDE Plasma 6's native tooltip component strictly enforces `maximumLineCount: 8`.
-   - Tooltips exceeding 8 lines (or lines that soft-wrap due to excessive width) have trailing content abruptly truncated by Kirigami/QtQuick.
-2. **6-Line Zero-Wrap Cyber HUD Architecture**:
-   - To guarantee 100% telemetry visibility without truncation or soft line-wrapping, the tooltip is compressed into an exact 6-line layout (< 60 chars per line):
-     - **Line 1 (HUD Header)**: `⚡ WATTCURB CYBER HUD ● LIVE | ±X.X W`
-     - **Line 2 (Battery Domain)**: `• 배터리: XX% [████░░░░] (충전/방전/AC 직결 · 수명 XX% · XXXX RPM)`
-     - **Line 3 (CPU Computation)**: `• CPU연산: XX.X W (XX%) [███░░░░░] X.XX GHz XX°C`
-     - **Line 4 (GPU & Platform IO)**: `• GPU/IO : X.X W GPU | X.X W IO | XX% C3슬립`
-     - **Line 5 (Top Culprits)**: `• 톱소비: #1 process X.X W | #2 process X.X W`
-     - **Line 6 (Governor & Audio RT)**: `• 모드/RT: Performance (4.1G 언락) | PipeWire RT(-12)`
-3. Compact typography container:
-   `<div style="font-family: 'JetBrains Mono', 'Hack', monospace; font-size: 11px; line-height: 1.25;"><font size="2">`
+### 2.2 Fixed-Prefix Progressive Bar & `<nobr>` Zero-Wrap Cyber HUD
+1. **Fixed-Column Progressive Bar Alignment**:
+   - To eliminate erratic horizontal jumping caused by varying numerical string lengths (e.g. `5.0 W (26%)` vs `14.2 W (100%)`), the progressive bar is placed immediately after a fixed-width 4-character label (`BAT `, `CPU `, `GPU `, `TOP `, `SYS `).
+   - The progressive bar (`[████░░░░]`) is anchored strictly at column 5 across all telemetry rows, with numerical metrics and secondary details positioned cleanly after the bar.
+2. **KDE Plasma `<nobr>` Anti-Wrap Guarantee**:
+   - Every row is wrapped in `<nobr>...</nobr>` tags, preventing Qt/Kirigami's `Text.Wrap` engine from soft line-breaking.
+   - Total character length per line is restricted to under 38 characters to ensure comfortable rendering even within narrow system tray popups.
+3. **6-Line Layout Architecture**:
+   - **Line 1 (HUD Header)**: `⚡ WATTCURB CYBER HUD ● LIVE | ±X.X W`
+   - **Line 2 (Battery Domain)**: `BAT [██████░░] XX% · 충전 중/방전/완충 직결 · XXXXrpm`
+   - **Line 3 (CPU Computation)**: `CPU [██░░░░░░] XX% · X.X W · X.XXGHz XX°C`
+   - **Line 4 (GPU & Platform IO)**: `GPU [████░░░░] X.X W · C3 XX% · IO X.X W`
+   - **Line 5 (Top Culprits)**: `TOP #1_comm X.X W · #2_comm X.X W`
+   - **Line 6 (Governor & Audio RT)**: `SYS Profile_Name | PipeWire RT(-12)`
+4. Compact typography container:
+   `<div style="font-family: 'JetBrains Mono', 'Hack', monospace; font-size: 11px; line-height: 1.35;"><font size="2">`
 
 ### 2.3 1-Second Reactive Daemon & Tray Event Synchronization
 1. `wattcurb.service` default sampling period reduced to 3.0s (window: 1.0s) for continuous live daemon telemetry.

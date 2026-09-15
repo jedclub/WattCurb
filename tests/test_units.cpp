@@ -1720,7 +1720,7 @@ void test_thinkpower_tray_client() {
     TrayClient::render_tooltip(state, title, sizeof(title), desc, sizeof(desc));
     verify_utf8(title);
     verify_utf8(desc);
-    assert(std::string_view(desc).find("충전 중 (완충 시 자동보호)") != std::string_view::npos);
+    assert(std::string_view(desc).find("충전 중") != std::string_view::npos);
 
     state.battery_state = 2;
     TrayClient::render_tooltip(state, title, sizeof(title), desc, sizeof(desc));
