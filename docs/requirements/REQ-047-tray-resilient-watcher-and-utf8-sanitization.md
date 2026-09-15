@@ -38,9 +38,13 @@ When the host system reboots, the WattCurb tray client (`wattcurb-tray`) is expe
 - **Periodic Loop Re-Registration**:
   - Main event loop (`run()`) checks `watcher_registered_`. If false, attempts re-registration every 3 seconds until confirmed.
 
-### 2.3 Process Singleton Lock (`wattcurb-tray.lock`)
-- Uses Linux abstract UNIX domain socket lock (`core::SingletonLock`).
-- If another instance is running, the secondary instance exits cleanly with exit code 0.
+### 2.3 Comprehensive Singleton Mutual Exclusion Architecture (`SingletonLock`)
+WattCurb employs Linux Abstract UNIX Domain Sockets (`sun_path[0] == '\0'`) across all user-facing and daemon processes, providing kernel-guaranteed atomic mutual exclusion with zero filesystem footprint:
+- **No Stale Lock Files**: Because abstract sockets reside purely in kernel memory, unexpected crashes, kernel panics, or `SIGKILL` events immediately release the socket. No residual `.pid` or `.lock` files can ever block subsequent launches.
+- **Three-Tier Scope Enforcement**:
+  1. **Background Daemon (`wattcurb.lock`)**: Bound by `wattcurb::core::DaemonRunner`. Ensures strictly one background profiler daemon is active. Concurrent launches exit with code 1.
+  2. **System Tray Client (`wattcurb-tray.lock`)**: Bound by `wattcurb::tray::main`. Protects against concurrent launches from systemd user units, XDG desktop autostart, and manual terminal execution. Duplicate instances immediately terminate cleanly with code 0.
+  3. **Matrix Dashboard Window (`wattcurb-dashboard.lock`)**: Bound by `src/ui/main_dashboard.cpp`. Prevents rapid context menu clicks or script triggers from spawning multiple duplicate Qt Quick OpenGL/Vulkan rendering windows. Duplicate instances exit cleanly with code 0.
 
 ### 2.4 CMake Release Installation Targets
 - Enforces CMake `install(TARGETS wattcurb wattcurb-tray wattcurb-dashboard RUNTIME DESTINATION bin)`.

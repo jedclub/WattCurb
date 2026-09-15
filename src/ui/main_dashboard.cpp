@@ -5,8 +5,16 @@
 #include <QFileInfo>
 #include <iostream>
 #include "ui/dashboard_backend.hpp"
+#include "core/singleton_lock.hpp"
 
 int main(int argc, char* argv[]) {
+    // Enforce singleton dashboard window
+    wattcurb::core::SingletonLock dashboard_lock("wattcurb-dashboard.lock");
+    if (!dashboard_lock.is_locked()) {
+        std::cerr << "[!] WattCurb dashboard is already running. Exiting.\n";
+        return 0;
+    }
+
     // Zero-Wakeup GUI setup: Set environment hints for KDE Wayland/X11
     qputenv("QT_QUICK_CONTROLS_STYLE", "Basic");
 
