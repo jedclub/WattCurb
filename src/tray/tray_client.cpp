@@ -1,5 +1,6 @@
 #include "tray/tray_client.hpp"
 #include "core/posix_fs.hpp"
+#include "core/scoped_profiler.hpp"
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
@@ -105,6 +106,7 @@ bool TrayClient::setup_shm() noexcept {
 }
 
 bool TrayClient::read_state(ipc::WattCurbSharedState& out) const noexcept {
+    WATTCURB_PROFILE_SCOPE("tray.read_state");
     if (!shm_state_) return false;
     bool ok = shm_state_->read_atomic(out);
     if (ok && local_override_mode_ >= 0) {
@@ -172,6 +174,7 @@ static void sanitize_utf8_inplace(char* s) noexcept {
 }
 
 static void probe_live_sensors_on_hover(ipc::WattCurbSharedState& state) noexcept {
+    WATTCURB_PROFILE_SCOPE("tray.probe_live_sensors");
     // Implements REF-REQ-050: Sub-5us on-demand hardware telemetry probe upon mouse hover
     // 1. Live Battery Telemetry: /sys/class/power_supply/BAT0/uevent
     char ubuf[1024]{};
@@ -236,6 +239,7 @@ void TrayClient::render_tooltip(
     char* out_title, size_t title_cap,
     char* out_desc, size_t desc_cap
 ) noexcept {
+    WATTCURB_PROFILE_SCOPE("tray.render_tooltip");
     unsigned int sys_w = state.system_drain_mw / 1000;
     unsigned int sys_frac = (state.system_drain_mw % 1000) / 100;
 
@@ -346,6 +350,7 @@ void TrayClient::resolve_icon_name(
     const ipc::WattCurbSharedState& state,
     char* out_icon, size_t icon_cap
 ) noexcept {
+    WATTCURB_PROFILE_SCOPE("tray.resolve_icon");
     const char* prof = "balanced";
     if (state.power_profile_mode == 0) {
         prof = "performance";
@@ -589,6 +594,7 @@ int TrayClient::property_get_item_is_menu(sd_bus*, const char*, const char*, con
 }
 
 int TrayClient::property_get_icon_name(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*) {
+    WATTCURB_PROFILE_SCOPE("tray.property_get_icon");
     auto* self = static_cast<TrayClient*>(userdata);
     ipc::WattCurbSharedState state{};
     self->read_state(state);
@@ -600,6 +606,7 @@ int TrayClient::property_get_icon_name(sd_bus*, const char*, const char*, const 
 }
 
 int TrayClient::property_get_tooltip(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*) {
+    WATTCURB_PROFILE_SCOPE("tray.property_get_tooltip");
     auto* self = static_cast<TrayClient*>(userdata);
     ipc::WattCurbSharedState state{};
     self->read_state(state);

@@ -1,5 +1,6 @@
 #include "core/daemon_runner.hpp"
 #include "report/report_generator.hpp"
+#include "core/scoped_profiler.hpp"
 
 #include <chrono>
 #include <csignal>
@@ -139,38 +140,63 @@ bool DaemonRunner::initialize() {
 }
 
 void DaemonRunner::collect_observation_window() {
-    // 1. T0: Capture start baseline
-    auto hw_start = hw_probe_.capture_sample();
-    auto& start_snapshot = proc_pool_.current();
-    proc_analyzer_.capture_snapshot(start_snapshot);
+    WATTCURB_PROFILE_SCOPE("daemon.collect_window");
 
-    // 2. Continuous Observation Window (~5 seconds)
+    // 1. T0: Capture start baseline
+    decltype(hw_probe_.capture_sample()) hw_start{};
+    {
+        WATTCURB_PROFILE_SCOPE("daemon.hw_capture_start");
+        hw_start = hw_probe_.capture_sample();
+    }
+    auto& start_snapshot = proc_pool_.current();
+    {
+        WATTCURB_PROFILE_SCOPE("daemon.proc_snapshot_start");
+        proc_analyzer_.capture_snapshot(start_snapshot);
+    }
+
+    // 2. Continuous Observation Window (~1 to 5 seconds)
     auto sleep_us = static_cast<useconds_t>(window_sec_ * 1'000'000.0);
     ::usleep(sleep_us);
 
     // 3. T1: Capture end state
-    auto hw_end = hw_probe_.capture_sample();
+    decltype(hw_probe_.capture_sample()) hw_end{};
+    {
+        WATTCURB_PROFILE_SCOPE("daemon.hw_capture_end");
+        hw_end = hw_probe_.capture_sample();
+    }
     auto& end_snapshot = proc_pool_.next();
-    proc_analyzer_.capture_snapshot(end_snapshot, &start_snapshot);
+    {
+        WATTCURB_PROFILE_SCOPE("daemon.proc_snapshot_end");
+        proc_analyzer_.capture_snapshot(end_snapshot, &start_snapshot);
+    }
 
     // 4. Compute Full-Domain Physical Attribution
-    cached_report_ = engine_.compute_attribution(
-        hw_start,
-        hw_end,
-        start_snapshot.span(),
-        end_snapshot.span(),
-        20
-    );
+    {
+        WATTCURB_PROFILE_SCOPE("daemon.compute_attribution");
+        cached_report_ = engine_.compute_attribution(
+            hw_start,
+            hw_end,
+            start_snapshot.span(),
+            end_snapshot.span(),
+            20
+        );
+    }
 
     // 5. Modular Battery Optimization Feature Actuation (REF-REQ-020 & REF-ARCH-009)
-    bool on_battery = cached_report_.hardware.is_battery_discharging;
-    double batt_pct = static_cast<double>(cached_report_.hardware.battery_capacity_percent);
-    feature_manager_.evaluate_and_actuate(cached_report_, on_battery, batt_pct);
+    {
+        WATTCURB_PROFILE_SCOPE("daemon.evaluate_and_actuate");
+        bool on_battery = cached_report_.hardware.is_battery_discharging;
+        double batt_pct = static_cast<double>(cached_report_.hardware.battery_capacity_percent);
+        feature_manager_.evaluate_and_actuate(cached_report_, on_battery, batt_pct);
+    }
 
     // 6. Ultra-Fast 128-Byte Seqlock POD Export (REF-REQ-028, REF-ARCH-018)
-    local_shared_state_.update_from_report(cached_report_);
-    if (shm_state_ != nullptr) {
-        shm_state_->update_from_report(cached_report_);
+    {
+        WATTCURB_PROFILE_SCOPE("daemon.shm_update");
+        local_shared_state_.update_from_report(cached_report_);
+        if (shm_state_ != nullptr) {
+            shm_state_->update_from_report(cached_report_);
+        }
     }
 
     proc_pool_.swap(); // 0ns pointer swap

@@ -1,5 +1,6 @@
 #include "policy/mitigation_engine.hpp"
 #include "core/posix_fs.hpp"
+#include "core/scoped_profiler.hpp"
 #include <sched.h>
 #include <sys/syscall.h>
 #include <sys/resource.h>
@@ -158,6 +159,7 @@ bool MitigationEngine::resolve_cgroup_path(int32_t pid, char* out_buf, size_t ou
 }
 
 bool MitigationEngine::is_immune_process(int32_t pid) noexcept {
+    WATTCURB_PROFILE_SCOPE("mitig.is_immune");
     if (pid <= 1) return true;
 
     char comm_path[64];
@@ -187,6 +189,7 @@ bool MitigationEngine::is_immune_process(int32_t pid) noexcept {
 }
 
 void MitigationEngine::audit_and_heal_audio_stack() noexcept {
+    WATTCURB_PROFILE_SCOPE("mitig.audit_heal_audio");
     // Implements REF-REQ-049: Ultra-fast (< 50us) active self-healing of audio scheduler state
     uid_t uid = ::getuid();
     const char* services[] = {
@@ -436,6 +439,7 @@ bool MitigationEngine::restore_display_backlight() noexcept {
 }
 
 void MitigationEngine::rollback_all() noexcept {
+    WATTCURB_PROFILE_SCOPE("mitig.rollback_all");
     // Implements REF-REQ-031 Sec 3.2 & REF-REQ-049: Restore all mitigated processes and heal audio stack
     audit_and_heal_audio_stack();
 
@@ -464,6 +468,7 @@ void MitigationEngine::rollback_all() noexcept {
 }
 
 void MitigationEngine::thaw_all_frozen() noexcept {
+    WATTCURB_PROFILE_SCOPE("mitig.thaw_frozen");
     // Transition from UltraEndurance to PowerSaver: thaw cgroups and downgrade to SCHED_IDLE
     for (auto& tm : m_tracked) {
         if (tm.current_action == MitigationAction::CgroupFreeze) {
@@ -483,6 +488,7 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
     bool on_battery,
     double battery_pct
 ) noexcept {
+    WATTCURB_PROFILE_SCOPE("mitig.evaluate_actuate");
     // Implements REF-REQ-049: Guarantee audio stack is immune and healthy every cycle
     audit_and_heal_audio_stack();
 
