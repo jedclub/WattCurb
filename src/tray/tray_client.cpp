@@ -577,18 +577,17 @@ int TrayClient::property_get_xayatana_label_guide(sd_bus*, const char*, const ch
 
 int TrayClient::method_activate(sd_bus_message*, void* userdata, sd_bus_error*) {
     auto* self = static_cast<TrayClient*>(userdata);
-    (void)self;
-    // Instant launch/focus of native KDE Plasma 6 Dashboard on Left-Click (REF-REQ-042)
-    pid_t pid = ::fork();
-    if (pid == 0) {
-        ::setsid();
-        const char* dash_bin = "/home/jedclub/.local/bin/wattcurb-dashboard";
-        if (::access(dash_bin, X_OK) == 0) {
-            ::execl(dash_bin, "wattcurb-dashboard", nullptr);
-        } else {
-            ::execlp("wattcurb-dashboard", "wattcurb-dashboard", nullptr);
+    // Implements REF-REQ-045: Explicit Menu Activation for Matrix Dashboard
+    // The intensive Qt Quick Matrix Dashboard must NEVER be triggered by simple left-clicking.
+    // Left-clicking cycles power profiles cleanly as originally specified in REF-REQ-035.
+    if (self) {
+        self->cycle_power_profile();
+        if (self->bus_) {
+            sd_bus_emit_signal(self->bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewIcon", nullptr);
+            sd_bus_emit_signal(self->bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewToolTip", nullptr);
+            sd_bus_emit_signal(self->bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "XAyatanaNewLabel", nullptr);
+            sd_bus_emit_signal(self->bus_, "/MenuBar", "com.canonical.dbusmenu", "LayoutUpdated", "ui", ++self->menu_revision_, 0);
         }
-        ::_exit(0);
     }
     return 0;
 }
@@ -734,7 +733,7 @@ int TrayClient::dbusmenu_method_get_layout(sd_bus_message* msg, void* userdata, 
     add_item(7, "Smart Save (스마트 절전 모드 - 1.7GHz)", true, nullptr, "radio", (cur_mode == 2 ? 1 : 0));
     add_item(8, "Ultra Save (초절전 모드 - 1.4GHz, 48Hz)", true, nullptr, "radio", (cur_mode == 3 ? 1 : 0));
     add_item(9, nullptr, true, "separator");
-    add_item(10, "🔍 지금 전력 소비 정밀 분석 (Rescan Now)");
+    add_item(10, "📈 정밀 분석 매트릭 창 열기 (Matrix Dashboard)");
     add_item(11, "📊 KDE 시스템 모니터 열기 (System Monitor)");
 
     sd_bus_message_close_container(reply); // children av
