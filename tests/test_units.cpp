@@ -1643,7 +1643,8 @@ void test_thinkpower_tray_client() {
     TrayClient::render_tooltip(state, title, sizeof(title), desc, sizeof(desc));
 
     assert(std::string_view(title).find("WattCurb: 14.2 W") != std::string_view::npos);
-    assert(std::string_view(desc).find("WattCurb Power Intelligence") != std::string_view::npos);
+    assert(std::string_view(desc).find("WATTCURB CYBER HUD") != std::string_view::npos);
+    assert(std::string_view(desc).find("<font size=\"2\">") != std::string_view::npos);
     assert(std::string_view(desc).find("82%") != std::string_view::npos);
     assert(std::string_view(desc).find("7.5 W") != std::string_view::npos);
     assert(std::string_view(desc).find("code") != std::string_view::npos);
