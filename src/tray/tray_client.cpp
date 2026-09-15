@@ -236,7 +236,6 @@ void TrayClient::render_tooltip(
     char* out_title, size_t title_cap,
     char* out_desc, size_t desc_cap
 ) noexcept {
-    // Ultra-fast integer fixed-point formatting: eliminates heavy float snprintf overhead
     unsigned int sys_w = state.system_drain_mw / 1000;
     unsigned int sys_frac = (state.system_drain_mw % 1000) / 100;
 
@@ -245,37 +244,20 @@ void TrayClient::render_tooltip(
 
     std::snprintf(out_title, title_cap, "⚡ WattCurb: %u.%u W (%s)", sys_w, sys_frac, status_kr);
 
-    const char* profile_name = "Performance (4.1GHz Boost 풀파워)";
-    if (state.power_profile_mode == 1) profile_name = "Balanced (지능형 균형)";
-    else if (state.power_profile_mode == 2) profile_name = "SmartSave (스마트 절전 1.7GHz)";
-    else if (state.power_profile_mode == 3) profile_name = "UltraSave (극저전력 1.4GHz)";
+    const char* profile_short = "Performance (4.1G 언락)";
+    if (state.power_profile_mode == 1) profile_short = "Balanced (균형)";
+    else if (state.power_profile_mode == 2) profile_short = "SmartSave (절전 1.7G)";
+    else if (state.power_profile_mode == 3) profile_short = "UltraSave (극저전력 1.4G)";
 
     unsigned int cpu_w = state.cpu_drain_mw / 1000;
     unsigned int cpu_frac = (state.cpu_drain_mw % 1000) / 100;
     unsigned int gpu_w = state.gpu_drain_mw / 1000;
     unsigned int gpu_frac = (state.gpu_drain_mw % 1000) / 100;
 
-    // Platform & DRAM / I/O derived power
     uint32_t comp_drain = state.cpu_drain_mw + state.gpu_drain_mw;
     uint32_t plat_drain = state.system_drain_mw > comp_drain ? (state.system_drain_mw - comp_drain) : 0;
     unsigned int plat_w = plat_drain / 1000;
     unsigned int plat_frac = (plat_drain % 1000) / 100;
-
-    // Remaining time format
-    char time_buf[128]{};
-    if (state.battery_state == 1) {
-        if (state.time_to_empty_min >= 60) {
-            std::snprintf(time_buf, sizeof(time_buf), "%u시간 %02u분 남음", state.time_to_empty_min / 60, state.time_to_empty_min % 60);
-        } else if (state.time_to_empty_min > 0) {
-            std::snprintf(time_buf, sizeof(time_buf), "%u분 남음", state.time_to_empty_min);
-        } else {
-            std::snprintf(time_buf, sizeof(time_buf), "측정 중...");
-        }
-    } else if (state.battery_state == 2) {
-        std::snprintf(time_buf, sizeof(time_buf), "완충 AC 직결 (배터리 수명보호)");
-    } else {
-        std::snprintf(time_buf, sizeof(time_buf), "충전 중 (완충 시 자동보호)");
-    }
 
     const char* bat_color = (state.battery_percent >= 60) ? "#10b981" :
                            ((state.battery_percent >= 25) ? "#f59e0b" : "#ef4444");
@@ -284,120 +266,79 @@ void TrayClient::render_tooltip(
                             ((state.cpu_temp_c < 65) ? "#10b981" :
                             ((state.cpu_temp_c < 80) ? "#fb923c" : "#f43f5e"));
 
-    const char* gpu_status = (state.gpu_drain_mw > 1000) ? "3D 렌더링 가속" : 
-                            ((state.gpu_drain_mw > 200) ? "2D GUI 가속" : "D3Cold 초절전");
-
-    const char* c3_status = (state.cstate_c3_percent >= 80) ? "최적 심층 수면" :
-                           ((state.cstate_c3_percent >= 40) ? "정상 유휴 슬립" : "실리콘 각성 부하");
-
-    // Progressive Unicode Visual Gauges (10 bars)
-    char bat_bar[64]{};
-    build_unicode_bar(bat_bar, sizeof(bat_bar), state.battery_percent, 10);
+    // 8-block Unicode bars for ultra-compact fit
+    char bat_bar[48]{};
+    build_unicode_bar(bat_bar, sizeof(bat_bar), state.battery_percent, 8);
 
     unsigned int sys_mw = state.system_drain_mw > 0 ? state.system_drain_mw : 1;
     unsigned int cpu_pct = std::clamp(static_cast<unsigned int>(state.cpu_drain_mw * 100 / sys_mw), 0u, 100u);
-    unsigned int gpu_pct = std::clamp(static_cast<unsigned int>(state.gpu_drain_mw * 100 / sys_mw), 0u, 100u);
-    unsigned int plat_pct = std::clamp(static_cast<unsigned int>(plat_drain * 100 / sys_mw), 0u, 100u);
-
     char cpu_bar[48]{};
-    char gpu_bar[48]{};
-    char plat_bar[48]{};
-    char c3_bar[48]{};
-
-    build_unicode_bar(cpu_bar, sizeof(cpu_bar), cpu_pct, 10);
-    build_unicode_bar(gpu_bar, sizeof(gpu_bar), gpu_pct, 10);
-    build_unicode_bar(plat_bar, sizeof(plat_bar), plat_pct, 10);
-    build_unicode_bar(c3_bar, sizeof(c3_bar), state.cstate_c3_percent, 10);
-
-    auto get_tier_name = [](uint8_t t) noexcept -> const char* {
-        switch (t) {
-            case 0: return "커널/오디오(면역)";
-            case 1: return "컴포지터/디스플레이";
-            case 2: return "데스크탑 환경";
-            case 3: return "사용자 앱";
-            case 4: return "백그라운드";
-            case 5: return "폭주 후보";
-            default: return "일반 작업";
-        }
-    };
-
-    // Progressive Top process format strings
-    char top1_buf[512]{};
-    char top2_buf[512]{};
-    if (state.culprits[0].comm[0]) {
-        unsigned int c1_w = state.culprits[0].drain_mw / 1000;
-        unsigned int c1_f = (state.culprits[0].drain_mw % 1000) / 100;
-        unsigned int c1_pct = std::clamp(static_cast<unsigned int>(state.culprits[0].drain_mw * 100 / sys_mw), 0u, 100u);
-        char c1_bar[48]{};
-        build_unicode_bar(c1_bar, sizeof(c1_bar), c1_pct, 8);
-        std::snprintf(top1_buf, sizeof(top1_buf),
-            "&nbsp;• #1 <font color=\"#ffffff\"><b>%-12s</b></font> <font color=\"#64748b\">(PID %d · %s)</font><br/>"
-            "&nbsp;&nbsp;&nbsp;&nbsp;<b><font color=\"#f43f5e\">%u.%u W</font></b> <font color=\"#94a3b8\">(%u%%)</font> &nbsp;<font color=\"#f43f5e\"><b>[%s]</b></font><br/>",
-            state.culprits[0].comm, state.culprits[0].pid, get_tier_name(state.culprits[0].tier),
-            c1_w, c1_f, c1_pct, c1_bar);
-    } else {
-        std::snprintf(top1_buf, sizeof(top1_buf),
-            "&nbsp;• <font color=\"#94a3b8\"><i>시스템 안정 유휴 (과다 누수 프로세스 없음)</i></font><br/>");
-    }
-
-    if (state.culprits[1].comm[0]) {
-        unsigned int c2_w = state.culprits[1].drain_mw / 1000;
-        unsigned int c2_f = (state.culprits[1].drain_mw % 1000) / 100;
-        unsigned int c2_pct = std::clamp(static_cast<unsigned int>(state.culprits[1].drain_mw * 100 / sys_mw), 0u, 100u);
-        char c2_bar[48]{};
-        build_unicode_bar(c2_bar, sizeof(c2_bar), c2_pct, 8);
-        std::snprintf(top2_buf, sizeof(top2_buf),
-            "&nbsp;• #2 <font color=\"#ffffff\"><b>%-12s</b></font> <font color=\"#64748b\">(PID %d · %s)</font><br/>"
-            "&nbsp;&nbsp;&nbsp;&nbsp;<b><font color=\"#fb923c\">%u.%u W</font></b> <font color=\"#94a3b8\">(%u%%)</font> &nbsp;<font color=\"#fb923c\"><b>[%s]</b></font><br/>",
-            state.culprits[1].comm, state.culprits[1].pid, get_tier_name(state.culprits[1].tier),
-            c2_w, c2_f, c2_pct, c2_bar);
-    }
-
-    char mitig_buf[128]{};
-    if (state.power_profile_mode == 0) {
-        std::snprintf(mitig_buf, sizeof(mitig_buf), "풀파워 언락 (CPU 4.1GHz Boost & Zero-Throttling)");
-    } else if (state.active_mitigations > 0) {
-        std::snprintf(mitig_buf, sizeof(mitig_buf), "실시간 감속 가동 중 (%u개 제어)", state.active_mitigations);
-    } else {
-        std::snprintf(mitig_buf, sizeof(mitig_buf), "Zero-Wakeup 슬립 유지 (스케줄러 대기)");
-    }
+    build_unicode_bar(cpu_bar, sizeof(cpu_bar), cpu_pct, 8);
 
     char sign = (state.battery_state == 2) ? '+' : (state.battery_state == 0 ? '+' : '-');
     unsigned int freq_ghz = state.cpu_freq_mhz / 1000;
     unsigned int freq_mhz_frac = (state.cpu_freq_mhz % 1000) / 10;
 
-    // Compact Typography with monospace font and high-density visual alignment
+    // Top 2 processes in single line
+    char culprits_line[512]{};
+    if (state.culprits[0].comm[0] && state.culprits[1].comm[0]) {
+        unsigned int c1_w = state.culprits[0].drain_mw / 1000;
+        unsigned int c1_f = (state.culprits[0].drain_mw % 1000) / 100;
+        unsigned int c2_w = state.culprits[1].drain_mw / 1000;
+        unsigned int c2_f = (state.culprits[1].drain_mw % 1000) / 100;
+        std::snprintf(culprits_line, sizeof(culprits_line),
+            "• 톱소비: <font color=\"#ffffff\"><b>%.12s</b></font> <font color=\"#f43f5e\"><b>%u.%u W</b></font> | <font color=\"#ffffff\"><b>%.12s</b></font> <font color=\"#fb923c\"><b>%u.%u W</b></font>",
+            state.culprits[0].comm, c1_w, c1_f, state.culprits[1].comm, c2_w, c2_f);
+    } else if (state.culprits[0].comm[0]) {
+        unsigned int c1_w = state.culprits[0].drain_mw / 1000;
+        unsigned int c1_f = (state.culprits[0].drain_mw % 1000) / 100;
+        std::snprintf(culprits_line, sizeof(culprits_line),
+            "• 톱소비: <font color=\"#ffffff\"><b>%.12s</b></font> <font color=\"#f43f5e\"><b>%u.%u W</b></font> (단독 부하)",
+            state.culprits[0].comm, c1_w, c1_f);
+    } else {
+        std::snprintf(culprits_line, sizeof(culprits_line),
+            "• 톱소비: <font color=\"#94a3b8\"><i>시스템 유휴 안정 (특이 누수 없음)</i></font>");
+    }
+
+    char bat_detail[128]{};
+    if (state.battery_state == 1) {
+        if (state.time_to_empty_min > 0) {
+            std::snprintf(bat_detail, sizeof(bat_detail), "%u분 남음 · 수명 %u%% · %u RPM",
+                          state.time_to_empty_min, state.battery_health_percent, state.fan_rpm);
+        } else {
+            std::snprintf(bat_detail, sizeof(bat_detail), "방전 중 · 수명 %u%% · %u RPM",
+                          state.battery_health_percent, state.fan_rpm);
+        }
+    } else if (state.battery_state == 2) {
+        std::snprintf(bat_detail, sizeof(bat_detail), "완충 AC 직결 · 수명 %u%% · %u RPM",
+                      state.battery_health_percent, state.fan_rpm);
+    } else {
+        std::snprintf(bat_detail, sizeof(bat_detail), "충전 중 (완충 시 자동보호) · %u RPM",
+                      state.fan_rpm);
+    }
+
+    // Exact 6 lines formatted to guarantee 0 line-wraps inside Plasma 6's maximumLineCount: 8 limit:
+    // Line 1: HUD Live Title & Total Watts
+    // Line 2: Battery Level, Bar, Detail (Charging/Discharging/AC Direct, Health, RPM)
+    // Line 3: CPU Wattage, %, Bar, Clock GHz, Temp °C
+    // Line 4: GPU & Platform Wattage & C3 Sleep %
+    // Line 5: Top 2 Energy Drain Culprits
+    // Line 6: Active Profile & PipeWire Audio Realtime Status
     std::snprintf(out_desc, desc_cap,
-        "<div style=\"font-family: 'JetBrains Mono', 'Hack', 'Fira Code', monospace, sans-serif; font-size: 11px; line-height: 1.3;\"><font size=\"2\">"
-        "<b><font color=\"#00f0ff\">⚡ WATTCURB CYBER HUD</font></b> &nbsp;<font color=\"#10b981\"><b>● LIVE</b></font> &nbsp;<font color=\"#64748b\">|</font>&nbsp; <b><font color=\"#f59e0b\">%c%u.%u W</font></b><br/>"
-        "<font color=\"#334155\">──────────────────────────────────────</font><br/>"
-        "<font color=\"#38bdf8\"><b>[배터리 & 전력 동태 (Power Flow)]</b></font><br/>"
-        "&nbsp;• 충전율 : <font color=\"%s\"><b>%u%%</b></font> <font color=\"%s\"><b>[%s]</b></font> <font color=\"#94a3b8\">(수명 %u%% · %s)</font><br/>"
-        "&nbsp;• 상태값 : <font color=\"#38bdf8\"><b>%s</b></font> &nbsp;<font color=\"#64748b\">|</font>&nbsp; 웨이크업: <font color=\"#f43f5e\"><b>%u/s</b></font> &nbsp;<font color=\"#64748b\">|</font>&nbsp; 팬: <font color=\"#cbd5e1\"><b>%u RPM</b></font><br/>"
-        "<font color=\"#334155\">──────────────────────────────────────</font><br/>"
-        "<font color=\"#a855f7\"><b>[실리콘 하드웨어 도메인 (Progressive HW)]</b></font><br/>"
-        "&nbsp;• CPU 연산 &nbsp;: <b><font color=\"#00f0ff\">%2u.%u W</font></b> <font color=\"#64748b\">(%2u%%)</font> <font color=\"#00f0ff\"><b>[%s]</b></font> <b><font color=\"#38bdf8\">%u.%02u GHz</font></b> <font color=\"%s\"><b>%u°C</b></font><br/>"
-        "&nbsp;• GPU 그래픽: <b><font color=\"#10b981\">%2u.%u W</font></b> <font color=\"#64748b\">(%2u%%)</font> <font color=\"#10b981\"><b>[%s]</b></font> <font color=\"#38bdf8\">%s</font><br/>"
-        "&nbsp;• 플랫폼/IO &nbsp;: <b><font color=\"#e2e8f0\">%2u.%u W</font></b> <font color=\"#64748b\">(%2u%%)</font> <font color=\"#e2e8f0\"><b>[%s]</b></font> <font color=\"#64748b\">LPDDR5X/APST</font><br/>"
-        "&nbsp;• C3 심층수면: <b><font color=\"#a855f7\">%2u%% C3</font></b> <font color=\"#64748b\">Sleep</font> <font color=\"#a855f7\"><b>[%s]</b></font> <font color=\"#10b981\">%s</font><br/>"
-        "<font color=\"#334155\">──────────────────────────────────────</font><br/>"
-        "<font color=\"#f43f5e\"><b>[실시간 최다 전력 누수 프로세스 (Top Culprits)]</b></font><br/>"
-        "%s"
-        "%s"
-        "<font color=\"#334155\">──────────────────────────────────────</font><br/>"
-        "<font color=\"#64748b\">프로파일: </font><b><font color=\"#00f0ff\">%s</font></b><br/>"
-        "<font color=\"#64748b\">오디오면역: </font><b><font color=\"#10b981\">PipeWire/Pulse Realtime TS (-12)</font></b><br/>"
-        "<font color=\"#64748b\">정책엔진: </font><b><font color=\"#38bdf8\">%s</font></b>"
+        "<div style=\"font-family: 'JetBrains Mono', 'Hack', monospace; font-size: 11px; line-height: 1.25;\"><font size=\"2\">"
+        "<b><font color=\"#00f0ff\">⚡ WATTCURB CYBER HUD</font></b> <font color=\"#10b981\"><b>● LIVE</b></font> | <b><font color=\"#f59e0b\">%c%u.%u W</font></b><br/>"
+        "• 배터리: <font color=\"%s\"><b>%u%%</b></font> <font color=\"%s\"><b>[%s]</b></font> (%s)<br/>"
+        "• CPU연산: <b><font color=\"#00f0ff\">%u.%u W</font></b> <font color=\"#64748b\">(%2u%%)</font> <font color=\"#00f0ff\"><b>[%s]</b></font> <b><font color=\"#38bdf8\">%u.%02u GHz</font></b> <font color=\"%s\"><b>%u°C</b></font><br/>"
+        "• GPU/IO : <b><font color=\"#10b981\">%u.%u W GPU</font></b> | <b><font color=\"#e2e8f0\">%u.%u W IO</font></b> | <font color=\"#a855f7\"><b>%u%% C3슬립</b></font><br/>"
+        "%s<br/>"
+        "• 모드/RT: <b><font color=\"#00f0ff\">%s</font></b> | <font color=\"#10b981\"><b>PipeWire RT(-12)</b></font>"
         "</font></div>",
         sign, sys_w, sys_frac,
-        bat_color, state.battery_percent, bat_color, bat_bar, state.battery_health_percent, time_buf,
-        status_kr, state.wakeups_per_sec, state.fan_rpm,
+        bat_color, state.battery_percent, bat_color, bat_bar, bat_detail,
         cpu_w, cpu_frac, cpu_pct, cpu_bar, freq_ghz, freq_mhz_frac, temp_color, state.cpu_temp_c,
-        gpu_w, gpu_frac, gpu_pct, gpu_bar, gpu_status,
-        plat_w, plat_frac, plat_pct, plat_bar,
-        state.cstate_c3_percent, c3_bar, c3_status,
-        top1_buf, top2_buf,
-        profile_name, mitig_buf
+        gpu_w, gpu_frac, plat_w, plat_frac, state.cstate_c3_percent,
+        culprits_line,
+        profile_short
     );
 
     sanitize_utf8_inplace(out_desc);

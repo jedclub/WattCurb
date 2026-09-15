@@ -25,15 +25,20 @@ Users observed that mouse-hovering over the WattCurb tray indicator failed to re
    - **CPU Core Frequency**: Real-time active clock read from `/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq`.
 2. All probing executes with zero dynamic heap allocation in < 5.0µs, guaranteeing instantaneous live feedback without latency.
 
-### 2.2 Dense Monospace Cyber HUD ToolTip Layout
-1. Formatted with compact typography:
-   `<div style="font-family: 'JetBrains Mono', 'Hack', 'Fira Code', monospace, sans-serif; font-size: 11px; line-height: 1.3;"><font size="2">`
-2. Four distinct progressive telemetry sections:
-   - **Header**: Live power flow banner with visual indicator (`⚡ WATTCURB CYBER HUD ● LIVE | ±X.X W`).
-   - **[배터리 & 전력 동태 (Power Flow)]**: Charge level, 10-block Unicode visual bar `[████████░░]`, battery health, remaining time/charging status, wakeup frequency, and cooling fan RPM.
-   - **[실리콘 하드웨어 도메인 (Progressive HW)]**: CPU power, percentage, gauge bar, clock frequency (`X.XX GHz`), package temperature; GPU power, percentage, rendering acceleration status; Platform/IO LPDDR5X power; C3 deep sleep residency percentage and state.
-   - **[실시간 최다 전력 누수 프로세스 (Top Culprits)]**: Top 2 energy-consuming processes with PID, safety tier, individual wattage, percentage, and proportional mini-gauges.
-   - **[시스템 거버너 & 성능 정책]**: Active profile, PipeWire/Pulse realtime audio immunity status (`TS -12`), and non-halting closed-loop mitigation state.
+### 2.2 KDE Plasma 6 ToolTip Line Limit & Dense Monospace 6-Line Cyber HUD
+1. **KDE Plasma 6 `maximumLineCount: 8` Constraint**:
+   - Forensic analysis of `/usr/lib/qt6/qml/org/kde/plasma/core/DefaultToolTip.qml` revealed that KDE Plasma 6's native tooltip component strictly enforces `maximumLineCount: 8`.
+   - Tooltips exceeding 8 lines (or lines that soft-wrap due to excessive width) have trailing content abruptly truncated by Kirigami/QtQuick.
+2. **6-Line Zero-Wrap Cyber HUD Architecture**:
+   - To guarantee 100% telemetry visibility without truncation or soft line-wrapping, the tooltip is compressed into an exact 6-line layout (< 60 chars per line):
+     - **Line 1 (HUD Header)**: `⚡ WATTCURB CYBER HUD ● LIVE | ±X.X W`
+     - **Line 2 (Battery Domain)**: `• 배터리: XX% [████░░░░] (충전/방전/AC 직결 · 수명 XX% · XXXX RPM)`
+     - **Line 3 (CPU Computation)**: `• CPU연산: XX.X W (XX%) [███░░░░░] X.XX GHz XX°C`
+     - **Line 4 (GPU & Platform IO)**: `• GPU/IO : X.X W GPU | X.X W IO | XX% C3슬립`
+     - **Line 5 (Top Culprits)**: `• 톱소비: #1 process X.X W | #2 process X.X W`
+     - **Line 6 (Governor & Audio RT)**: `• 모드/RT: Performance (4.1G 언락) | PipeWire RT(-12)`
+3. Compact typography container:
+   `<div style="font-family: 'JetBrains Mono', 'Hack', monospace; font-size: 11px; line-height: 1.25;"><font size="2">`
 
 ### 2.3 1-Second Reactive Daemon & Tray Event Synchronization
 1. `wattcurb.service` default sampling period reduced to 3.0s (window: 1.0s) for continuous live daemon telemetry.
