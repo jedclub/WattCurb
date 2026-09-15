@@ -35,7 +35,8 @@ struct alignas(64) WattCurbSharedState {
     uint8_t  cstate_c3_percent{0};
     uint8_t  battery_health_percent{0};
     uint8_t  power_profile_mode{0};        // 0: Balanced, 1: PowerSaver, 2: UltraEndurance (REF-REQ-031)
-    uint8_t  reserved0[21]{0};
+    uint16_t cpu_freq_mhz{0};              // Realtime average CPU clock in MHz
+    uint8_t  reserved0[19]{0};
 
     // Cacheline 1: Top Dominant Energy Culprits
     SharedCulprit culprits[2];            // 2 * 32 = 64 Bytes -> Total struct = 128 Bytes exactly
@@ -55,6 +56,7 @@ struct alignas(64) WattCurbSharedState {
         gpu_drain_mw = static_cast<uint32_t>(r.hardware.gpu_watts * 1000.0);
         wakeups_per_sec = static_cast<uint32_t>(r.total_system_wakeups_per_sec);
         cpu_temp_c = static_cast<uint16_t>(std::clamp(static_cast<int>(r.hardware.cpu_temp_c), 0, 200));
+        cpu_freq_mhz = static_cast<uint16_t>(r.hardware.cpu_freq_avg_mhz);
         fan_rpm = static_cast<uint16_t>(std::clamp(r.hardware.fan_rpm, 0u, 20000u));
         cstate_c3_percent = static_cast<uint8_t>(std::clamp(static_cast<int>(r.hardware.cstate_c3_deep_percent), 0, 100));
         battery_health_percent = static_cast<uint8_t>(std::clamp(static_cast<int>(r.hardware.battery_health_percent), 0, 100));

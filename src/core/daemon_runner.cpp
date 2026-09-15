@@ -20,8 +20,8 @@
 namespace wattcurb::core {
 
 DaemonRunner::DaemonRunner(double period_sec, double window_sec, std::string_view lock_name)
-    : period_sec_(period_sec > 0.0 ? period_sec : 60.0),
-      window_sec_(window_sec > 0.0 ? window_sec : 5.0),
+    : period_sec_(period_sec > 0.0 ? period_sec : 3.0),
+      window_sec_(window_sec > 0.0 ? window_sec : 1.0),
       lock_name_(lock_name),
       lock_(lock_name) {}
 

@@ -1,4 +1,5 @@
 #include "tray/tray_client.hpp"
+#include "core/posix_fs.hpp"
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
@@ -170,6 +171,66 @@ static void sanitize_utf8_inplace(char* s) noexcept {
     }
 }
 
+static void probe_live_sensors_on_hover(ipc::WattCurbSharedState& state) noexcept {
+    // Implements REF-REQ-050: Sub-5us on-demand hardware telemetry probe upon mouse hover
+    // 1. Live Battery Telemetry: /sys/class/power_supply/BAT0/uevent
+    char ubuf[1024]{};
+    ssize_t n = core::fs::read_small_file("/sys/class/power_supply/BAT0/uevent", ubuf, sizeof(ubuf) - 1);
+    if (n <= 0) {
+        n = core::fs::read_small_file("/sys/class/power_supply/BAT1/uevent", ubuf, sizeof(ubuf) - 1);
+    }
+    if (n > 0) {
+        const char* p = ubuf;
+        uint32_t power_now = 0;
+        uint32_t current_now = 0;
+        uint32_t voltage_now = 0;
+        while (*p) {
+            if (std::strncmp(p, "POWER_SUPPLY_POWER_NOW=", 23) == 0) {
+                power_now = static_cast<uint32_t>(std::strtoul(p + 23, nullptr, 10));
+            } else if (std::strncmp(p, "POWER_SUPPLY_CURRENT_NOW=", 25) == 0) {
+                current_now = static_cast<uint32_t>(std::strtoul(p + 25, nullptr, 10));
+            } else if (std::strncmp(p, "POWER_SUPPLY_VOLTAGE_NOW=", 25) == 0) {
+                voltage_now = static_cast<uint32_t>(std::strtoul(p + 25, nullptr, 10));
+            } else if (std::strncmp(p, "POWER_SUPPLY_CAPACITY=", 22) == 0) {
+                uint8_t cap = static_cast<uint8_t>(std::strtoul(p + 22, nullptr, 10));
+                if (cap > 0 && cap <= 100) state.battery_percent = cap;
+            } else if (std::strncmp(p, "POWER_SUPPLY_STATUS=Discharging", 31) == 0) {
+                state.battery_state = 1;
+            } else if (std::strncmp(p, "POWER_SUPPLY_STATUS=Charging", 28) == 0) {
+                state.battery_state = 0;
+            } else if (std::strncmp(p, "POWER_SUPPLY_STATUS=Full", 24) == 0 ||
+                       std::strncmp(p, "POWER_SUPPLY_STATUS=Not charging", 32) == 0) {
+                state.battery_state = 2;
+            }
+            while (*p && *p != '\n') ++p;
+            if (*p == '\n') ++p;
+        }
+        if (power_now > 0) {
+            state.system_drain_mw = power_now / 1000;
+        } else if (current_now > 0 && voltage_now > 0) {
+            state.system_drain_mw = static_cast<uint32_t>((static_cast<uint64_t>(current_now) * voltage_now) / 1'000'000'000ULL);
+        }
+    }
+
+    // 2. Live CPU Thermal Sensor: /sys/class/thermal/thermal_zone0/temp
+    char tbuf[32]{};
+    if (core::fs::read_small_file("/sys/class/thermal/thermal_zone0/temp", tbuf, sizeof(tbuf) - 1) > 0) {
+        long temp_mc = std::strtol(tbuf, nullptr, 10);
+        if (temp_mc > 0) {
+            state.cpu_temp_c = static_cast<uint16_t>(temp_mc / 1000);
+        }
+    }
+
+    // 3. Live CPU Core Frequency: scaling_cur_freq
+    char fbuf[32]{};
+    if (core::fs::read_small_file("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", fbuf, sizeof(fbuf) - 1) > 0) {
+        long khz = std::strtol(fbuf, nullptr, 10);
+        if (khz > 0) {
+            state.cpu_freq_mhz = static_cast<uint16_t>(khz / 1000);
+        }
+    }
+}
+
 void TrayClient::render_tooltip(
     const ipc::WattCurbSharedState& state,
     char* out_title, size_t title_cap,
@@ -180,14 +241,14 @@ void TrayClient::render_tooltip(
     unsigned int sys_frac = (state.system_drain_mw % 1000) / 100;
 
     const char* status_kr = state.battery_state == 1 ? "방전 중" : 
-                           (state.battery_state == 2 ? "AC 패스스루" : "AC 충전 중");
+                           (state.battery_state == 2 ? "AC 직결 (완충)" : "AC 충전 중");
 
     std::snprintf(out_title, title_cap, "⚡ WattCurb: %u.%u W (%s)", sys_w, sys_frac, status_kr);
 
-    const char* profile_name = "Performance (고성능 4.1G 언락)";
-    if (state.power_profile_mode == 1) profile_name = "Balanced (기본 균형)";
-    else if (state.power_profile_mode == 2) profile_name = "SmartSave (스마트 절전 1.7G)";
-    else if (state.power_profile_mode == 3) profile_name = "UltraSave (극저전력 1.4G)";
+    const char* profile_name = "Performance (4.1GHz Boost 풀파워)";
+    if (state.power_profile_mode == 1) profile_name = "Balanced (지능형 균형)";
+    else if (state.power_profile_mode == 2) profile_name = "SmartSave (스마트 절전 1.7GHz)";
+    else if (state.power_profile_mode == 3) profile_name = "UltraSave (극저전력 1.4GHz)";
 
     unsigned int cpu_w = state.cpu_drain_mw / 1000;
     unsigned int cpu_frac = (state.cpu_drain_mw % 1000) / 100;
@@ -200,7 +261,7 @@ void TrayClient::render_tooltip(
     unsigned int plat_w = plat_drain / 1000;
     unsigned int plat_frac = (plat_drain % 1000) / 100;
 
-    // Remaining time format (Expanded to 128 bytes to prevent UTF-8 truncation)
+    // Remaining time format
     char time_buf[128]{};
     if (state.battery_state == 1) {
         if (state.time_to_empty_min >= 60) {
@@ -211,7 +272,7 @@ void TrayClient::render_tooltip(
             std::snprintf(time_buf, sizeof(time_buf), "측정 중...");
         }
     } else if (state.battery_state == 2) {
-        std::snprintf(time_buf, sizeof(time_buf), "완충 AC 직결 (마모 방지)");
+        std::snprintf(time_buf, sizeof(time_buf), "완충 AC 직결 (배터리 수명보호)");
     } else {
         std::snprintf(time_buf, sizeof(time_buf), "충전 중 (완충 시 자동보호)");
     }
@@ -219,19 +280,19 @@ void TrayClient::render_tooltip(
     const char* bat_color = (state.battery_percent >= 60) ? "#10b981" :
                            ((state.battery_percent >= 25) ? "#f59e0b" : "#ef4444");
 
-    const char* temp_color = (state.cpu_temp_c < 55) ? "#00f0ff" :
-                            ((state.cpu_temp_c < 70) ? "#10b981" :
+    const char* temp_color = (state.cpu_temp_c < 50) ? "#00f0ff" :
+                            ((state.cpu_temp_c < 65) ? "#10b981" :
                             ((state.cpu_temp_c < 80) ? "#fb923c" : "#f43f5e"));
 
-    const char* gpu_status = (state.gpu_drain_mw > 1000) ? "3D 렌더링 활성" : 
+    const char* gpu_status = (state.gpu_drain_mw > 1000) ? "3D 렌더링 가속" : 
                             ((state.gpu_drain_mw > 200) ? "2D GUI 가속" : "D3Cold 초절전");
 
     const char* c3_status = (state.cstate_c3_percent >= 80) ? "최적 심층 수면" :
                            ((state.cstate_c3_percent >= 40) ? "정상 유휴 슬립" : "실리콘 각성 부하");
 
-    // Progressive Unicode Visual Gauges
+    // Progressive Unicode Visual Gauges (10 bars)
     char bat_bar[64]{};
-    build_unicode_bar(bat_bar, sizeof(bat_bar), state.battery_percent, 12);
+    build_unicode_bar(bat_bar, sizeof(bat_bar), state.battery_percent, 10);
 
     unsigned int sys_mw = state.system_drain_mw > 0 ? state.system_drain_mw : 1;
     unsigned int cpu_pct = std::clamp(static_cast<unsigned int>(state.cpu_drain_mw * 100 / sys_mw), 0u, 100u);
@@ -250,12 +311,12 @@ void TrayClient::render_tooltip(
 
     auto get_tier_name = [](uint8_t t) noexcept -> const char* {
         switch (t) {
-            case 0: return "커널/시스템";
-            case 1: return "디스플레이/서버";
-            case 2: return "오디오/HW";
-            case 3: return "데스크탑 환경";
-            case 4: return "사용자 앱";
-            case 5: return "백그라운드";
+            case 0: return "커널/오디오(면역)";
+            case 1: return "컴포지터/디스플레이";
+            case 2: return "데스크탑 환경";
+            case 3: return "사용자 앱";
+            case 4: return "백그라운드";
+            case 5: return "폭주 후보";
             default: return "일반 작업";
         }
     };
@@ -294,41 +355,44 @@ void TrayClient::render_tooltip(
 
     char mitig_buf[128]{};
     if (state.power_profile_mode == 0) {
-        std::snprintf(mitig_buf, sizeof(mitig_buf), "전면 개방 (4.1GHz 터보 부스트 & Zero-Throttling)");
+        std::snprintf(mitig_buf, sizeof(mitig_buf), "풀파워 언락 (CPU 4.1GHz Boost & Zero-Throttling)");
     } else if (state.active_mitigations > 0) {
-        std::snprintf(mitig_buf, sizeof(mitig_buf), "실시간 가동 중 (%u개 제어)", state.active_mitigations);
+        std::snprintf(mitig_buf, sizeof(mitig_buf), "실시간 감속 가동 중 (%u개 제어)", state.active_mitigations);
     } else {
-        std::snprintf(mitig_buf, sizeof(mitig_buf), "Zero-Wakeup ACTIVE (대기 슬립 유지)");
+        std::snprintf(mitig_buf, sizeof(mitig_buf), "Zero-Wakeup 슬립 유지 (스케줄러 대기)");
     }
 
     char sign = (state.battery_state == 2) ? '+' : (state.battery_state == 0 ? '+' : '-');
+    unsigned int freq_ghz = state.cpu_freq_mhz / 1000;
+    unsigned int freq_mhz_frac = (state.cpu_freq_mhz % 1000) / 10;
 
-    // High-Density Progressive Cyber HUD with compact typography (font size="2")
+    // Compact Typography with monospace font and high-density visual alignment
     std::snprintf(out_desc, desc_cap,
-        "<font size=\"2\">"
+        "<div style=\"font-family: 'JetBrains Mono', 'Hack', 'Fira Code', monospace, sans-serif; font-size: 11px; line-height: 1.3;\"><font size=\"2\">"
         "<b><font color=\"#00f0ff\">⚡ WATTCURB CYBER HUD</font></b> &nbsp;<font color=\"#10b981\"><b>● LIVE</b></font> &nbsp;<font color=\"#64748b\">|</font>&nbsp; <b><font color=\"#f59e0b\">%c%u.%u W</font></b><br/>"
         "<font color=\"#334155\">──────────────────────────────────────</font><br/>"
         "<font color=\"#38bdf8\"><b>[배터리 & 전력 동태 (Power Flow)]</b></font><br/>"
         "&nbsp;• 충전율 : <font color=\"%s\"><b>%u%%</b></font> <font color=\"%s\"><b>[%s]</b></font> <font color=\"#94a3b8\">(수명 %u%% · %s)</font><br/>"
         "&nbsp;• 상태값 : <font color=\"#38bdf8\"><b>%s</b></font> &nbsp;<font color=\"#64748b\">|</font>&nbsp; 웨이크업: <font color=\"#f43f5e\"><b>%u/s</b></font> &nbsp;<font color=\"#64748b\">|</font>&nbsp; 팬: <font color=\"#cbd5e1\"><b>%u RPM</b></font><br/>"
         "<font color=\"#334155\">──────────────────────────────────────</font><br/>"
-        "<font color=\"#a855f7\"><b>[실리콘 도메인 세부 부하 (Progressive HW)]</b></font><br/>"
-        "&nbsp;• CPU 연산 &nbsp;: <b><font color=\"#00f0ff\">%2u.%u W</font></b> <font color=\"#64748b\">(%2u%%)</font> <font color=\"#00f0ff\"><b>[%s]</b></font> <font color=\"%s\"><b>%u°C</b></font><br/>"
+        "<font color=\"#a855f7\"><b>[실리콘 하드웨어 도메인 (Progressive HW)]</b></font><br/>"
+        "&nbsp;• CPU 연산 &nbsp;: <b><font color=\"#00f0ff\">%2u.%u W</font></b> <font color=\"#64748b\">(%2u%%)</font> <font color=\"#00f0ff\"><b>[%s]</b></font> <b><font color=\"#38bdf8\">%u.%02u GHz</font></b> <font color=\"%s\"><b>%u°C</b></font><br/>"
         "&nbsp;• GPU 그래픽: <b><font color=\"#10b981\">%2u.%u W</font></b> <font color=\"#64748b\">(%2u%%)</font> <font color=\"#10b981\"><b>[%s]</b></font> <font color=\"#38bdf8\">%s</font><br/>"
         "&nbsp;• 플랫폼/IO &nbsp;: <b><font color=\"#e2e8f0\">%2u.%u W</font></b> <font color=\"#64748b\">(%2u%%)</font> <font color=\"#e2e8f0\"><b>[%s]</b></font> <font color=\"#64748b\">LPDDR5X/APST</font><br/>"
         "&nbsp;• C3 심층수면: <b><font color=\"#a855f7\">%2u%% C3</font></b> <font color=\"#64748b\">Sleep</font> <font color=\"#a855f7\"><b>[%s]</b></font> <font color=\"#10b981\">%s</font><br/>"
         "<font color=\"#334155\">──────────────────────────────────────</font><br/>"
-        "<font color=\"#f43f5e\"><b>[실시간 최다 소비 프로세스 (Progressive)]</b></font><br/>"
+        "<font color=\"#f43f5e\"><b>[실시간 최다 전력 누수 프로세스 (Top Culprits)]</b></font><br/>"
         "%s"
         "%s"
         "<font color=\"#334155\">──────────────────────────────────────</font><br/>"
         "<font color=\"#64748b\">프로파일: </font><b><font color=\"#00f0ff\">%s</font></b><br/>"
-        "<font color=\"#64748b\">정책엔진: </font><b><font color=\"#10b981\">%s</font></b>"
-        "</font>",
+        "<font color=\"#64748b\">오디오면역: </font><b><font color=\"#10b981\">PipeWire/Pulse Realtime TS (-12)</font></b><br/>"
+        "<font color=\"#64748b\">정책엔진: </font><b><font color=\"#38bdf8\">%s</font></b>"
+        "</font></div>",
         sign, sys_w, sys_frac,
         bat_color, state.battery_percent, bat_color, bat_bar, state.battery_health_percent, time_buf,
         status_kr, state.wakeups_per_sec, state.fan_rpm,
-        cpu_w, cpu_frac, cpu_pct, cpu_bar, temp_color, state.cpu_temp_c,
+        cpu_w, cpu_frac, cpu_pct, cpu_bar, freq_ghz, freq_mhz_frac, temp_color, state.cpu_temp_c,
         gpu_w, gpu_frac, gpu_pct, gpu_bar, gpu_status,
         plat_w, plat_frac, plat_pct, plat_bar,
         state.cstate_c3_percent, c3_bar, c3_status,
@@ -518,9 +582,9 @@ int TrayClient::run() noexcept {
         if (r < 0) break;
         if (r > 0) continue; // More work to do immediately
 
-        // Sleep with 3-second timeout (3'000'000 us):
-        // Wakes up on D-Bus events instantly, or at least once every 3s to sync live telemetry
-        r = sd_bus_wait(bus_, 3'000'000ULL);
+        // Sleep with 1-second timeout (1'000'000 us):
+        // Wakes up on D-Bus events instantly, or at least once every 1s to sync live telemetry
+        r = sd_bus_wait(bus_, 1'000'000ULL);
         if (r < 0 && r != -EINTR) break;
 
         // Implements REF-REQ-047: If initial registration failed during desktop cold boot,
@@ -532,9 +596,12 @@ int TrayClient::run() noexcept {
         // Periodic state check: read 128-byte Seqlock SHM (< 50ns, zero-allocation)
         ipc::WattCurbSharedState cur_state{};
         if (read_state(cur_state)) {
-            bool changed = (cur_state.battery_percent != prev_state.battery_percent) ||
+            bool changed = (cur_state.seq_version != prev_state.seq_version) ||
+                           (cur_state.battery_percent != prev_state.battery_percent) ||
                            (cur_state.battery_state != prev_state.battery_state) ||
-                           (std::abs(static_cast<int>(cur_state.system_drain_mw) - static_cast<int>(prev_state.system_drain_mw)) > 200) ||
+                           (std::abs(static_cast<int>(cur_state.system_drain_mw) - static_cast<int>(prev_state.system_drain_mw)) > 50) ||
+                           (std::abs(static_cast<int>(cur_state.cpu_drain_mw) - static_cast<int>(prev_state.cpu_drain_mw)) > 100) ||
+                           (cur_state.cpu_temp_c != prev_state.cpu_temp_c) ||
                            (cur_state.power_profile_mode != prev_state.power_profile_mode);
 
             if (changed) {
@@ -598,6 +665,9 @@ int TrayClient::property_get_tooltip(sd_bus*, const char*, const char*, const ch
     auto* self = static_cast<TrayClient*>(userdata);
     ipc::WattCurbSharedState state{};
     self->read_state(state);
+
+    // Implements REF-REQ-050: Instant live hardware sensor probe upon hover!
+    probe_live_sensors_on_hover(state);
 
     char icon[64]{};
     resolve_icon_name(state, icon, sizeof(icon));

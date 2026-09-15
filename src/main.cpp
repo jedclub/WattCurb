@@ -122,8 +122,8 @@ int query_daemon_status() {
 int main(int argc, char* argv[]) {
     double interval_sec = 2.0;
     double duration_sec = 0.0;
-    double period_sec = 60.0;
-    double window_sec = 5.0;
+    double period_sec = 3.0;
+    double window_sec = 1.0;
     size_t sample_count = 1;
     size_t top_n = 15;
     bool briefing_mode = false;
@@ -158,9 +158,9 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--dev-profile") {
             dev_profile = true;
         } else if (arg == "--period" && i + 1 < argc) {
-            period_sec = std::max(5.0, std::strtod(argv[++i], nullptr));
+            period_sec = std::max(1.0, std::strtod(argv[++i], nullptr));
         } else if (arg == "--window" && i + 1 < argc) {
-            window_sec = std::max(1.0, std::strtod(argv[++i], nullptr));
+            window_sec = std::max(0.5, std::strtod(argv[++i], nullptr));
         } else if ((arg == "-i" || arg == "--interval") && i + 1 < argc) {
             interval_sec = std::max(0.5, std::strtod(argv[++i], nullptr));
         } else if ((arg == "-w" || arg == "--duration") && i + 1 < argc) {

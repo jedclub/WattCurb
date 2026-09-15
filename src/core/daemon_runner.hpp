@@ -17,7 +17,7 @@ namespace wattcurb::core {
 // Implements REF-REQ-002, REF-REQ-007, REF-REQ-019, REF-REQ-020, REF-REQ-028, REF-ARCH-004, REF-ARCH-018
 class DaemonRunner {
 public:
-    explicit DaemonRunner(double period_sec = 60.0, double window_sec = 5.0, std::string_view lock_name = "wattcurb.lock");
+    explicit DaemonRunner(double period_sec = 3.0, double window_sec = 1.0, std::string_view lock_name = "wattcurb.lock");
     ~DaemonRunner();
 
     DaemonRunner(const DaemonRunner&) = delete;
@@ -33,8 +33,8 @@ public:
     [[nodiscard]] const policy::FeatureManager& feature_manager() const noexcept { return feature_manager_; }
 
 private:
-    double period_sec_{60.0};
-    double window_sec_{5.0};
+    double period_sec_{3.0};
+    double window_sec_{1.0};
     std::string lock_name_;
     SingletonLock lock_;
     std::atomic<bool> running_{false};
