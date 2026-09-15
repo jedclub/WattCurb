@@ -123,6 +123,7 @@ void test_attribution_engine() {
     hw1.battery_power_uw = 15'000'000;
     hw1.is_discharging = true;
     hw1.gpu_power_uw = 6'000'000;
+    hw1.gpu_busy_percent = 70;
     hw1.backlight_brightness = 20000;
     hw1.backlight_max_brightness = 60000;
 
@@ -131,6 +132,7 @@ void test_attribution_engine() {
     hw2.battery_power_uw = 15'000'000;
     hw2.is_discharging = true;
     hw2.gpu_power_uw = 6'000'000;
+    hw2.gpu_busy_percent = 70;
     hw2.backlight_brightness = 20000;
     hw2.backlight_max_brightness = 60000;
 
@@ -140,8 +142,8 @@ void test_attribution_engine() {
     };
 
     std::vector<wattcurb::ProcessSample> p2 = {
-        {.pid = 101, .utime_ticks = 300, .stime_ticks = 60, .comm = "renderer", .drm_engine_gfx_ns = 101'000'000, .drm_vram_kib = 65536},
-        {.pid = 102, .utime_ticks = 11, .stime_ticks = 5, .comm = "idle_daemon", .drm_engine_gfx_ns = 0, .drm_vram_kib = 0}
+        {.pid = 101, .utime_ticks = 100, .stime_ticks = 20, .comm = "renderer", .drm_engine_gfx_ns = 1'401'000'000, .drm_vram_kib = 65536},
+        {.pid = 102, .utime_ticks = 100, .stime_ticks = 20, .comm = "idle_daemon", .drm_engine_gfx_ns = 0, .drm_vram_kib = 0}
     };
 
     wattcurb::policy::AttributionEngine engine;
@@ -149,11 +151,62 @@ void test_attribution_engine() {
 
     assert(report.top_processes.size() == 2);
     assert(report.top_processes[0].pid == 101);
-    assert(report.top_processes[0].gpu_watts > 0.0);
+    assert(report.top_processes[0].gpu_watts > 2.0);
     assert(report.top_processes[0].primary_hw_domain == "GPU Silicon");
     assert(report.top_processes[0].wdi_score > report.top_processes[1].wdi_score);
     assert(!report.domain_culprits.empty());
     std::cout << " [PASS] test_attribution_engine\n";
+}
+
+// Implements REF-TEST-009 & REF-REQ-051: AMD APU PPT Disambiguation and Duty-Cycle GPU Attribution
+void test_apu_ppt_and_gpu_duty_cycle_attribution() {
+    auto now = std::chrono::steady_clock::now();
+    wattcurb::HardwareSample hw1;
+    hw1.timestamp = now;
+    hw1.battery_power_uw = 25'000'000;
+    hw1.is_discharging = true;
+    hw1.gpu_power_uw = 20'000'000; // 20 Watts AMD APU Package Power Tracking (PPT)
+    hw1.gpu_is_apu_ppt = true;
+    hw1.gpu_busy_percent = 0; // GPU is idle
+    std::strncpy(hw1.gpu_power_label.data(), "PPT", hw1.gpu_power_label.size());
+
+    wattcurb::HardwareSample hw2;
+    hw2.timestamp = now + std::chrono::seconds(1); // 1-second interval
+    hw2.battery_power_uw = 25'000'000;
+    hw2.is_discharging = true;
+    hw2.gpu_power_uw = 20'000'000;
+    hw2.gpu_is_apu_ppt = true;
+    hw2.gpu_busy_percent = 0;
+    std::strncpy(hw2.gpu_power_label.data(), "PPT", hw2.gpu_power_label.size());
+
+    // Scenario: wattcurb-dashboard rendered 1 frame using 2.47ms (2,470,000 ns) of GPU time
+    std::vector<wattcurb::ProcessSample> p1 = {
+        {.pid = 229783, .utime_ticks = 50, .stime_ticks = 10, .comm = "wattcurb-dashbo", .drm_engine_gfx_ns = 10'000'000},
+        {.pid = 1000, .utime_ticks = 10, .stime_ticks = 2, .comm = "bash", .drm_engine_gfx_ns = 0}
+    };
+    std::vector<wattcurb::ProcessSample> p2 = {
+        {.pid = 229783, .utime_ticks = 60, .stime_ticks = 12, .comm = "wattcurb-dashbo", .drm_engine_gfx_ns = 12'470'000},
+        {.pid = 1000, .utime_ticks = 10, .stime_ticks = 2, .comm = "bash", .drm_engine_gfx_ns = 0}
+    };
+
+    wattcurb::policy::AttributionEngine engine;
+    auto report = engine.compute_attribution(hw1, hw2, p1, p2, 5);
+
+    // 1. Hardware iGPU power must NOT be charged 20W! It must be idle leakage ~0.05W!
+    assert(report.hardware.gpu_watts <= 0.10 && "AMD APU PPT at 0% busy must decouple iGPU power to idle baseline (<0.10W)!");
+    
+    // 2. Process attribution: wattcurb-dashboard must NEVER be charged 20W!
+    // Its attributed GPU power must be < 0.05W!
+    auto dash_it = std::find_if(report.top_processes.begin(), report.top_processes.end(),
+                                [](const auto& p) { return p.pid == 229783; });
+    assert(dash_it != report.top_processes.end());
+    assert(dash_it->gpu_watts < 0.01 && "2.47ms GPU usage in idle APU must attribute < 0.01W, NOT 20.00W!");
+    
+    // 3. Must NOT be classified as Tier 5 Runaway! It is Tier 0 Immune System Component!
+    assert(dash_it->safety_tier == 0 && "wattcurb components must be Tier 0 Critical Immune!");
+    assert(!dash_it->is_runaway_candidate && "Self-monitoring GUI must not be flagged as Runaway!");
+
+    std::cout << " [PASS] test_apu_ppt_and_gpu_duty_cycle_attribution (REF-TEST-009, REF-REQ-051: APU PPT decoupled, duty-cycle scaled)\n";
 }
 
 void test_windowed_attribution_engine() {
@@ -1804,6 +1857,7 @@ int main() {
     test::test_proc_io_parsing();
     test::test_drm_fdinfo_parsing();
     test::test_attribution_engine();
+    test::test_apu_ppt_and_gpu_duty_cycle_attribution();
     test::test_windowed_attribution_engine();
     test::test_singleton_lock();
     test::test_persistent_hw_probe();

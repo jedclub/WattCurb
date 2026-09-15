@@ -42,10 +42,10 @@ DashboardBackend::DashboardBackend(QObject* parent)
         gpu_history_.append(init_gpu);
     }
 
-    // 1-second live telemetry poll timer (ultra-low overhead)
+    // 1.5-second live telemetry poll timer (ultra-low overhead, Zero-Wakeup compliant)
     poll_timer_ = new QTimer(this);
     connect(poll_timer_, &QTimer::timeout, this, &DashboardBackend::onPollTimer);
-    poll_timer_->start(1000);
+    poll_timer_->start(1500);
 }
 
 DashboardBackend::~DashboardBackend() {
@@ -165,9 +165,10 @@ bool DashboardBackend::queryDaemonTelemetry() noexcept {
 
     QJsonArray proc_arr = obj.value("processes").toArray();
     QVariantList new_list;
-    new_list.reserve(proc_arr.size());
+    new_list.reserve(std::min<qsizetype>(proc_arr.size(), 25));
 
     for (const auto& item_val : proc_arr) {
+        if (new_list.size() >= 25) break; // Top 25 processes are sufficient for visible matrix
         QJsonObject p = item_val.toObject();
         QVariantMap map;
         map["pid"] = p.value("pid").toInt();

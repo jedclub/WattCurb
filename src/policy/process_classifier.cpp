@@ -7,6 +7,7 @@ namespace wattcurb::policy {
 ProcessClassification ProcessClassifierDB::classify(std::string_view comm) noexcept {
     // 1. Tier 0: Critical Kernel, Audio & Init Services (CRITICAL_IMMUNE)
     // REF-REQ-049: Absolute Realtime Immunity for PipeWire, PulseAudio, and Audio Stack
+    // REF-REQ-051: Daemon Self-Immunity (WattCurb components must never throttle themselves)
     if (comm == "systemd" || comm == "init" || comm == "kthreadd" ||
         comm.starts_with("kworker") || comm.starts_with("pipewire") || comm.starts_with("wireplumber") ||
         comm == "pulseaudio" || comm.starts_with("jackd") || comm == "jackdbus" ||
@@ -15,7 +16,8 @@ ProcessClassification ProcessClassifierDB::classify(std::string_view comm) noexc
         comm == "polkitd" || comm == "udevd" || comm == "systemd-journal" ||
         comm == "systemd-resolve" || comm == "systemd-logind" || comm == "NetworkManager" ||
         comm == "wpa_supplicant" || comm == "iwd" || comm == "bluetoothd" ||
-        comm == "upowerd" || comm == "acpid" || comm == "auditd") {
+        comm == "upowerd" || comm == "acpid" || comm == "auditd" ||
+        comm.starts_with("wattcurb")) {
         return ProcessClassification{
             .tier = ProcessSafetyTier::CriticalImmune,
             .default_action = MitigationAction::None,

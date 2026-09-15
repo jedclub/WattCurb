@@ -132,13 +132,26 @@ HardwarePowerBreakdown AttributionEngine::compute_hardware_power(
         }
     }
 
-    // 2. GPU Subsystem Telemetry & PPT (REF-REQ-010 Sec 2.3)
+    // 2. GPU Subsystem Telemetry & PPT (REF-REQ-010 Sec 2.3, REF-REQ-051, REF-ARCH-022)
+    double raw_gpu_w = 0.0;
     if (hw2.gpu_power_uw.has_value()) {
         uint64_t g1 = hw1.gpu_power_uw.value_or(*hw2.gpu_power_uw);
         uint64_t g2 = *hw2.gpu_power_uw;
-        hw.gpu_watts = static_cast<double>(g1 + g2) / 2.0 / 1'000'000.0;
+        raw_gpu_w = static_cast<double>(g1 + g2) / 2.0 / 1'000'000.0;
     }
     hw.gpu_busy_percent = hw2.gpu_busy_percent.value_or(0);
+
+    if (hw2.gpu_is_apu_ppt) {
+        // AMD APU Package Power Tracking (PPT) Disambiguation:
+        // On AMD APUs, power1_input is the total socket power (CPU + iGPU + SoC).
+        // Dynamic iGPU power scales with GPU engine activity; idle baseline leakage is ~0.05W.
+        double busy_ratio = std::clamp(static_cast<double>(hw.gpu_busy_percent) / 100.0, 0.0, 1.0);
+        double igpu_active_w = raw_gpu_w * busy_ratio;
+        hw.gpu_watts = (hw.gpu_busy_percent > 0) ? std::min(raw_gpu_w * 0.70, igpu_active_w + 0.15) : 0.05;
+    } else {
+        // Standalone dGPU (Discrete Board Power)
+        hw.gpu_watts = raw_gpu_w;
+    }
     hw.gpu_freq_mhz = hw2.gpu_freq_hz.has_value() ? (static_cast<double>(*hw2.gpu_freq_hz) / 1'000'000.0) : 0.0;
     hw.gpu_temp_c = hw2.gpu_temp_mdeg.has_value() ? (static_cast<double>(*hw2.gpu_temp_mdeg) / 1000.0) : 0.0;
     hw.gpu_vddgfx_v = hw2.gpu_vddgfx_mv.has_value() ? (static_cast<double>(*hw2.gpu_vddgfx_mv) / 1000.0) : 0.0;
@@ -231,9 +244,12 @@ HardwarePowerBreakdown AttributionEngine::compute_hardware_power(
         uint64_t delta_uj = (e2 >= e1) ? (e2 - e1) : (e2 + (0xFFFFFFFFULL - e1));
         hw.cpu_package_watts = (static_cast<double>(delta_uj) / 1'000'000.0) / delta_sec;
     } else {
-        // Fallback unprivileged decomposition (REF-RES-002)
+        // Fallback unprivileged decomposition (REF-RES-002, REF-REQ-051)
         hw.has_direct_rapl = false;
-        if (hw.total_system_watts > 0.0) {
+        if (hw2.gpu_is_apu_ppt && raw_gpu_w > 0.5) {
+            // APU Socket Decomposition: PPT Socket Power minus iGPU power leaves CPU Package & SoC!
+            hw.cpu_package_watts = std::max(0.5, raw_gpu_w - hw.gpu_watts);
+        } else if (hw.total_system_watts > 0.0) {
             double accounted_other = hw.gpu_watts + hw.display_watts + hw.fan_estimated_watts + hw.storage_estimated_watts + 1.2;
             hw.cpu_package_watts = std::max(0.5, hw.total_system_watts - accounted_other);
         } else {
@@ -476,10 +492,32 @@ AnalysisReportData AttributionEngine::compute_attribution(
                 pap.cpu_watts = static_per_proc;
             }
 
-            // GPU Watts
+            // GPU Watts (REF-REQ-010, REF-REQ-051, REF-ARCH-022)
+            // Physical Duty-Cycle & Dynamic Workload Proportional Attribution:
+            // Prevents Heisenbug where a process rendering 1 frame (2ms) is charged 100% of GPU power!
             if (total_delta_gpu_ns > 0 && d.delta_gpu_ns > 0) {
+                uint64_t interval_ns = static_cast<uint64_t>(delta_sec * 1'000'000'000.0);
+                if (interval_ns == 0) interval_ns = 1'000'000'000ULL;
+
                 double g_share = static_cast<double>(d.delta_gpu_ns) / static_cast<double>(total_delta_gpu_ns);
-                pap.gpu_watts = report.hardware.gpu_watts * g_share;
+                double duty_cycle = std::min(1.0, static_cast<double>(d.delta_gpu_ns) / static_cast<double>(interval_ns));
+
+                // Dynamic GPU power across the interval
+                double dyn_gpu_power = 0.0;
+                if (report.hardware.gpu_busy_percent > 0) {
+                    double busy_ratio = std::clamp(static_cast<double>(report.hardware.gpu_busy_percent) / 100.0, 0.0, 1.0);
+                    dyn_gpu_power = report.hardware.gpu_watts * busy_ratio;
+                } else {
+                    // If hardware reports 0% busy or unmetered, dynamic power cannot exceed active time fraction
+                    double active_ratio = std::min(1.0, static_cast<double>(total_delta_gpu_ns) / static_cast<double>(interval_ns));
+                    dyn_gpu_power = report.hardware.gpu_watts * active_ratio;
+                }
+
+                // Process cannot be charged more than the GPU's active wattage scaled by its actual duty cycle!
+                double max_duty_watts = report.hardware.gpu_watts * duty_cycle;
+                double proportional_dyn_watts = dyn_gpu_power * g_share;
+
+                pap.gpu_watts = std::min(proportional_dyn_watts, max_duty_watts);
             } else {
                 pap.gpu_watts = 0.0;
             }
@@ -566,9 +604,11 @@ AnalysisReportData AttributionEngine::compute_attribution(
             pap.hardware_mechanism = "Major Page Faults (" + std::to_string(pap.majflt_per_sec) + " flt/s, NVMe Active)";
         } else if (pap.gpu_watts >= 0.5 && pap.gpu_watts >= pap.cpu_watts && pap.gpu_watts >= pap.wakeup_tax_watts) {
             pap.primary_hw_domain = "GPU Silicon";
-            int pct = (total_delta_gpu_ns > 0) ? static_cast<int>((static_cast<double>(d.delta_gpu_ns) * 100.0) / static_cast<double>(total_delta_gpu_ns)) : 100;
+            uint64_t interval_ns = static_cast<uint64_t>(delta_sec * 1'000'000'000.0);
+            if (interval_ns == 0) interval_ns = 1'000'000'000ULL;
+            int duty_pct = std::min(100, static_cast<int>((static_cast<double>(d.delta_gpu_ns) * 100.0) / static_cast<double>(interval_ns)));
             pap.hardware_mechanism = "AMDGPU GFX Engine (" + std::to_string(pap.vram_kib / 1024) + "MB VRAM, " +
-                                     std::to_string(pct) + "% GPU)";
+                                     std::to_string(duty_pct) + "% Duty)";
         } else if (pap.wakeup_tax_watts >= 0.3 && pap.wakeup_tax_watts >= pap.cpu_watts) {
             pap.primary_hw_domain = "CPU C-State Wakeup";
             pap.hardware_mechanism = "C3 Sleep Breaker (" + std::to_string(pap.wakeups_per_sec) + " wakeups/s)";
@@ -585,10 +625,16 @@ AnalysisReportData AttributionEngine::compute_attribution(
             pap.hardware_mechanism = "Background Poll (" + std::to_string(pap.wakeups_per_sec) + " w/s)";
         }
 
-        // Process Safety Classification & Recommended Action (REF-REQ-019 & REF-RES-008)
+        // Process Safety Classification & Recommended Action (REF-REQ-019, REF-RES-008, REF-REQ-049 & REF-REQ-051)
         auto classification = ProcessClassifierDB::classify(pap.comm.c_str());
         pap.safety_tier = static_cast<uint8_t>(classification.tier);
         pap.recommended_action = static_cast<uint8_t>(classification.default_action);
+
+        // Immune processes (Tier 0 & Tier 1) can NEVER be flagged as runaway candidates
+        if (classification.tier == ProcessSafetyTier::CriticalImmune ||
+            classification.tier == ProcessSafetyTier::DesktopCore) {
+            pap.is_runaway_candidate = false;
+        }
     }
 }
 

@@ -197,6 +197,8 @@ HardwareProbe::HardwareProbe(HardwareProbe&& other) noexcept
       gpu_in0_path_(std::move(other.gpu_in0_path_)),
       gpu_in1_path_(std::move(other.gpu_in1_path_)),
       drm_device_path_(std::move(other.drm_device_path_)),
+      gpu_is_apu_ppt_(std::exchange(other.gpu_is_apu_ppt_, false)),
+      gpu_power_label_(std::move(other.gpu_power_label_)),
       nvme_status_path_(std::move(other.nvme_status_path_)),
       nvme_temp1_path_(std::move(other.nvme_temp1_path_)),
       nvme_temp2_path_(std::move(other.nvme_temp2_path_)),
@@ -296,6 +298,8 @@ HardwareProbe& HardwareProbe::operator=(HardwareProbe&& other) noexcept {
         gpu_in0_path_ = std::move(other.gpu_in0_path_);
         gpu_in1_path_ = std::move(other.gpu_in1_path_);
         drm_device_path_ = std::move(other.drm_device_path_);
+        gpu_is_apu_ppt_ = std::exchange(other.gpu_is_apu_ppt_, false);
+        gpu_power_label_ = std::move(other.gpu_power_label_);
         nvme_status_path_ = std::move(other.nvme_status_path_);
         nvme_temp1_path_ = std::move(other.nvme_temp1_path_);
         nvme_temp2_path_ = std::move(other.nvme_temp2_path_);
@@ -747,6 +751,21 @@ std::pair<uint8_t, uint8_t> HardwareProbe::read_pcie_binary_link_status(int conf
                     auto p_avg = entry.path() / "power1_average";
                     if (std::filesystem::exists(p1, ec)) gpu_power_path_ = p1;
                     else if (std::filesystem::exists(p_avg, ec)) gpu_power_path_ = p_avg;
+
+                    auto p1_lbl = entry.path() / "power1_label";
+                    if (std::filesystem::exists(p1_lbl, ec)) {
+                        int l_fd = open_ro_cloexec(p1_lbl);
+                        if (l_fd >= 0) {
+                            std::array<char, 16> l_buf{};
+                            if (read_string_buf(l_fd, l_buf.data(), l_buf.size())) {
+                                gpu_power_label_ = trim_sv(l_buf.data());
+                                if (gpu_power_label_ == "PPT") {
+                                    gpu_is_apu_ppt_ = true;
+                                }
+                            }
+                            ::close(l_fd);
+                        }
+                    }
                 }
                 if (gpu_temp_path_.empty()) gpu_temp_path_ = entry.path() / "temp1_input";
                 if (gpu_freq_path_.empty()) gpu_freq_path_ = entry.path() / "freq1_input";
@@ -1134,6 +1153,12 @@ void HardwareProbe::capture_subsystems(HardwareSample& sample) const {
     // 3. GPU Telemetry
     {
         WATTCURB_PROFILE_SCOPE("hw.gpu_metrics");
+        sample.gpu_is_apu_ppt = gpu_is_apu_ppt_;
+        if (!gpu_power_label_.empty()) {
+            size_t copy_sz = std::min(sample.gpu_power_label.size() - 1, gpu_power_label_.size());
+            std::memcpy(sample.gpu_power_label.data(), gpu_power_label_.c_str(), copy_sz);
+            sample.gpu_power_label[copy_sz] = '\0';
+        }
         {
             WATTCURB_PROFILE_SCOPE("hw.gpu_power_core");
             if (gpu_power_fd_ >= 0) sample.gpu_power_uw = read_uint64_fd(gpu_power_fd_);

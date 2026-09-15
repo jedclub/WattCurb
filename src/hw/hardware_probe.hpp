@@ -92,6 +92,8 @@ private:
     std::filesystem::path gpu_link_speed_path_;
     std::filesystem::path gpu_link_width_path_;
     std::filesystem::path drm_device_path_;
+    bool gpu_is_apu_ppt_{false};
+    core::FixedString<16> gpu_power_label_{};
 
     // 4. Storage / NVMe paths
     std::filesystem::path nvme_status_path_;

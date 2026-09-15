@@ -65,8 +65,10 @@ struct HardwareSample {
     std::array<uint64_t, 4> cstate_time_us{}; // Aggregate POLL, C1, C2, C3
     std::array<char, 16> cpu_governor{};
 
-    // 3. Graphics Processing Unit (AMDGPU / DRM) (REF-REQ-010 Sec 2.3)
-    std::optional<uint64_t> gpu_power_uw; // Package Power Tracking (PPT)
+    // 3. Graphics Processing Unit (AMDGPU / DRM) (REF-REQ-010 Sec 2.3, REF-REQ-051)
+    std::optional<uint64_t> gpu_power_uw; // Raw power reading (Package Power Tracking or discrete board)
+    bool gpu_is_apu_ppt{false};           // True if sensor is APU Package Power Tracking (PPT), not standalone dGPU
+    std::array<char, 16> gpu_power_label{}; // Sensor label (e.g. "PPT", "edge", "VDDGFX")
     std::optional<uint32_t> gpu_busy_percent;
     std::optional<uint64_t> gpu_freq_hz;
     std::optional<int32_t> gpu_temp_mdeg;

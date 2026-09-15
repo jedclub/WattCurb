@@ -244,6 +244,8 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 38
                             antialiasing: true
+                            renderStrategy: Canvas.Threaded
+                            renderTarget: Canvas.FramebufferObject
 
                             Connections {
                                 target: backend
@@ -431,6 +433,8 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 32
                             antialiasing: true
+                            renderStrategy: Canvas.Threaded
+                            renderTarget: Canvas.FramebufferObject
 
                             Connections {
                                 target: backend
@@ -507,6 +511,8 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 30
                             antialiasing: true
+                            renderStrategy: Canvas.Threaded
+                            renderTarget: Canvas.FramebufferObject
 
                             Connections {
                                 target: backend
@@ -624,6 +630,8 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             antialiasing: true
+                            renderStrategy: Canvas.Threaded
+                            renderTarget: Canvas.FramebufferObject
 
                             Connections {
                                 target: backend
@@ -741,6 +749,8 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             clip: true
+                            reuseItems: true
+                            cacheBuffer: 150
                             model: backend.processList
                             spacing: 3
 
