@@ -67,6 +67,10 @@ void TrayClient::cleanup() noexcept {
         sd_bus_slot_unref(menu_slot_);
         menu_slot_ = nullptr;
     }
+    if (match_slot_) {
+        sd_bus_slot_unref(match_slot_);
+        match_slot_ = nullptr;
+    }
     if (slot_) {
         sd_bus_slot_unref(slot_);
         slot_ = nullptr;
@@ -130,6 +134,42 @@ static void build_unicode_bar(char* out, size_t out_cap, unsigned int percent, u
     out[pos] = '\0';
 }
 
+// Zero-allocation UTF-8 truncation guard (REF-REQ-047)
+// Ensures that if snprintf truncates in the middle of a multibyte UTF-8 character,
+// the incomplete byte sequence is cleanly terminated, preventing D-Bus -EINVAL rejection.
+static void sanitize_utf8_inplace(char* s) noexcept {
+    if (!s) return;
+    size_t len = std::strlen(s);
+    if (len == 0) return;
+
+    for (size_t lookback = 1; lookback <= 4 && lookback <= len; ++lookback) {
+        unsigned char lead = static_cast<unsigned char>(s[len - lookback]);
+        if ((lead & 0x80) == 0x00) {
+            // Pure ASCII boundary
+            break;
+        }
+        if ((lead & 0xC0) == 0x80) {
+            // Continuation byte, keep searching backward for lead byte
+            continue;
+        }
+        if ((lead & 0xE0) == 0xC0) {
+            // 2-byte sequence expecting 2 bytes total (lookback == 2)
+            if (lookback < 2) s[len - lookback] = '\0';
+            break;
+        }
+        if ((lead & 0xF0) == 0xE0) {
+            // 3-byte sequence expecting 3 bytes total (lookback == 3)
+            if (lookback < 3) s[len - lookback] = '\0';
+            break;
+        }
+        if ((lead & 0xF8) == 0xF0) {
+            // 4-byte sequence expecting 4 bytes total (lookback == 4)
+            if (lookback < 4) s[len - lookback] = '\0';
+            break;
+        }
+    }
+}
+
 void TrayClient::render_tooltip(
     const ipc::WattCurbSharedState& state,
     char* out_title, size_t title_cap,
@@ -160,8 +200,8 @@ void TrayClient::render_tooltip(
     unsigned int plat_w = plat_drain / 1000;
     unsigned int plat_frac = (plat_drain % 1000) / 100;
 
-    // Remaining time format
-    char time_buf[32]{};
+    // Remaining time format (Expanded to 128 bytes to prevent UTF-8 truncation)
+    char time_buf[128]{};
     if (state.battery_state == 1) {
         if (state.time_to_empty_min >= 60) {
             std::snprintf(time_buf, sizeof(time_buf), "%u시간 %02u분 남음", state.time_to_empty_min / 60, state.time_to_empty_min % 60);
@@ -233,7 +273,7 @@ void TrayClient::render_tooltip(
             state.culprits[1].comm, state.culprits[1].pid, c2_w, c2_f, c2_pct, c2_bar);
     }
 
-    char mitig_buf[64]{};
+    char mitig_buf[128]{};
     if (state.power_profile_mode == 0) {
         std::snprintf(mitig_buf, sizeof(mitig_buf), "전면 개방 (4.1G 풀파워 언락)");
     } else if (state.active_mitigations > 0) {
@@ -273,6 +313,9 @@ void TrayClient::render_tooltip(
         top1_buf, top2_buf,
         profile_name, mitig_buf
     );
+
+    sanitize_utf8_inplace(out_desc);
+    sanitize_utf8_inplace(out_title);
 }
 
 void TrayClient::resolve_icon_name(
@@ -373,7 +416,40 @@ bool TrayClient::setup_dbus() noexcept {
     r = sd_bus_add_object_vtable(bus_, &menu_slot_, "/MenuBar", "com.canonical.dbusmenu", dbusmenu_vtable, this);
     if (r < 0) return false;
 
+    // Implements REF-REQ-047: Watch for org.kde.StatusNotifierWatcher appearance on D-Bus
+    // When plasmashell/kded6 boots or restarts, automatically re-register immediately.
+    r = sd_bus_match_signal(
+        bus_,
+        &match_slot_,
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "NameOwnerChanged",
+        on_name_owner_changed,
+        this
+    );
+
     return true;
+}
+
+int TrayClient::on_name_owner_changed(sd_bus_message* msg, void* userdata, sd_bus_error*) {
+    auto* self = static_cast<TrayClient*>(userdata);
+    if (!self || !msg) return 0;
+
+    const char* name = nullptr;
+    const char* old_owner = nullptr;
+    const char* new_owner = nullptr;
+    int r = sd_bus_message_read(msg, "sss", &name, &old_owner, &new_owner);
+    if (r >= 0 && name && std::strcmp(name, "org.kde.StatusNotifierWatcher") == 0) {
+        if (new_owner && new_owner[0] != '\0') {
+            // Watcher service appeared or restarted on bus
+            self->register_with_watcher();
+        } else {
+            // Watcher disappeared
+            self->watcher_registered_ = false;
+        }
+    }
+    return 0;
 }
 
 bool TrayClient::register_with_watcher() noexcept {
@@ -391,19 +467,22 @@ bool TrayClient::register_with_watcher() noexcept {
         service_name_
     );
     if (r >= 0) {
+        watcher_registered_ = true;
         // Emit initial change signals to trigger plasmashell to query properties immediately
         sd_bus_emit_signal(bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewIcon", nullptr);
         sd_bus_emit_signal(bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewStatus", "s", "Active");
         sd_bus_emit_signal(bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewToolTip", nullptr);
         sd_bus_flush(bus_);
+        return true;
     }
-    return (r >= 0);
+    watcher_registered_ = false;
+    return false;
 }
 
 bool TrayClient::initialize() noexcept {
     setup_shm(); // Non-fatal: if daemon is not yet running, local defaults apply
     if (!setup_dbus()) return false;
-    register_with_watcher(); // Non-fatal if watcher is starting up
+    register_with_watcher(); // Non-fatal if watcher is still starting up
     return true;
 }
 
@@ -421,6 +500,12 @@ int TrayClient::run() noexcept {
         // Wakes up on D-Bus events instantly, or at least once every 3s to sync live telemetry
         r = sd_bus_wait(bus_, 3'000'000ULL);
         if (r < 0 && r != -EINTR) break;
+
+        // Implements REF-REQ-047: If initial registration failed during desktop cold boot,
+        // retry periodically until StatusNotifierWatcher is acquired.
+        if (!watcher_registered_) {
+            register_with_watcher();
+        }
 
         // Periodic state check: read 128-byte Seqlock SHM (< 50ns, zero-allocation)
         ipc::WattCurbSharedState cur_state{};
@@ -483,6 +568,7 @@ int TrayClient::property_get_icon_name(sd_bus*, const char*, const char*, const 
 
     char icon[64]{};
     resolve_icon_name(state, icon, sizeof(icon));
+    sanitize_utf8_inplace(icon);
     return sd_bus_message_append(reply, "s", icon);
 }
 
@@ -493,10 +579,13 @@ int TrayClient::property_get_tooltip(sd_bus*, const char*, const char*, const ch
 
     char icon[64]{};
     resolve_icon_name(state, icon, sizeof(icon));
+    sanitize_utf8_inplace(icon);
 
     char title[128]{};
     char desc[8192]{};
     render_tooltip(state, title, sizeof(title), desc, sizeof(desc));
+    sanitize_utf8_inplace(title);
+    sanitize_utf8_inplace(desc);
 
     // Open structure (sa(iiay)ss)
     int r = sd_bus_message_open_container(reply, 'r', "sa(iiay)ss");

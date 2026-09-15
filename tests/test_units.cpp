@@ -1650,6 +1650,44 @@ void test_thinkpower_tray_client() {
     assert(std::string_view(desc).find("kwin_wayland") != std::string_view::npos);
     assert(std::string_view(desc).find("SmartSave") != std::string_view::npos);
 
+    // Verify AC charging and AC direct state UTF-8 validity (REF-REQ-047)
+    auto verify_utf8 = [](const char* s) {
+        const unsigned char* bytes = reinterpret_cast<const unsigned char*>(s);
+        size_t i = 0;
+        while (bytes[i] != 0) {
+            if (bytes[i] <= 0x7F) {
+                i += 1;
+            } else if ((bytes[i] & 0xE0) == 0xC0) {
+                assert((bytes[i+1] & 0xC0) == 0x80 && "Malformed 2-byte UTF-8 sequence!");
+                i += 2;
+            } else if ((bytes[i] & 0xF0) == 0xE0) {
+                assert((bytes[i+1] & 0xC0) == 0x80 && (bytes[i+2] & 0xC0) == 0x80 && "Malformed 3-byte UTF-8 sequence!");
+                i += 3;
+            } else if ((bytes[i] & 0xF8) == 0xF0) {
+                assert((bytes[i+1] & 0xC0) == 0x80 && (bytes[i+2] & 0xC0) == 0x80 && (bytes[i+3] & 0xC0) == 0x80 && "Malformed 4-byte UTF-8 sequence!");
+                i += 4;
+            } else {
+                assert(false && "Invalid UTF-8 lead byte!");
+            }
+        }
+    };
+
+    verify_utf8(title);
+    verify_utf8(desc);
+
+    // Test battery_state = 0 (Charging) & battery_state = 2 (AC passthrough)
+    state.battery_state = 0;
+    TrayClient::render_tooltip(state, title, sizeof(title), desc, sizeof(desc));
+    verify_utf8(title);
+    verify_utf8(desc);
+    assert(std::string_view(desc).find("충전 중 (완충 시 자동보호)") != std::string_view::npos);
+
+    state.battery_state = 2;
+    TrayClient::render_tooltip(state, title, sizeof(title), desc, sizeof(desc));
+    verify_utf8(title);
+    verify_utf8(desc);
+    assert(std::string_view(desc).find("완충 AC 직결") != std::string_view::npos);
+
     // 2. Icon Name Resolution Test (Breeze 10% quantized battery + profile icons)
     char icon[64]{};
     state.battery_percent = 82; // rounds to 080

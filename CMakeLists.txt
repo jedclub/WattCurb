@@ -99,6 +99,7 @@ target_link_libraries(wattcurb PRIVATE wattcurb_lib)
 add_executable(wattcurb-tray
     src/tray/main_tray.cpp
     src/tray/tray_client.cpp
+    src/core/singleton_lock.cpp
 )
 target_include_directories(wattcurb-tray PRIVATE src ${SYSTEMD_INCLUDE_DIRS})
 target_link_libraries(wattcurb-tray PRIVATE ${SYSTEMD_LIBRARIES})
@@ -151,3 +152,12 @@ add_custom_target(wattcurb_asm
     COMMENT "Generating verbose Intel-syntax assembly dumps in build/asm/..."
 )
 
+# Installation targets for release deployment
+install(TARGETS wattcurb wattcurb-tray
+    RUNTIME DESTINATION bin
+)
+if(TARGET wattcurb-dashboard)
+    install(TARGETS wattcurb-dashboard
+        RUNTIME DESTINATION bin
+    )
+endif()

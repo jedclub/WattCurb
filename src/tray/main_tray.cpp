@@ -1,4 +1,5 @@
 #include "tray/tray_client.hpp"
+#include "core/singleton_lock.hpp"
 #include <csignal>
 #include <cstdio>
 #include <unistd.h>
@@ -16,6 +17,13 @@ void signal_handler(int sig) noexcept {
 int main(int argc, char* argv[]) {
     // Implements REF-REQ-035 & REF-ARCH-025:
     // Standalone Ultra-Low-Overhead SNI Desktop Tray Client for WattCurb
+
+    // Enforce singleton instance: prevents duplicate tray icons on concurrent autostart & systemd launches
+    wattcurb::core::SingletonLock tray_lock("wattcurb-tray.lock");
+    if (!tray_lock.is_locked()) {
+        std::fprintf(stderr, "[WattCurb-Tray] Another instance is already running. Exiting cleanly.\n");
+        return 0;
+    }
 
     struct sigaction sa{};
     sa.sa_handler = signal_handler;

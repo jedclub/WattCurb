@@ -67,6 +67,9 @@ public:
     static int method_context_menu(sd_bus_message* msg, void* userdata, sd_bus_error* error);
     static int method_noop(sd_bus_message* msg, void* userdata, sd_bus_error* error);
 
+    // D-Bus Signal Callbacks
+    static int on_name_owner_changed(sd_bus_message* msg, void* userdata, sd_bus_error* error);
+
     // com.canonical.dbusmenu VTable callbacks
     static int dbusmenu_property_get_version(sd_bus* bus, const char* path, const char* interface, const char* property, sd_bus_message* reply, void* userdata, sd_bus_error* error);
     static int dbusmenu_property_get_status(sd_bus* bus, const char* path, const char* interface, const char* property, sd_bus_message* reply, void* userdata, sd_bus_error* error);
@@ -83,12 +86,15 @@ private:
     sd_bus* bus_{nullptr};
     sd_bus_slot* slot_{nullptr};
     sd_bus_slot* menu_slot_{nullptr};
+    sd_bus_slot* match_slot_{nullptr};
     int shm_fd_{-1};
     const ipc::WattCurbSharedState* shm_state_{nullptr};
     bool running_{false};
+    bool watcher_registered_{false};
     char service_name_[64]{0};
     uint32_t menu_revision_{1};
     int local_override_mode_{-1};
 };
 
 } // namespace wattcurb::tray
+
