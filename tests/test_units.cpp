@@ -607,6 +607,36 @@ void test_process_classifier() {
 
     auto c_pipe = ProcessClassifierDB::classify("pipewire");
     assert(c_pipe.tier == ProcessSafetyTier::CriticalImmune);
+    assert(c_pipe.can_throttle_scheduler == false);
+
+    // REF-REQ-049: pipewire-pulse & audio stack immunity
+    auto c_pipe_pulse = ProcessClassifierDB::classify("pipewire-pulse");
+    assert(c_pipe_pulse.tier == ProcessSafetyTier::CriticalImmune);
+    assert(c_pipe_pulse.can_throttle_scheduler == false);
+
+    auto c_pipe_ms = ProcessClassifierDB::classify("pipewire-media-session");
+    assert(c_pipe_ms.tier == ProcessSafetyTier::CriticalImmune);
+    assert(c_pipe_ms.can_throttle_scheduler == false);
+
+    auto c_wp = ProcessClassifierDB::classify("wireplumber");
+    assert(c_wp.tier == ProcessSafetyTier::CriticalImmune);
+    assert(c_wp.can_throttle_scheduler == false);
+
+    auto c_pa = ProcessClassifierDB::classify("pulseaudio");
+    assert(c_pa.tier == ProcessSafetyTier::CriticalImmune);
+    assert(c_pa.can_throttle_scheduler == false);
+
+    auto c_jack = ProcessClassifierDB::classify("jackdbus");
+    assert(c_jack.tier == ProcessSafetyTier::CriticalImmune);
+    assert(c_jack.can_throttle_scheduler == false);
+
+    auto c_alsa = ProcessClassifierDB::classify("alsactl");
+    assert(c_alsa.tier == ProcessSafetyTier::CriticalImmune);
+    assert(c_alsa.can_throttle_scheduler == false);
+
+    auto c_rtkit = ProcessClassifierDB::classify("rtkit-daemon");
+    assert(c_rtkit.tier == ProcessSafetyTier::CriticalImmune);
+    assert(c_rtkit.can_throttle_scheduler == false);
 
     auto c_kw = ProcessClassifierDB::classify("kworker/u16:1");
     assert(c_kw.tier == ProcessSafetyTier::CriticalImmune);
@@ -672,6 +702,15 @@ void test_mitigation_engine() {
     crit_p.safety_tier = static_cast<uint8_t>(ProcessSafetyTier::CriticalImmune);
     crit_p.wdi_score = 25.0;
     mock_report.top_processes.push_back(crit_p);
+
+    // REF-REQ-049: PipeWire-pulse must NEVER be throttled or frozen
+    ProcessAttributedPower audio_p;
+    audio_p.pid = 9993;
+    audio_p.comm = "pipewire-pulse";
+    audio_p.cpu_watts = 1.2;
+    audio_p.safety_tier = static_cast<uint8_t>(ProcessSafetyTier::CriticalImmune);
+    audio_p.wdi_score = 30.0;
+    mock_report.top_processes.push_back(audio_p);
 
     // Create a Background Worker (eligible for mitigation)
     ProcessAttributedPower bg_p;

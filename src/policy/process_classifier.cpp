@@ -5,9 +5,12 @@ namespace wattcurb::policy {
 
 // Implements REF-RES-008 & REF-ARCH-008: Process Knowledge Base
 ProcessClassification ProcessClassifierDB::classify(std::string_view comm) noexcept {
-    // 1. Tier 0: Critical Kernel & Init Services (CRITICAL_IMMUNE)
+    // 1. Tier 0: Critical Kernel, Audio & Init Services (CRITICAL_IMMUNE)
+    // REF-REQ-049: Absolute Realtime Immunity for PipeWire, PulseAudio, and Audio Stack
     if (comm == "systemd" || comm == "init" || comm == "kthreadd" ||
-        comm.starts_with("kworker") || comm == "pipewire" || comm == "wireplumber" ||
+        comm.starts_with("kworker") || comm.starts_with("pipewire") || comm.starts_with("wireplumber") ||
+        comm == "pulseaudio" || comm.starts_with("jackd") || comm == "jackdbus" ||
+        comm == "alsactl" || comm == "rtkit-daemon" || comm == "sndiod" ||
         comm == "dbus-broker" || comm == "dbus-daemon" || comm == "seatd" ||
         comm == "polkitd" || comm == "udevd" || comm == "systemd-journal" ||
         comm == "systemd-resolve" || comm == "systemd-logind" || comm == "NetworkManager" ||

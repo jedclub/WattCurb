@@ -12,7 +12,7 @@ namespace wattcurb::policy {
 // Closed-Loop Adaptive Mitigation Engine with 3-Tier State Machine & Bidirectional Rollback
 class MitigationEngine {
 public:
-    MitigationEngine() noexcept = default;
+    MitigationEngine() noexcept;
 
     // Evaluates current power report, determines profile via hysteresis, and applies closed-loop actuations
     ActiveMitigationStatus evaluate_and_actuate(
@@ -46,6 +46,10 @@ public:
     static bool set_cpu_epp_policy(const char* policy) noexcept;
     static bool cap_display_backlight(double max_pct) noexcept;
     static bool restore_display_backlight() noexcept;
+
+    // Process Immunity & Audio Protection (REF-REQ-049)
+    static bool is_immune_process(int32_t pid) noexcept;
+    static void audit_and_heal_audio_stack() noexcept;
 
     // Fast resolution of cgroup v2 path for a given pid without heap allocations
     static bool resolve_cgroup_path(int32_t pid, char* out_buf, size_t out_cap) noexcept;
