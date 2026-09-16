@@ -362,49 +362,53 @@ void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample, const 
         if ((sample.utime_ticks + sample.stime_ticks < 20 && sample.voluntary_ctxt_switches < 50) ||
             (sample.num_threads == 1 && sample.io_syscalls == 0 && sample.minflt == 0)) {
             sample.open_sockets = 0;
-            sample.pinned_drm_fd = -1;
+            sample.pinned_drm_fd = -1; // Unchecked ephemeral process
             return;
         }
     }
 
-    // 1. Persistent DRM FD Pinning (REF-RES-006):
+    // 1. Persistent DRM FD Pinning (REF-RES-006, REF-REQ-051):
     // If we previously located a DRM render node FD for this PID, query its fdinfo directly with ZERO readlinkat!
     bool drm_resolved = false;
-    if (prev != nullptr && prev->pinned_drm_fd >= 0) {
-        char info_path[160];
-        std::snprintf(info_path, sizeof(info_path), "%s/%d/fdinfo/%d", procfs_root_.c_str(), pid, prev->pinned_drm_fd);
-        alignas(64) char fdinfo_buf[2048];
-        size_t bytes = 0;
-        {
-            WATTCURB_PROFILE_SCOPE("proc.fd_drm_fdinfo");
-            if (read_file_to_stack_buf(info_path, fdinfo_buf, sizeof(fdinfo_buf), bytes)) {
-                if (parse_drm_fdinfo(std::string_view(fdinfo_buf, bytes), sample)) {
-                    sample.pinned_drm_fd = prev->pinned_drm_fd;
-                    drm_resolved = true;
+    if (prev != nullptr) {
+        if (prev->pinned_drm_fd >= 0) {
+            char info_path[160];
+            std::snprintf(info_path, sizeof(info_path), "%s/%d/fdinfo/%d", procfs_root_.c_str(), pid, prev->pinned_drm_fd);
+            alignas(64) char fdinfo_buf[2048];
+            size_t bytes = 0;
+            {
+                WATTCURB_PROFILE_SCOPE("proc.fd_drm_fdinfo");
+                if (read_file_to_stack_buf(info_path, fdinfo_buf, sizeof(fdinfo_buf), bytes)) {
+                    if (parse_drm_fdinfo(std::string_view(fdinfo_buf, bytes), sample)) {
+                        sample.pinned_drm_fd = prev->pinned_drm_fd;
+                        drm_resolved = true;
+                    }
                 }
             }
+        } else if (prev->pinned_drm_fd == -2) {
+            // Already verified in previous turns that this is a Non-GPU process!
+            sample.pinned_drm_fd = -2;
+            drm_resolved = true;
+        } else {
+            sample.pinned_drm_fd = -1;
         }
     }
 
-    // 2. Fast Socket and FD Bypass (REF-RES-006, REF-RES-007, REF-REQ-027):
+    // 2. Fast Socket and FD Bypass (REF-RES-006, REF-RES-007, REF-REQ-027, REF-REQ-052):
     // If previous sample exists, preserve socket count.
     // WiFi CAM attribution strictly requires wakeups_per_sec > 10 (delta_sw >= 20 over 2s).
-    // Processes below this rate cannot hold WiFi radio in active mode; skip expensive fd inspection!
+    // In steady state, established processes maintain static socket counts; eliminate VFS readlink storms!
     if (prev != nullptr) {
         sample.open_sockets = prev->open_sockets;
-        if (drm_resolved || prev->pinned_drm_fd == -1) {
-            uint64_t cur_sw = sample.voluntary_ctxt_switches + sample.nonvoluntary_ctxt_switches;
-            uint64_t prev_sw = prev->voluntary_ctxt_switches + prev->nonvoluntary_ctxt_switches;
-            uint64_t delta_sw = (cur_sw >= prev_sw) ? (cur_sw - prev_sw) : 0;
-
-            // If process had 0 sockets previously and no significant context switches or I/O, skip!
+        if (drm_resolved || prev->pinned_drm_fd <= 0) {
+            // If process had 0 sockets previously, rescan only periodically every 10 passes (~20s) (REF-REQ-052)
             if (prev->open_sockets == 0) {
-                if (delta_sw < 200 && (pass_counter_ % 8 != 0)) {
+                if (pass_counter_ % 10 != 0) {
                     return;
                 }
             } else {
-                // Established network processes: rescan every 6 passes (~12s) to eliminate VFS readlink storms (REF-REQ-027)
-                if (pass_counter_ % 6 != 0) {
+                // Established network processes: rescan every 8 passes (~16s) to eliminate VFS readlink storms (REF-REQ-027)
+                if (pass_counter_ % 8 != 0) {
                     return;
                 }
             }
@@ -489,6 +493,9 @@ void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample, const 
         }
     }
     sample.open_sockets = sockets_count;
+    if (!drm_resolved && sample.pinned_drm_fd < 0) {
+        sample.pinned_drm_fd = -2; // Full scan verified that this process has NO DRM render node!
+    }
 
     ::close(dfd);
 }

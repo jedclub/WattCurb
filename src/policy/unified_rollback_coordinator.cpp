@@ -9,6 +9,11 @@ bool UnifiedRollbackCoordinator::execute_rapid_rollback(
     WindowAwareGovernor& window_gov,
     uint64_t now_ns
 ) noexcept {
+    // Fast idempotent bypass: if system is already at clean baseline, return immediately with zero syscalls
+    if (s_state.is_clean_baseline && window_gov.tracked_count() == 0 && mitigation.tracked_count() == 0) {
+        return true;
+    }
+
     // 1. Process Domain (Window Governor): Unthrottle all minimized background applications
     window_gov.rollback_all();
 

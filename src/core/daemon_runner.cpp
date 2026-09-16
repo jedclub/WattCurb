@@ -139,50 +139,39 @@ bool DaemonRunner::initialize() {
     return true;
 }
 
-void DaemonRunner::collect_observation_window() {
-    WATTCURB_PROFILE_SCOPE("daemon.collect_window");
+void DaemonRunner::process_observation_cycle() {
+    WATTCURB_PROFILE_SCOPE("daemon.observation_cycle");
 
-    // 1. T0: Capture start baseline
-    decltype(hw_probe_.capture_sample()) hw_start{};
-    {
-        WATTCURB_PROFILE_SCOPE("daemon.hw_capture_start");
-        hw_start = hw_probe_.capture_sample();
-    }
-    auto& start_snapshot = proc_pool_.current();
-    {
-        WATTCURB_PROFILE_SCOPE("daemon.proc_snapshot_start");
-        proc_analyzer_.capture_snapshot(start_snapshot);
+    if (!has_baseline_) {
+        hw_prev_ = hw_probe_.capture_sample();
+        proc_analyzer_.capture_snapshot(proc_pool_.current());
+        has_baseline_ = true;
+        return;
     }
 
-    // 2. Continuous Observation Window (~1 to 5 seconds)
-    auto sleep_us = static_cast<useconds_t>(window_sec_ * 1'000'000.0);
-    ::usleep(sleep_us);
+    // 1. T1: Continuous observation sample without redundant usleep
+    auto hw_cur = hw_probe_.capture_sample();
+    auto& prev_snapshot = proc_pool_.current();
+    auto& cur_snapshot = proc_pool_.next();
 
-    // 3. T1: Capture end state
-    decltype(hw_probe_.capture_sample()) hw_end{};
     {
-        WATTCURB_PROFILE_SCOPE("daemon.hw_capture_end");
-        hw_end = hw_probe_.capture_sample();
-    }
-    auto& end_snapshot = proc_pool_.next();
-    {
-        WATTCURB_PROFILE_SCOPE("daemon.proc_snapshot_end");
-        proc_analyzer_.capture_snapshot(end_snapshot, &start_snapshot);
+        WATTCURB_PROFILE_SCOPE("daemon.proc_snapshot");
+        proc_analyzer_.capture_snapshot(cur_snapshot, &prev_snapshot);
     }
 
-    // 4. Compute Full-Domain Physical Attribution
+    // 2. Compute Full-Domain Physical Attribution
     {
         WATTCURB_PROFILE_SCOPE("daemon.compute_attribution");
         cached_report_ = engine_.compute_attribution(
-            hw_start,
-            hw_end,
-            start_snapshot.span(),
-            end_snapshot.span(),
+            hw_prev_,
+            hw_cur,
+            prev_snapshot.span(),
+            cur_snapshot.span(),
             20
         );
     }
 
-    // 5. Modular Battery Optimization Feature Actuation (REF-REQ-020 & REF-ARCH-009)
+    // 3. Modular Battery Optimization Feature Actuation (REF-REQ-020 & REF-ARCH-009)
     {
         WATTCURB_PROFILE_SCOPE("daemon.evaluate_and_actuate");
         bool on_battery = cached_report_.hardware.is_battery_discharging;
@@ -190,7 +179,7 @@ void DaemonRunner::collect_observation_window() {
         feature_manager_.evaluate_and_actuate(cached_report_, on_battery, batt_pct);
     }
 
-    // 6. Ultra-Fast 128-Byte Seqlock POD Export (REF-REQ-028, REF-ARCH-018)
+    // 4. Ultra-Fast 128-Byte Seqlock POD Export (REF-REQ-028, REF-ARCH-018)
     {
         WATTCURB_PROFILE_SCOPE("daemon.shm_update");
         local_shared_state_.update_from_report(cached_report_);
@@ -199,6 +188,7 @@ void DaemonRunner::collect_observation_window() {
         }
     }
 
+    hw_prev_ = std::move(hw_cur);
     proc_pool_.swap(); // 0ns pointer swap
 }
 
@@ -209,10 +199,16 @@ int DaemonRunner::run() {
 
     running_ = true;
     std::cout << "[*] WattCurb background daemon initialized (PID: " << ::getpid()
-              << ", period: " << period_sec_ << "s, window: " << window_sec_ << "s, Zero-Wakeup active)\n" << std::flush;
+              << ", period: " << period_sec_ << "s, Zero-Wakeup active)\n" << std::flush;
 
     // Initial baseline capture immediately upon startup
-    collect_observation_window();
+    hw_prev_ = hw_probe_.capture_sample();
+    proc_analyzer_.capture_snapshot(proc_pool_.current());
+    has_baseline_ = true;
+
+    // Quick initial warm-up (0.5s) to populate shared memory and report before entering timer sleep
+    ::usleep(500000);
+    process_observation_cycle();
 
     struct epoll_event events[8];
 
@@ -232,9 +228,8 @@ int DaemonRunner::run() {
                 ssize_t s = ::read(timer_fd_, &expirations, sizeof(expirations));
                 (void)s;
 
-                // Collect 5-second window observation and apply mitigation
-                collect_observation_window();
-
+                // Stream one continuous window observation with zero redundant wakeups (REF-REQ-052)
+                process_observation_cycle();
             } else if (fd == signal_fd_) {
                 struct signalfd_siginfo fdsi{};
                 ssize_t s = ::read(signal_fd_, &fdsi, sizeof(fdsi));
@@ -407,7 +402,7 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
         ::sendto(fd, ack, sizeof(ack) - 1, 0,
                  reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
     } else if (req.find("RESCAN") != std::string_view::npos) {
-        collect_observation_window();
+        process_observation_cycle();
         const char ack[] = "OK\n";
         ::sendto(fd, ack, sizeof(ack) - 1, 0,
                  reinterpret_cast<struct sockaddr*>(&client_addr), client_len);

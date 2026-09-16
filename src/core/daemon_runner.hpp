@@ -45,6 +45,8 @@ private:
     policy::FeatureManager feature_manager_;
     ProcessPool proc_pool_;
     AnalysisReportData cached_report_;
+    HardwareSample hw_prev_{};
+    bool has_baseline_{false};
 
     ipc::WattCurbSharedState local_shared_state_{};
     ipc::WattCurbSharedState* shm_state_{nullptr};
@@ -57,7 +59,7 @@ private:
     bool setup_timer();
     bool setup_signals();
     bool setup_shm();
-    void collect_observation_window();
+    void process_observation_cycle();
     void handle_ipc_datagram(int fd);
     void cleanup_descriptors() noexcept;
 };
