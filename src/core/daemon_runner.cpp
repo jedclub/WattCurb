@@ -13,6 +13,7 @@
 #include <sys/prctl.h>
 #include <sys/signalfd.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/timerfd.h>
 #include <sys/un.h>
 #include <thread>
@@ -81,6 +82,7 @@ bool DaemonRunner::setup_shm() {
     if (shm_fd_ < 0) {
         return false;
     }
+    ::fchmod(shm_fd_, 0666); // Explicitly ensure world-readability even under root umask
     if (::ftruncate(shm_fd_, sizeof(ipc::WattCurbSharedState)) < 0) {
         ::close(shm_fd_);
         shm_fd_ = -1;

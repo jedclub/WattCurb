@@ -372,70 +372,13 @@ bool MitigationEngine::set_cpu_epp_policy(const char* policy) noexcept {
     return (written > 0);
 }
 
-bool MitigationEngine::cap_display_backlight(double max_pct) noexcept {
-    DIR* dir = ::opendir("/sys/class/backlight");
-    if (!dir) return false;
-
-    struct dirent* entry = nullptr;
-    bool success = false;
-    while ((entry = ::readdir(dir)) != nullptr) {
-        if (entry->d_name[0] == '.') continue;
-
-        char path[256];
-        std::snprintf(path, sizeof(path), "/sys/class/backlight/%s/max_brightness", entry->d_name);
-        char max_buf[32]{};
-        if (core::fs::read_small_file(path, max_buf, sizeof(max_buf)) <= 0) continue;
-        uint32_t max_b = static_cast<uint32_t>(std::strtoul(max_buf, nullptr, 10));
-        if (max_b == 0) continue;
-
-        std::snprintf(path, sizeof(path), "/sys/class/backlight/%s/brightness", entry->d_name);
-        char cur_buf[32]{};
-        if (core::fs::read_small_file(path, cur_buf, sizeof(cur_buf)) <= 0) continue;
-        uint32_t cur_b = static_cast<uint32_t>(std::strtoul(cur_buf, nullptr, 10));
-
-        // Save original level and device name if not already saved
-        if (s_saved_backlight_level == 0) {
-            s_saved_backlight_level = cur_b;
-            std::strncpy(s_saved_backlight_device, entry->d_name, sizeof(s_saved_backlight_device) - 1);
-            s_saved_backlight_device[sizeof(s_saved_backlight_device) - 1] = '\0';
-        }
-
-        uint32_t cap_target = static_cast<uint32_t>(max_b * (max_pct / 100.0));
-        if (cur_b > cap_target) {
-            int fd = ::open(path, O_WRONLY | O_CLOEXEC);
-            if (fd >= 0) {
-                char write_buf[32];
-                int wlen = std::snprintf(write_buf, sizeof(write_buf), "%u\n", cap_target);
-                ssize_t written = ::write(fd, write_buf, static_cast<size_t>(wlen));
-                ::close(fd);
-                if (written > 0) {
-                    success = true;
-                }
-            }
-        }
-    }
-    ::closedir(dir);
-    return success;
+bool MitigationEngine::cap_display_backlight(double /*max_pct*/) noexcept {
+    // Preserves user display brightness invariant: WattCurb must NEVER forcibly dim the user's screen.
+    return true;
 }
 
 bool MitigationEngine::restore_display_backlight() noexcept {
-    if (s_saved_backlight_level == 0 || s_saved_backlight_device[0] == '\0') {
-        return false;
-    }
-
-    char path[256];
-    std::snprintf(path, sizeof(path), "/sys/class/backlight/%s/brightness", s_saved_backlight_device);
-    int fd = ::open(path, O_WRONLY | O_CLOEXEC);
-    if (fd < 0) return false;
-
-    char write_buf[32];
-    int wlen = std::snprintf(write_buf, sizeof(write_buf), "%u\n", s_saved_backlight_level);
-    ssize_t written = ::write(fd, write_buf, static_cast<size_t>(wlen));
-    ::close(fd);
-
-    s_saved_backlight_level = 0;
-    s_saved_backlight_device[0] = '\0';
-    return (written > 0);
+    return true;
 }
 
 void MitigationEngine::rollback_all() noexcept {

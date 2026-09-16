@@ -1,0 +1,15 @@
+[Unit]
+Description=WattCurb Ultra-Low-Overhead Power Profiling & Mitigation Daemon (Root System Service)
+Documentation=https://github.com/jedclub/WattCurb
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/wattcurb --daemon --period 3.0
+Restart=on-failure
+RestartSec=3
+KillMode=mixed
+TimeoutStopSec=2
+
+[Install]
+WantedBy=multi-user.target

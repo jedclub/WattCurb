@@ -388,13 +388,8 @@ static void apply_hardware_profile(const char* mode) noexcept {
         }
     }
 
-    if (::access("/home/jedclub/.local/bin/power-profile-manager", X_OK) == 0) {
-        pid_t pid = ::fork();
-        if (pid == 0) {
-            ::execl("/home/jedclub/.local/bin/power-profile-manager", "power-profile-manager", mode, "--internal", nullptr);
-            ::_exit(0);
-        }
-    }
+    // Note: The unprivileged tray client does NOT fork power-profile-manager directly
+    // to prevent pkexec authorization prompts. The root daemon executes hardware profile actuation.
 }
 
 bool TrayClient::send_daemon_command(const char* cmd) noexcept {
@@ -686,16 +681,14 @@ int TrayClient::property_get_xayatana_label_guide(sd_bus*, const char*, const ch
 
 int TrayClient::method_activate(sd_bus_message*, void* userdata, sd_bus_error*) {
     auto* self = static_cast<TrayClient*>(userdata);
-    // Implements REF-REQ-045: Explicit Menu Activation for Matrix Dashboard
-    // The intensive Qt Quick Matrix Dashboard must NEVER be triggered by simple left-clicking.
-    // Left-clicking cycles power profiles cleanly as originally specified in REF-REQ-035.
+    // User safety invariant: Left-clicking must NEVER automatically cycle power profiles.
+    // Power profiles must only be explicitly selected via the context menu.
+    // Left-clicking requests an instant telemetry refresh.
     if (self) {
-        self->cycle_power_profile();
+        self->send_daemon_command("RESCAN\n");
         if (self->bus_) {
-            sd_bus_emit_signal(self->bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewIcon", nullptr);
             sd_bus_emit_signal(self->bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewToolTip", nullptr);
             sd_bus_emit_signal(self->bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "XAyatanaNewLabel", nullptr);
-            sd_bus_emit_signal(self->bus_, "/MenuBar", "com.canonical.dbusmenu", "LayoutUpdated", "ui", ++self->menu_revision_, 0);
         }
     }
     return 0;

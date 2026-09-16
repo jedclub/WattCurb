@@ -377,18 +377,7 @@ void DashboardBackend::setProfile(int mode) {
     std::snprintf(cmd, sizeof(cmd), "PROFILE %d\n", mode);
     sendDaemonCommand(cmd);
 
-    // Apply hardware changes via CLI script immediately (REF-REQ-043)
-    const char* hw_mode = "balanced";
-    if (mode == 0) hw_mode = "performance";
-    else if (mode == 2) hw_mode = "save";
-    else if (mode == 3) hw_mode = "ultra";
-
-    const char* ppm = "/home/jedclub/.local/bin/power-profile-manager";
-    if (::access(ppm, X_OK) == 0) {
-        std::string sys_cmd = std::string(ppm) + " " + hw_mode + " 2>/dev/null &";
-        ::system(sys_cmd.c_str());
-    }
-
+    // Hardware actuation is executed natively by root daemon upon receiving PROFILE command
     emit profileChanged();
 }
 
