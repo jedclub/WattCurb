@@ -1827,6 +1827,81 @@ void test_thinkpower_tray_client() {
               << avg_us_op << " us/op)\n";
 }
 
+// Implements REF-TEST-019: Anti-Starvation & Greedy Capping Oracle Gate Verification (REF-REQ-054, REF-ARCH-030)
+void test_anti_starvation_and_greedy_capping() {
+    using namespace wattcurb::policy;
+
+    // 1. Topological Core Partitioning Math
+    int32_t total_cpus = MitigationEngine::get_total_online_cpus();
+    int32_t reserved = MitigationEngine::get_reserved_headroom_cores();
+    assert(total_cpus > 0 && "Online CPU count must be positive");
+    if (total_cpus >= 8) {
+        assert(reserved == 2 && "Systems with >= 8 cores must reserve 2 logical cores (1 physical SMT pair)");
+    } else if (total_cpus >= 4) {
+        assert(reserved == 1 && "Systems with >= 4 cores must reserve 1 logical core");
+    } else {
+        assert(reserved == 0 && "Systems with < 4 cores cannot reserve cores");
+    }
+
+    cpu_set_t allowed = MitigationEngine::get_headroom_allowed_cpuset();
+    cpu_set_t all_cores = MitigationEngine::get_all_cores_cpuset();
+
+    int32_t allowed_count = total_cpus - reserved;
+    for (int32_t c = 0; c < allowed_count; ++c) {
+        assert(CPU_ISSET(static_cast<size_t>(c), &allowed) && "Allowed CPUs must be present in allowed set");
+    }
+    for (int32_t c = allowed_count; c < total_cpus; ++c) {
+        assert(!CPU_ISSET(static_cast<size_t>(c), &allowed) && "Reserved headroom CPUs must NOT be in allowed set");
+    }
+    for (int32_t c = 0; c < total_cpus; ++c) {
+        assert(CPU_ISSET(static_cast<size_t>(c), &all_cores) && "All CPUs must be present in all_cores set");
+    }
+
+    // 2. Self-Immunity Verification (REF-REQ-049, REF-REQ-054)
+    pid_t my_pid = ::getpid();
+    assert(MitigationEngine::is_immune_process(my_pid) && "WattCurb processes must be immune from affinity capping");
+    assert(!MitigationEngine::apply_core_affinity_cap(my_pid) && "Applying affinity cap to immune process must return false");
+
+    // 3. Audio Stack Self-Healing
+    MitigationEngine::audit_and_heal_audio_stack();
+
+    // 4. FeatureManager Integration & Descriptor Validation
+    FeatureManager fm;
+    assert(fm.is_feature_enabled(FeatureId::AntiStarvationHeadroom) && "AntiStarvationHeadroom must be default enabled");
+    auto desc = FeatureManager::descriptor(FeatureId::AntiStarvationHeadroom);
+    assert(desc.feature_code == "FEAT-008" && "Feature code must be FEAT-008");
+    assert(desc.default_enabled == true);
+
+    // 5. Oracle Gate Micro-Benchmark: 50,000 iterations of headroom cpuset generation
+    constexpr size_t BENCH_COUNT = 50000;
+    auto t0 = std::chrono::steady_clock::now();
+    uint64_t tsc0 = wattcurb::core::hw_isa::read_tsc();
+
+    volatile int dummy = 0;
+    for (size_t i = 0; i < BENCH_COUNT; ++i) {
+        cpu_set_t cs = MitigationEngine::get_headroom_allowed_cpuset();
+        dummy += CPU_ISSET(0, &cs);
+    }
+    (void)dummy;
+
+    auto t1 = std::chrono::steady_clock::now();
+    uint64_t tsc1 = wattcurb::core::hw_isa::read_tsc();
+
+    auto total_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+    double avg_us_op = (static_cast<double>(total_ns) / static_cast<double>(BENCH_COUNT)) / 1000.0;
+    double cycles_op = static_cast<double>(tsc1 - tsc0) / static_cast<double>(BENCH_COUNT);
+
+    std::cout << " [ORACLE GATE] Headroom Mask Computation Benchmark (" << BENCH_COUNT << " iters):\n"
+              << "   * Average Latency : " << std::fixed << std::setprecision(4) << avg_us_op << " us/op\n"
+              << "   * Average Cycles  : " << std::setprecision(1) << cycles_op << " cycles/op\n";
+
+    assert(avg_us_op < 0.20 && "Headroom mask calculation must complete in < 0.20 us/op");
+
+    std::cout << " [PASS] test_anti_starvation_and_greedy_capping (REF-TEST-019: Cores 0.."
+              << (allowed_count - 1) << " allowed, " << reserved << " reserved for audio/compositor, "
+              << avg_us_op << " us/op)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -1846,6 +1921,7 @@ int main() {
     test::test_window_aware_governor();
     test::test_unified_rapid_rollback();
     test::test_thinkpower_tray_client();
+    test::test_anti_starvation_and_greedy_capping();
     test::test_process_classifier();
     test::test_mitigation_engine();
     test::test_adaptive_mitigation_and_rollback();

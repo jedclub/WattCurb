@@ -22,7 +22,8 @@ enum class MitigationAction : uint8_t {
     RelaxTimerSlack = 2,   // Stage 2: timerslack_ns -> 100ms ~ 500ms
     MemoryReclaim = 3,     // Stage 3: cgroup.memory.reclaim
     CgroupFreeze = 4,      // Stage 4: [STRICTLY PROHIBITED by REF-REQ-044] Cgroup freezing disabled
-    Terminate = 5          // Stage 5: [STRICTLY PROHIBITED by REF-REQ-044] Process termination disabled
+    Terminate = 5,         // Stage 5: [STRICTLY PROHIBITED by REF-REQ-044] Process termination disabled
+    AffinityCap = 6        // Stage 6: Anti-starvation core headroom affinity cap (REF-REQ-054)
 };
 
 struct ProcessClassification {

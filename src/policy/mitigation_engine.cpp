@@ -165,15 +165,17 @@ bool MitigationEngine::is_immune_process(int32_t pid) noexcept {
     char comm_path[64];
     std::snprintf(comm_path, sizeof(comm_path), "/proc/%d/comm", pid);
     char comm_buf[64]{};
-    ssize_t n = core::fs::read_small_file(comm_path, comm_buf, sizeof(comm_buf) - 1);
-    if (n <= 0) return false;
+    size_t n = 0;
+    if (!core::fs::read_small_file(comm_path, comm_buf, sizeof(comm_buf), &n) || n == 0) {
+        return false;
+    }
 
     while (n > 0 && (comm_buf[n - 1] == '\n' || comm_buf[n - 1] == '\r' || comm_buf[n - 1] == ' ')) {
         comm_buf[--n] = '\0';
     }
-    std::string_view comm(comm_buf, static_cast<size_t>(n));
+    std::string_view comm(comm_buf, n);
 
-    // Implements REF-REQ-049: Absolute immunity invariant for audio and critical system daemons
+    // Implements REF-REQ-049 & REF-REQ-054: Absolute immunity invariant for audio and critical system daemons
     if (comm.starts_with("pipewire") || comm.starts_with("wireplumber") ||
         comm == "pulseaudio" || comm.starts_with("jackd") || comm == "jackdbus" ||
         comm == "alsactl" || comm == "rtkit-daemon" || comm == "sndiod" ||
@@ -182,16 +184,161 @@ bool MitigationEngine::is_immune_process(int32_t pid) noexcept {
         comm == "seatd" || comm == "polkitd" || comm == "udevd" ||
         comm == "kwin_wayland" || comm == "kwin_x11" || comm == "kwin" ||
         comm == "mutter" || comm == "sway" || comm == "hyprland" ||
-        comm == "Xorg" || comm == "Xwayland") {
+        comm == "Xorg" || comm == "Xwayland" || comm.starts_with("wattcurb")) {
         return true;
     }
     return false;
 }
 
+int32_t MitigationEngine::get_total_online_cpus() noexcept {
+    static const int32_t s_cpus = []() noexcept {
+        long n = ::sysconf(_SC_NPROCESSORS_ONLN);
+        return (n > 0) ? static_cast<int32_t>(n) : 1;
+    }();
+    return s_cpus;
+}
+
+int32_t MitigationEngine::get_reserved_headroom_cores() noexcept {
+    static const int32_t s_reserved = []() noexcept {
+        int32_t n = get_total_online_cpus();
+        if (n >= 8) return 2; // Reserve 1 physical SMT core pair (e.g. Cores 14 & 15)
+        if (n >= 4) return 1; // Reserve 1 logical core
+        return 0;             // Systems with < 4 cores cannot reserve without major penalty
+    }();
+    return s_reserved;
+}
+
+cpu_set_t MitigationEngine::get_headroom_allowed_cpuset() noexcept {
+    static const cpu_set_t s_allowed = []() noexcept {
+        int32_t n = get_total_online_cpus();
+        int32_t r = get_reserved_headroom_cores();
+        int32_t allowed = std::max(1, n - r);
+
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        for (int32_t c = 0; c < allowed; ++c) {
+            CPU_SET(static_cast<size_t>(c), &cpuset);
+        }
+        return cpuset;
+    }();
+    return s_allowed;
+}
+
+cpu_set_t MitigationEngine::get_all_cores_cpuset() noexcept {
+    static const cpu_set_t s_all = []() noexcept {
+        int32_t n = get_total_online_cpus();
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        for (int32_t c = 0; c < n; ++c) {
+            CPU_SET(static_cast<size_t>(c), &cpuset);
+        }
+        return cpuset;
+    }();
+    return s_all;
+}
+
+bool MitigationEngine::apply_core_affinity_cap(int32_t pid, const cpu_set_t* allowed_set) noexcept {
+    WATTCURB_PROFILE_SCOPE("mitig.apply_affinity_cap");
+    if (pid <= 1 || is_immune_process(pid)) return false;
+
+    cpu_set_t default_set;
+    if (!allowed_set) {
+        default_set = get_headroom_allowed_cpuset();
+        allowed_set = &default_set;
+    }
+
+    bool any_success = (::sched_setaffinity(pid, sizeof(cpu_set_t), allowed_set) == 0);
+
+    // Thread-level traversal via /proc/<pid>/task/ (REF-REQ-054, REF-ARCH-030)
+    char task_dir[64];
+    std::snprintf(task_dir, sizeof(task_dir), "/proc/%d/task", pid);
+
+    DIR* dir = ::opendir(task_dir);
+    if (!dir) {
+        return any_success;
+    }
+
+    struct dirent* entry = nullptr;
+    while ((entry = ::readdir(dir)) != nullptr) {
+        if (entry->d_name[0] == '.') continue;
+        char* endptr = nullptr;
+        long tid = std::strtol(entry->d_name, &endptr, 10);
+        if (tid > 0 && *endptr == '\0') {
+            if (::sched_setaffinity(static_cast<pid_t>(tid), sizeof(cpu_set_t), allowed_set) == 0) {
+                any_success = true;
+            }
+        }
+    }
+    ::closedir(dir);
+    return any_success;
+}
+
+bool MitigationEngine::restore_core_affinity(int32_t pid) noexcept {
+    WATTCURB_PROFILE_SCOPE("mitig.restore_affinity");
+    if (pid <= 1) return false;
+
+    cpu_set_t all_cores = get_all_cores_cpuset();
+    bool any_success = (::sched_setaffinity(pid, sizeof(cpu_set_t), &all_cores) == 0);
+
+    char task_dir[64];
+    std::snprintf(task_dir, sizeof(task_dir), "/proc/%d/task", pid);
+
+    DIR* dir = ::opendir(task_dir);
+    if (!dir) {
+        return any_success;
+    }
+
+    struct dirent* entry = nullptr;
+    while ((entry = ::readdir(dir)) != nullptr) {
+        if (entry->d_name[0] == '.') continue;
+        char* endptr = nullptr;
+        long tid = std::strtol(entry->d_name, &endptr, 10);
+        if (tid > 0 && *endptr == '\0') {
+            if (::sched_setaffinity(static_cast<pid_t>(tid), sizeof(cpu_set_t), &all_cores) == 0) {
+                any_success = true;
+            }
+        }
+    }
+    ::closedir(dir);
+    return any_success;
+}
+
+bool MitigationEngine::apply_sched_batch(int32_t pid, int nice_val) noexcept {
+    WATTCURB_PROFILE_SCOPE("mitig.apply_sched_batch");
+    if (pid <= 1 || is_immune_process(pid)) return false;
+
+    struct sched_param sp{};
+    sp.sched_priority = 0;
+    bool any_success = (::sched_setscheduler(pid, SCHED_BATCH, &sp) == 0);
+    ::setpriority(PRIO_PROCESS, pid, nice_val);
+
+    char task_dir[64];
+    std::snprintf(task_dir, sizeof(task_dir), "/proc/%d/task", pid);
+
+    DIR* dir = ::opendir(task_dir);
+    if (!dir) {
+        return any_success;
+    }
+
+    struct dirent* entry = nullptr;
+    while ((entry = ::readdir(dir)) != nullptr) {
+        if (entry->d_name[0] == '.') continue;
+        char* endptr = nullptr;
+        long tid = std::strtol(entry->d_name, &endptr, 10);
+        if (tid > 0 && *endptr == '\0') {
+            if (::sched_setscheduler(static_cast<pid_t>(tid), SCHED_BATCH, &sp) == 0) {
+                any_success = true;
+            }
+            ::setpriority(PRIO_PROCESS, static_cast<pid_t>(tid), nice_val);
+        }
+    }
+    ::closedir(dir);
+    return any_success;
+}
+
 void MitigationEngine::audit_and_heal_audio_stack() noexcept {
     WATTCURB_PROFILE_SCOPE("mitig.audit_heal_audio");
-    // Implements REF-REQ-049: Ultra-fast (< 50us) active self-healing of audio scheduler state
-    uid_t uid = ::getuid();
+    // Implements REF-REQ-049 & REF-REQ-054: Dynamic discovery of user session slices and active audio healing
     const char* services[] = {
         "pipewire.service",
         "pipewire-pulse.service",
@@ -200,39 +347,59 @@ void MitigationEngine::audit_and_heal_audio_stack() noexcept {
     };
     const char* slices[] = {"session.slice", "app.slice"};
 
-    bool found_any = false;
-    for (const char* svc : services) {
-        for (const char* slc : slices) {
-            char path[256];
-            std::snprintf(path, sizeof(path),
-                          "/sys/fs/cgroup/user.slice/user-%u.slice/user@%u.service/%s/%s/cgroup.procs",
-                          static_cast<unsigned>(uid), static_cast<unsigned>(uid), slc, svc);
+    cpu_set_t all_cores = get_all_cores_cpuset();
 
-            char buf[128]{};
-            ssize_t n = core::fs::read_small_file(path, buf, sizeof(buf) - 1);
-            if (n <= 0) continue;
+    // 1. Discover active user slices under /sys/fs/cgroup/user.slice/
+    DIR* user_dir = ::opendir("/sys/fs/cgroup/user.slice");
+    if (user_dir) {
+        struct dirent* uent = nullptr;
+        while ((uent = ::readdir(user_dir)) != nullptr) {
+            if (std::strncmp(uent->d_name, "user-", 5) != 0) continue;
+            const char* dot = std::strstr(uent->d_name, ".slice");
+            if (!dot || dot[6] != '\0') continue;
 
-            found_any = true;
-            const char* p = buf;
-            while (*p) {
-                while (*p == ' ' || *p == '\n' || *p == '\r') ++p;
-                if (!*p) break;
-                char* next = nullptr;
-                long pid_val = std::strtol(p, &next, 10);
-                if (pid_val > 1) {
-                    int sched = ::sched_getscheduler(static_cast<int32_t>(pid_val));
-                    if (sched == SCHED_IDLE) {
-                        restore_sched_normal(static_cast<int32_t>(pid_val));
+            // Extract uid string from user-<uid>.slice
+            char uid_str[32]{};
+            size_t uid_len = static_cast<size_t>(dot - (uent->d_name + 5));
+            if (uid_len >= sizeof(uid_str)) continue;
+            std::memcpy(uid_str, uent->d_name + 5, uid_len);
+            uid_str[uid_len] = '\0';
+
+            for (const char* svc : services) {
+                for (const char* slc : slices) {
+                    char path[384];
+                    std::snprintf(path, sizeof(path),
+                                  "/sys/fs/cgroup/user.slice/%s/user@%s.service/%s/%s/cgroup.procs",
+                                  uent->d_name, uid_str, slc, svc);
+
+                    char buf[128]{};
+                    size_t n = 0;
+                    if (!core::fs::read_small_file(path, buf, sizeof(buf), &n) || n == 0) continue;
+
+                    const char* p = buf;
+                    while (*p) {
+                        while (*p == ' ' || *p == '\n' || *p == '\r') ++p;
+                        if (!*p) break;
+                        char* next = nullptr;
+                        long pid_val = std::strtol(p, &next, 10);
+                        if (pid_val > 1) {
+                            int32_t audio_pid = static_cast<int32_t>(pid_val);
+                            int sched = ::sched_getscheduler(audio_pid);
+                            if (sched == SCHED_IDLE) {
+                                restore_sched_normal(audio_pid);
+                            }
+                            // Elevate priority to real-time interactive level (-19)
+                            ::setpriority(PRIO_PROCESS, audio_pid, -19);
+                            // Ensure audio thread has full access to all cores including clean headroom
+                            ::sched_setaffinity(audio_pid, sizeof(cpu_set_t), &all_cores);
+                        }
+                        if (next == p) break;
+                        p = next;
                     }
                 }
-                if (next == p) break;
-                p = next;
             }
         }
-    }
-
-    if (found_any) {
-        return; // Fast path completed in < 50us
+        ::closedir(user_dir);
     }
 }
 
@@ -387,6 +554,12 @@ void MitigationEngine::rollback_all() noexcept {
     audit_and_heal_audio_stack();
 
     for (const auto& tm : m_tracked) {
+        if (tm.affinity_capped) {
+            restore_core_affinity(tm.pid);
+        }
+        if (tm.sched_batch_applied) {
+            restore_sched_normal(tm.pid);
+        }
         if (tm.current_action == MitigationAction::CgroupFreeze) {
             apply_cgroup_freeze(tm.pid, false);
             restore_sched_normal(tm.pid);
@@ -599,6 +772,42 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
             if (reclaim_amount > 0 && apply_memory_reclaim(proc.pid, reclaim_amount)) {
                 status.reclaimed_bytes += reclaim_amount;
                 status.estimated_savings_watts += 0.04;
+            }
+        }
+
+        // Anti-Starvation & CPU Headroom Protection (REF-REQ-054, REF-ARCH-030)
+        bool should_cap_affinity = false;
+        if (tier != ProcessSafetyTier::CriticalImmune && tier != ProcessSafetyTier::DesktopCore && !is_immune_process(proc.pid)) {
+            if (proc.cpu_watts > 1.5 || proc.wdi_score > 8.0 || proc.is_runaway_candidate ||
+                (tier == ProcessSafetyTier::BackgroundWorker && proc.cpu_watts > 1.0)) {
+                should_cap_affinity = true;
+            }
+        }
+
+        if (should_cap_affinity) {
+            cpu_set_t allowed_set = get_headroom_allowed_cpuset();
+            if (apply_core_affinity_cap(proc.pid, &allowed_set)) {
+                apply_sched_batch(proc.pid, 10);
+                if (!already_tracked && m_tracked.size() < MAX_TRACKED_MITIGATIONS) {
+                    m_tracked.push_back(TrackedMitigation{
+                        .pid = proc.pid,
+                        .tier = tier,
+                        .current_action = MitigationAction::AffinityCap,
+                        .applied_timestamp_sec = 0,
+                        .original_timerslack_ns = proc.timerslack_ns,
+                        .affinity_capped = true,
+                        .sched_batch_applied = true
+                    });
+                    already_tracked = true;
+                } else if (already_tracked) {
+                    for (auto& tm : m_tracked) {
+                        if (tm.pid == proc.pid) {
+                            tm.affinity_capped = true;
+                            tm.sched_batch_applied = true;
+                            break;
+                        }
+                    }
+                }
             }
         }
     }

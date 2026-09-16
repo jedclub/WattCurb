@@ -41,13 +41,22 @@ public:
     static bool apply_memory_reclaim(int32_t pid, uint64_t bytes) noexcept;
     static bool apply_cgroup_freeze(int32_t pid, bool freeze) noexcept;
 
+    // Anti-Starvation & CPU Headroom Partitioning (REF-REQ-054, REF-ARCH-030)
+    static int32_t get_total_online_cpus() noexcept;
+    static int32_t get_reserved_headroom_cores() noexcept;
+    static cpu_set_t get_headroom_allowed_cpuset() noexcept;
+    static cpu_set_t get_all_cores_cpuset() noexcept;
+    static bool apply_core_affinity_cap(int32_t pid, const cpu_set_t* allowed_set = nullptr) noexcept;
+    static bool restore_core_affinity(int32_t pid) noexcept;
+    static bool apply_sched_batch(int32_t pid, int nice_val = 10) noexcept;
+
     // Hardware-Level Actuation Primitives (REF-REQ-031 Sec 3.3)
     static bool set_pcie_aspm_policy(const char* policy) noexcept;
     static bool set_cpu_epp_policy(const char* policy) noexcept;
     static bool cap_display_backlight(double max_pct) noexcept;
     static bool restore_display_backlight() noexcept;
 
-    // Process Immunity & Audio Protection (REF-REQ-049)
+    // Process Immunity & Audio Protection (REF-REQ-049, REF-REQ-054)
     static bool is_immune_process(int32_t pid) noexcept;
     static void audit_and_heal_audio_stack() noexcept;
 
@@ -62,6 +71,8 @@ public:
         MitigationAction current_action{MitigationAction::None};
         uint64_t applied_timestamp_sec{0};
         uint64_t original_timerslack_ns{50000};
+        bool affinity_capped{false};
+        bool sched_batch_applied{false};
     };
 
     [[nodiscard]] const core::FixedVector<TrackedMitigation, MAX_TRACKED_MITIGATIONS>& tracked_mitigations() const noexcept {

@@ -17,7 +17,8 @@ enum class FeatureId : uint8_t {
     ZenCcxAffinityPinning = 4,
     DisplayBacklightFloor = 5,
     PcieAspmEnforcer = 6,
-    Count = 7
+    AntiStarvationHeadroom = 7,
+    Count = 8
 };
 
 struct FeatureDescriptor {
@@ -75,6 +76,8 @@ public:
     static bool actuate_memory_reclaim(int32_t pid, uint64_t bytes) noexcept;
     static bool actuate_cgroup_freeze(int32_t pid, bool freeze) noexcept;
     static bool actuate_ccx_affinity(int32_t pid, int32_t target_core) noexcept;
+    static bool actuate_anti_starvation_cap(int32_t pid) noexcept;
+    static bool actuate_anti_starvation_restore(int32_t pid) noexcept;
 
 private:
     std::array<FeatureMetrics, static_cast<size_t>(FeatureId::Count)> m_metrics{};

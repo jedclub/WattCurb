@@ -97,6 +97,18 @@ FeatureDescriptor FeatureManager::descriptor(FeatureId id) noexcept {
                 .description = "Enforces PCIe ASPM powersave policy and NVMe autonomous power state transitions on battery",
                 .default_enabled = true
             };
+        case FeatureId::AntiStarvationHeadroom:
+            return FeatureDescriptor{
+                .id = FeatureId::AntiStarvationHeadroom,
+                .feature_code = "FEAT-008",
+                .name = "AntiStarvationHeadroom",
+                .target_domain = "CPU Scheduler / Core Affinity",
+                .kernel_mechanism = "sched_setaffinity(task, allowed_mask) + sched_setscheduler(task, SCHED_BATCH)",
+                .power_saving_rationale = "Reserves clean physical headroom cores for real-time interactive audio (PipeWire) and display compositor (KWin Wayland). Restricts greedy multi-threaded compute workloads (>150% CPU) to remaining cores and enforces CFS batch preemption, eliminating audio dropouts and desktop freezes.",
+                .safety_constraints = "Tier 0 (CriticalImmune) & Tier 1 (DesktopCore) strictly immune. Never terminates or freezes processes (REF-REQ-044).",
+                .description = "Guarantees clean CPU headroom cores for audio & compositor, capping greedy batch processes to prevent system freezes",
+                .default_enabled = true
+            };
         case FeatureId::Count:
             break;
     }
@@ -167,11 +179,27 @@ bool FeatureManager::actuate_ccx_affinity(int32_t pid, int32_t target_core) noex
     return (::sched_setaffinity(pid, sizeof(cpu_set_t), &cpuset) == 0);
 }
 
+bool FeatureManager::actuate_anti_starvation_cap(int32_t pid) noexcept {
+    cpu_set_t allowed_set = MitigationEngine::get_headroom_allowed_cpuset();
+    bool aff = MitigationEngine::apply_core_affinity_cap(pid, &allowed_set);
+    bool batch = MitigationEngine::apply_sched_batch(pid, 10);
+    return (aff || batch);
+}
+
+bool FeatureManager::actuate_anti_starvation_restore(int32_t pid) noexcept {
+    bool aff = MitigationEngine::restore_core_affinity(pid);
+    bool norm = MitigationEngine::restore_sched_normal(pid);
+    return (aff || norm);
+}
+
 ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
     AnalysisReportData& report,
     bool on_battery,
     double battery_pct
 ) noexcept {
+    // Implements REF-REQ-049 & REF-REQ-054: Active audio stack immunity and healing every cycle
+    MitigationEngine::audit_and_heal_audio_stack();
+
     ActiveMitigationStatus status{};
 
     // Reset per-cycle actions in metrics while retaining enabled flags
@@ -208,6 +236,8 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
                 MitigationEngine::restore_sched_normal(tm.pid);
             } else if (tm.applied_feature == FeatureId::SchedIdleThrottle) {
                 MitigationEngine::restore_sched_normal(tm.pid);
+            } else if (tm.applied_feature == FeatureId::AntiStarvationHeadroom) {
+                actuate_anti_starvation_restore(tm.pid);
             }
             MitigationEngine::apply_timer_slack(tm.pid, 50'000ULL);
         }
@@ -364,6 +394,69 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
                 }
             }
         }
+
+        // Feature 8: AntiStarvationHeadroom (REF-REQ-054, REF-ARCH-030)
+        if (is_feature_enabled(FeatureId::AntiStarvationHeadroom)) {
+            bool should_cap = false;
+            if (tier != ProcessSafetyTier::CriticalImmune && tier != ProcessSafetyTier::DesktopCore && !MitigationEngine::is_immune_process(proc.pid)) {
+                if (proc.cpu_watts > 1.5 || proc.wdi_score > 8.0 || proc.is_runaway_candidate ||
+                    (tier == ProcessSafetyTier::BackgroundWorker && proc.cpu_watts > 1.0)) {
+                    should_cap = true;
+                }
+            }
+
+            if (should_cap) {
+                // Check if already tracked
+                bool already_tracked = false;
+                for (const auto& tm : m_tracked) {
+                    if (tm.pid == proc.pid && tm.applied_feature == FeatureId::AntiStarvationHeadroom) {
+                        already_tracked = true;
+                        break;
+                    }
+                }
+
+                if (!already_tracked && actuate_anti_starvation_cap(proc.pid)) {
+                    auto& m = m_metrics[static_cast<size_t>(FeatureId::AntiStarvationHeadroom)];
+                    ++m.actions_taken;
+                    double savings = proc.cpu_watts * 0.15; // Energy reduction from mitigating SMT cross-thread thrashing
+                    m.estimated_power_saved_watts += savings;
+                    if (m.targeted_pid_count < m.targeted_pids.size()) {
+                        m.targeted_pids[m.targeted_pid_count++] = proc.pid;
+                    }
+                    if (m_tracked.size() < MAX_TRACKED_MITIGATIONS) {
+                        m_tracked.push_back(TrackedMitigation{
+                            .pid = proc.pid,
+                            .applied_feature = FeatureId::AntiStarvationHeadroom,
+                            .timestamp_sec = 0
+                        });
+                    }
+                    ++status.throttled_count;
+                    status.estimated_savings_watts += savings;
+                }
+            }
+        }
+    }
+
+    // Dynamic De-escalation: uncap any process whose CPU consumption has subsided
+    for (size_t i = 0; i < m_tracked.size(); ) {
+        if (m_tracked[i].applied_feature == FeatureId::AntiStarvationHeadroom) {
+            bool still_greedy = false;
+            for (const auto& proc : report.top_processes) {
+                if (proc.pid == m_tracked[i].pid) {
+                    if (proc.cpu_watts > 0.5 || proc.wdi_score > 4.0) {
+                        still_greedy = true;
+                    }
+                    break;
+                }
+            }
+            if (!still_greedy) {
+                actuate_anti_starvation_restore(m_tracked[i].pid);
+                m_tracked[i] = m_tracked.back();
+                m_tracked.pop_back();
+                continue;
+            }
+        }
+        ++i;
     }
 
     // Feature 6: DisplayBacklightFloor Advisory
@@ -400,6 +493,9 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
             } else if (fid == FeatureId::DisplayBacklightFloor) {
                 std::snprintf(buf, sizeof(buf), "[%s] Backlight floor advisory active (~%.2fW)",
                               desc.name.c_str(), m.estimated_power_saved_watts);
+            } else if (fid == FeatureId::AntiStarvationHeadroom) {
+                std::snprintf(buf, sizeof(buf), "[%s] Headroom preserved, capped %zu greedy PID(s) (~%.2fW)",
+                              desc.name.c_str(), m.actions_taken, m.estimated_power_saved_watts);
             } else {
                 std::snprintf(buf, sizeof(buf), "[%s] %zu action(s) on target PIDs (~%.2fW)",
                               desc.name.c_str(), m.actions_taken, m.estimated_power_saved_watts);

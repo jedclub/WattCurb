@@ -122,6 +122,7 @@ const char* ProcessClassifierDB::action_name(MitigationAction action) noexcept {
         case MitigationAction::MemoryReclaim:  return "Reclaim Memory";
         case MitigationAction::CgroupFreeze:   return "Freeze Cgroup (Disabled)";
         case MitigationAction::Terminate:      return "Terminate (Prohibited)";
+        case MitigationAction::AffinityCap:    return "AffinityCap (Headroom Guard)";
     }
     return "Unknown";
 }
