@@ -78,7 +78,15 @@ bool DaemonRunner::setup_signals() {
 }
 
 bool DaemonRunner::setup_shm() {
-    shm_fd_ = ::open(ipc::SHARED_STATE_SHM_PATH, O_RDWR | O_CREAT | O_CLOEXEC, 0666);
+    if (shm_state_ != nullptr) return true;
+
+    // 1. Try opening existing file first (without O_CREAT to avoid fs.protected_regular EACCES)
+    shm_fd_ = ::open(ipc::SHARED_STATE_SHM_PATH, O_RDWR | O_CLOEXEC);
+    if (shm_fd_ < 0) {
+        // If it does not exist, or permissions prevented opening, unlink any stale file and create anew
+        ::unlink(ipc::SHARED_STATE_SHM_PATH);
+        shm_fd_ = ::open(ipc::SHARED_STATE_SHM_PATH, O_RDWR | O_CREAT | O_CLOEXEC, 0666);
+    }
     if (shm_fd_ < 0) {
         return false;
     }
@@ -105,6 +113,32 @@ bool DaemonRunner::initialize() {
     }
 
     setup_shm(); // Non-fatal: local Seqlock state remains 100% functional
+
+    // Load persisted profile mode if available (REF-REQ-053)
+    char mode_buf[32]{};
+    int r_mode = core::fs::read_small_file("/home/jedclub/.cache/power_profile_mode", mode_buf, sizeof(mode_buf) - 1);
+    if (r_mode > 0) {
+        std::string_view m(mode_buf, static_cast<size_t>(r_mode));
+        if (m.find("performance") != std::string_view::npos) {
+            feature_manager_.set_override_profile(PowerProfileMode::Performance);
+            local_shared_state_.power_profile_mode = 0;
+        } else if (m.find("ultra") != std::string_view::npos) {
+            feature_manager_.set_override_profile(PowerProfileMode::UltraEndurance);
+            local_shared_state_.power_profile_mode = 3;
+        } else if (m.find("save") != std::string_view::npos) {
+            feature_manager_.set_override_profile(PowerProfileMode::PowerSaver);
+            local_shared_state_.power_profile_mode = 2;
+        } else {
+            feature_manager_.set_override_profile(PowerProfileMode::Balanced);
+            local_shared_state_.power_profile_mode = 1;
+        }
+    } else {
+        feature_manager_.set_override_profile(PowerProfileMode::Balanced);
+        local_shared_state_.power_profile_mode = 1;
+    }
+    if (shm_state_ != nullptr) {
+        shm_state_->power_profile_mode = local_shared_state_.power_profile_mode;
+    }
 
     if (!setup_timer()) {
         std::cerr << "[!] Error: Failed to initialize timerfd.\n";
@@ -184,6 +218,9 @@ void DaemonRunner::process_observation_cycle() {
     // 4. Ultra-Fast 128-Byte Seqlock POD Export (REF-REQ-028, REF-ARCH-018)
     {
         WATTCURB_PROFILE_SCOPE("daemon.shm_update");
+        if (shm_state_ == nullptr) {
+            setup_shm();
+        }
         local_shared_state_.update_from_report(cached_report_);
         if (shm_state_ != nullptr) {
             shm_state_->update_from_report(cached_report_);
@@ -380,6 +417,7 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
             auto new_mode = static_cast<PowerProfileMode>(mode_val);
             feature_manager_.set_override_profile(new_mode);
             local_shared_state_.power_profile_mode = static_cast<uint8_t>(new_mode);
+            cached_report_.mitigation_status.current_profile = new_mode;
             if (shm_state_) {
                 shm_state_->power_profile_mode = static_cast<uint8_t>(new_mode);
             }
@@ -390,6 +428,15 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
             else if (new_mode == PowerProfileMode::PowerSaver) hw_arg = "save";
             else if (new_mode == PowerProfileMode::UltraEndurance) hw_arg = "ultra";
 
+            // Persist selected mode
+            int mode_fd = ::open("/home/jedclub/.cache/power_profile_mode", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
+            if (mode_fd >= 0) {
+                ::fchmod(mode_fd, 0666);
+                (void)::write(mode_fd, hw_arg, std::strlen(hw_arg));
+                (void)::write(mode_fd, "\n", 1);
+                ::close(mode_fd);
+            }
+
             pid_t pid = ::fork();
             if (pid == 0) {
                 ::setsid();
@@ -399,6 +446,9 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
                 }
                 ::_exit(0);
             }
+
+            // Immediately refresh observation and shared memory state
+            process_observation_cycle();
         }
         const char ack[] = "OK\n";
         ::sendto(fd, ack, sizeof(ack) - 1, 0,

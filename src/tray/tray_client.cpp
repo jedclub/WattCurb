@@ -1,4 +1,5 @@
 #include "tray/tray_client.hpp"
+#include "core/singleton_lock.hpp"
 #include "core/posix_fs.hpp"
 #include "core/scoped_profiler.hpp"
 #include <fcntl.h>
@@ -107,10 +108,19 @@ bool TrayClient::setup_shm() noexcept {
 
 bool TrayClient::read_state(ipc::WattCurbSharedState& out) const noexcept {
     WATTCURB_PROFILE_SCOPE("tray.read_state");
+    if (!shm_state_) {
+        const_cast<TrayClient*>(this)->setup_shm();
+    }
     if (!shm_state_) return false;
     bool ok = shm_state_->read_atomic(out);
-    if (ok && local_override_mode_ >= 0) {
-        out.power_profile_mode = static_cast<uint8_t>(local_override_mode_);
+    if (ok) {
+        if (local_override_mode_ >= 0) {
+            if (out.power_profile_mode == static_cast<uint8_t>(local_override_mode_)) {
+                const_cast<TrayClient*>(this)->local_override_mode_ = -1;
+            } else {
+                out.power_profile_mode = static_cast<uint8_t>(local_override_mode_);
+            }
+        }
     }
     return ok;
 }
@@ -394,20 +404,8 @@ static void apply_hardware_profile(const char* mode) noexcept {
 
 bool TrayClient::send_daemon_command(const char* cmd) noexcept {
     if (!cmd) return false;
-    int fd = ::socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-    if (fd < 0) return false;
-
-    struct sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    addr.sun_path[0] = '\0';
-    const char lock_name[] = "wattcurb.lock";
-    std::memcpy(addr.sun_path + 1, lock_name, sizeof(lock_name) - 1);
-    socklen_t addr_len = static_cast<socklen_t>(sizeof(sa_family_t) + 1 + sizeof(lock_name) - 1);
-
-    size_t len = std::strlen(cmd);
-    ssize_t sent = ::sendto(fd, cmd, len, 0, reinterpret_cast<struct sockaddr*>(&addr), addr_len);
-    ::close(fd);
-    return (sent > 0);
+    std::string resp;
+    return core::SingletonLock::query_daemon(cmd, resp, "wattcurb.lock", 250);
 }
 
 void TrayClient::cycle_power_profile() noexcept {
@@ -833,7 +831,7 @@ int TrayClient::dbusmenu_method_get_layout(sd_bus_message* msg, void* userdata, 
     add_item(5, "Performance (고성능 모드 - 4.1GHz Boost)", true, nullptr, "radio", (cur_mode == 0 ? 1 : 0));
     add_item(6, "Balanced (균형 모드 - 기본 권장)", true, nullptr, "radio", (cur_mode == 1 ? 1 : 0));
     add_item(7, "Smart Save (스마트 절전 모드 - 1.7GHz)", true, nullptr, "radio", (cur_mode == 2 ? 1 : 0));
-    add_item(8, "Ultra Save (초절전 모드 - 1.4GHz, 48Hz)", true, nullptr, "radio", (cur_mode == 3 ? 1 : 0));
+    add_item(8, "Ultra Save (초절전 모드 - 1.4GHz 상한)", true, nullptr, "radio", (cur_mode == 3 ? 1 : 0));
     add_item(9, nullptr, true, "separator");
     add_item(10, "📈 정밀 분석 매트릭 창 열기 (Matrix Dashboard)");
     add_item(11, "📊 KDE 시스템 모니터 열기 (System Monitor)");

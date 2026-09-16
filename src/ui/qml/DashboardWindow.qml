@@ -956,7 +956,7 @@ ApplicationWindow {
 
                 // Ultra Save Mode
                 Button {
-                    text: "❄️ Ultra Save (1.4G/48Hz)"
+                    text: "❄️ Ultra Save (1.4G)"
                     highlighted: backend.powerProfileMode === 3
                     font.pixelSize: 10
                     font.bold: true

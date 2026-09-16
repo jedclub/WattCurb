@@ -359,7 +359,7 @@ QString DashboardBackend::powerProfileName() const {
         case 0: return QStringLiteral("Performance (고성능 4.1GHz)");
         case 1: return QStringLiteral("Balanced (기본 균형)");
         case 2: return QStringLiteral("Smart Save (스마트 절전 1.7GHz)");
-        case 3: return QStringLiteral("Ultra Save (울트라 절전 1.4GHz + 48Hz)");
+        case 3: return QStringLiteral("Ultra Save (울트라 절전 1.4GHz 상한)");
         default: return QStringLiteral("Balanced");
     }
 }
