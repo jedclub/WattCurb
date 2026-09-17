@@ -35,9 +35,10 @@
 |   +-----------------------------------------------------------------------------------------+   |
 |   |                         MitigationEngine Direct Sysfs Actuator                          |   |
 |   |                                                                                         |   |
-|   |  UltraEndurance Mode:                                                                   |   |
-|   |  * CPU Scaling Max : 1.0 GHz (or cpuinfo_min_freq clamp: 1.4 GHz + SMU 4W TDP)          |   |
-|   |  * GPU OverDrive   : echo manual > power_dpm_force_performance_level                    |   |
+|   |  UltraEndurance Mode:                                                                   |
+|   |  * CPU Scaling Max : 1.4 GHz (hardware P-state floor + SMU 4W TDP)                       |
+|   |  * Process Cap     : 25% core affinity cap (4 cores max on 16T) + nice 19 + cpu.max quota |
+|   |  * GPU OverDrive   : echo manual > power_dpm_force_performance_level                    |
 |   |                      echo "s 1 640" > pp_od_clk_voltage && echo "c" > pp_od_clk_voltage |   |
 |   |                                                                                         |   |
 |   |  Balanced / Perf Restoration:                                                           |   |

@@ -405,7 +405,7 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_platform_profile("low-power");
         set_cpu_governor("powersave");
         set_cpu_boost(false);
-        set_cpu_scaling_max_freq(1000000); // 1.0GHz strict ultra-endurance cap
+        set_cpu_scaling_max_freq(1400000); // 1.4GHz minimum hardware P-state floor
         set_pcie_aspm_policy("powersave");
         set_panel_power_savings(2);
         set_cpu_epp_policy("power");
@@ -587,8 +587,9 @@ cpu_set_t MitigationEngine::get_headroom_allowed_cpuset(PowerProfileMode mode) n
     if (n >= 8) {
         switch (mode) {
             case PowerProfileMode::UltraEndurance:
-                // Ultra Mode: 50% max cores (e.g. 8 cores on 16-core) to avoid low-clock runqueue starvation
-                allowed = std::max(2, n / 2);
+                // Ultra Mode: Strict 25% max cores (e.g. 4 cores on 16-core, 2 cores on 8-core)
+                // to hard-limit maximum process CPU utilization while operating at 1.4GHz floor
+                allowed = std::max(2, n / 4);
                 break;
             case PowerProfileMode::PowerSaver:
                 // PowerSaver Mode: 75% max cores (e.g. 12 cores on 16-core)
@@ -603,7 +604,7 @@ cpu_set_t MitigationEngine::get_headroom_allowed_cpuset(PowerProfileMode mode) n
     } else if (n >= 4) {
         switch (mode) {
             case PowerProfileMode::UltraEndurance:
-                allowed = std::max(1, n / 2);
+                allowed = 1; // 1 core max on 4-core (25% max CPU)
                 break;
             case PowerProfileMode::PowerSaver:
             case PowerProfileMode::Balanced:
@@ -939,6 +940,49 @@ bool MitigationEngine::apply_cgroup_freeze(int32_t pid, bool freeze) noexcept {
     if (fd < 0) return false;
 
     ssize_t written = ::write(fd, "0\n", 2);
+    ::close(fd);
+
+    return (written > 0);
+}
+
+bool MitigationEngine::apply_cgroup_cpu_quota(int32_t pid, uint32_t max_quota_us, uint32_t period_us) noexcept {
+    if (pid <= 1 || is_immune_process(pid)) return false;
+
+    char cg_path[256];
+    if (!resolve_cgroup_path(pid, cg_path, sizeof(cg_path))) {
+        return false;
+    }
+
+    char cpu_max_path[320];
+    std::snprintf(cpu_max_path, sizeof(cpu_max_path), "%s/cpu.max", cg_path);
+
+    int fd = ::open(cpu_max_path, O_WRONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+
+    char buf[64];
+    int len = std::snprintf(buf, sizeof(buf), "%u %u\n", max_quota_us, period_us);
+    ssize_t written = ::write(fd, buf, static_cast<size_t>(len));
+    ::close(fd);
+
+    return (written > 0);
+}
+
+bool MitigationEngine::restore_cgroup_cpu_quota(int32_t pid) noexcept {
+    if (pid <= 1) return false;
+
+    char cg_path[256];
+    if (!resolve_cgroup_path(pid, cg_path, sizeof(cg_path))) {
+        return false;
+    }
+
+    char cpu_max_path[320];
+    std::snprintf(cpu_max_path, sizeof(cpu_max_path), "%s/cpu.max", cg_path);
+
+    int fd = ::open(cpu_max_path, O_WRONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+
+    constexpr const char unconstrained[] = "max 100000\n";
+    ssize_t written = ::write(fd, unconstrained, sizeof(unconstrained) - 1);
     ::close(fd);
 
     return (written > 0);

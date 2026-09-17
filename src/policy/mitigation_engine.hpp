@@ -40,6 +40,8 @@ public:
     static bool apply_timer_slack(int32_t pid, uint64_t slack_ns) noexcept;
     static bool apply_memory_reclaim(int32_t pid, uint64_t bytes) noexcept;
     static bool apply_cgroup_freeze(int32_t pid, bool freeze) noexcept;
+    static bool apply_cgroup_cpu_quota(int32_t pid, uint32_t max_quota_us = 200000, uint32_t period_us = 100000) noexcept;
+    static bool restore_cgroup_cpu_quota(int32_t pid) noexcept;
 
     // Anti-Starvation & CPU Headroom Partitioning (REF-REQ-054, REF-ARCH-030, REF-REQ-057)
     static int32_t get_total_online_cpus() noexcept;

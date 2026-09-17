@@ -12,10 +12,14 @@
 ## 1. Executive Summary
 
 This specification formalizes two critical system behaviors:
-1. **UltraEndurance Extreme Power Capping**:
-   - Caps CPU maximum frequency target to **1.0 GHz** (clamped to the kernel's hardware P-state floor, e.g. 1.4 GHz on AMD Cezanne `acpi-cpufreq`, coupled with SMU 4W hardware STAPM constraints to force sustained frequencies below 1.0 GHz).
-   - Caps GPU (iGPU / dGPU) frequency to **40% of maximum capability** (e.g. 640 MHz on 1600 MHz AMD Vega / RDNA silicon) via native sysfs AMDGPU OverDrive (`pp_od_clk_voltage`) and DPM level management.
-   - Guarantees 100% faithful restoration to baseline max clocks upon returning to Balanced, PowerSaver, or Performance modes.
+1. **UltraEndurance Extreme Power & Process Capping**:
+   - Maintains CPU maximum frequency target at the **1.4 GHz** hardware P-state floor (`1400000` kHz on AMD Cezanne `acpi-cpufreq`).
+   - Caps maximum process CPU utilization in UltraEndurance mode:
+     - **Spatial Core Capping**: Runaway/heavy processes are restricted to at most **25% of system cores** (`allowed = std::max(2, n / 4)`, i.e. 4 cores out of 16), preventing multi-threaded workloads from exceeding 25% total compute capacity.
+     - **CFS Priority Demotion**: Throttled processes are assigned `nice +19` (`SCHED_BATCH` or `SCHED_IDLE`) to ensure interactive desktop threads always preempt them with zero latency.
+     - **cgroup v2 `cpu.max` Quota**: Where available, cgroup bandwidth is clamped to at most 2 cores (200,000 µs quota per 100,000 µs period).
+   - Caps GPU frequency to **40% of maximum capability** (640 MHz on 1600 MHz AMD Vega / RDNA silicon) via native sysfs AMDGPU OverDrive (`pp_od_clk_voltage`) and DPM level management.
+   - Guarantees 100% faithful restoration to baseline max clocks and unthrottled affinity upon returning to Balanced, PowerSaver, or Performance modes.
 2. **Forensic Logging & Storage Optimization Verification**:
    - Confirms that the periodic telemetry collection pipeline generates **strictly 0 bytes of disk writes** during steady-state monitoring.
    - Ensures that telemetry exchange is conducted via **128-byte Seqlock shared memory (`/dev/shm/wattcurb_state.bin`)** in RAM, eliminating NVMe/SATA wakeups from deep L1.2 sleep states.
@@ -24,11 +28,15 @@ This specification formalizes two critical system behaviors:
 
 ## 2. Functional Requirements
 
-### 2.1 UltraEndurance Hardware Limits
+### 2.1 UltraEndurance Hardware & Process Limits
 - **CPU Frequency**:
-  - Target: 1,000,000 kHz (1.0 GHz).
+  - Target: 1,400,000 kHz (1.4 GHz hardware floor).
   - Actuation: Written to `/sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq`.
-  - Kernel Clamping: Must query `/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq` before actuation. If `cpuinfo_min_freq > 1000000`, the actuation must apply `cpuinfo_min_freq` to prevent `-EINVAL` rejection while relying on SMU 4W TDP limits to clamp active clocks.
+- **Maximum Process CPU Utilization Hard Capping**:
+  - In UltraEndurance mode, processes with `cpu_watts > 0.20W` or `num_threads >= 2 && cpu_watts > 0.12W` or `wdi_score > 4.0` are subjected to:
+    - **25% Core Affinity Cap**: Confined to Cores 0..3 on a 16-core system (`std::max(2, n / 4)`).
+    - **CFS `nice +19` Deprioritization**: Reduced to ~1.5% CFS weight.
+    - **cgroup v2 Quota**: Capped via `/sys/fs/cgroup/.../cpu.max` to `200000 100000` (2 cores max).
 - **GPU Frequency**:
   - Target: 40% of maximum rated boost clock (640 MHz on 1600 MHz hardware).
   - Actuation:
@@ -40,6 +48,7 @@ This specification formalizes two critical system behaviors:
     - Reset OverDrive table: `"r\n"` followed by `"c\n"` to `pp_od_clk_voltage`.
     - Re-enable all DPM states: `"0 1 2\n"` to `pp_dpm_sclk`.
     - Reset DPM level: `"auto"` (Balanced/Save) or `"high"` (Performance).
+    - Uncap core affinity and restore original process nice values and cgroup `cpu.max` (`"max 100000"`).
 
 ### 2.2 Telemetry Storage & Logging Optimization
 - **Zero Disk Writes**: No log files (`.log`, `.txt`), journal records, or diagnostic traces may be written to physical disk during the periodic monitoring loop (`process_observation_cycle`).

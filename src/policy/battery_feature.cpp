@@ -185,17 +185,22 @@ bool FeatureManager::actuate_anti_starvation_cap(int32_t pid, PowerProfileMode m
     bool aff = MitigationEngine::apply_core_affinity_cap(pid, &allowed_set);
     int nice_val = 10;
     if (mode == PowerProfileMode::UltraEndurance) {
-        nice_val = 15;
+        nice_val = 19; // Maximum CFS deprioritization in UltraEndurance
     } else if (mode == PowerProfileMode::Performance) {
         nice_val = 5;
     }
     bool batch = MitigationEngine::apply_sched_batch(pid, nice_val);
+    if (mode == PowerProfileMode::UltraEndurance) {
+        // Enforce hard cgroup CPU quota (200% = 2 cores max quota per 100ms)
+        MitigationEngine::apply_cgroup_cpu_quota(pid, 200000, 100000);
+    }
     return (aff || batch);
 }
 
 bool FeatureManager::actuate_anti_starvation_restore(int32_t pid, const cpu_set_t* target_affinity, int orig_policy, int orig_nice) noexcept {
     bool aff = MitigationEngine::restore_core_affinity(pid, target_affinity);
     bool norm = MitigationEngine::restore_sched_normal(pid, orig_policy, orig_nice);
+    MitigationEngine::restore_cgroup_cpu_quota(pid);
     return (aff || norm);
 }
 
@@ -413,7 +418,7 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
             if (tier != ProcessSafetyTier::CriticalImmune && tier != ProcessSafetyTier::DesktopCore && !MitigationEngine::is_immune_process(proc.pid)) {
                 double cpu_w_threshold = 1.2;
                 if (eff_profile == PowerProfileMode::UltraEndurance) {
-                    cpu_w_threshold = 0.35; // Scaled to 4W TDP limit
+                    cpu_w_threshold = 0.20; // Tightened threshold for 1.4GHz UltraEndurance
                 } else if (eff_profile == PowerProfileMode::PowerSaver) {
                     cpu_w_threshold = 0.70; // Scaled to 10W TDP limit
                 } else if (eff_profile == PowerProfileMode::Performance) {
@@ -425,11 +430,14 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
                 } else if (proc.num_threads >= 4 && proc.cpu_watts > 0.25) {
                     // Multi-threaded parallel workload attempting to saturate cores
                     should_cap = true;
-                } else if (proc.wdi_score > 6.0 || proc.is_runaway_candidate) {
+                } else if (eff_profile == PowerProfileMode::UltraEndurance && proc.num_threads >= 2 && proc.cpu_watts > 0.12) {
+                    // Multi-threaded workload in UltraEndurance capped immediately
                     should_cap = true;
-                } else if (tier == ProcessSafetyTier::BackgroundWorker && proc.cpu_watts > 0.20) {
+                } else if (proc.wdi_score > (eff_profile == PowerProfileMode::UltraEndurance ? 4.0 : 6.0) || proc.is_runaway_candidate) {
                     should_cap = true;
-                } else if (tier == ProcessSafetyTier::RunawayCandidate && proc.cpu_watts > 0.25) {
+                } else if (tier == ProcessSafetyTier::BackgroundWorker && proc.cpu_watts > (eff_profile == PowerProfileMode::UltraEndurance ? 0.15 : 0.20)) {
+                    should_cap = true;
+                } else if (tier == ProcessSafetyTier::RunawayCandidate && proc.cpu_watts > (eff_profile == PowerProfileMode::UltraEndurance ? 0.15 : 0.25)) {
                     should_cap = true;
                 }
             }
@@ -480,7 +488,7 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
 
     // Dynamic De-escalation: uncap any process whose CPU consumption has subsided
     double deescalate_w = 0.40;
-    if (eff_profile == PowerProfileMode::UltraEndurance) deescalate_w = 0.15;
+    if (eff_profile == PowerProfileMode::UltraEndurance) deescalate_w = 0.10;
     else if (eff_profile == PowerProfileMode::PowerSaver) deescalate_w = 0.25;
     else if (eff_profile == PowerProfileMode::Performance) deescalate_w = 0.80;
 

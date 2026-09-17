@@ -1878,11 +1878,12 @@ void test_anti_starvation_and_greedy_capping() {
     cpu_set_t allowed_perf = MitigationEngine::get_headroom_allowed_cpuset(PowerProfileMode::Performance);
 
     if (total_cpus >= 8) {
-        // Ultra: 50% max cores (8 on 16-core)
-        for (int32_t c = 0; c < total_cpus / 2; ++c) {
+        // Ultra: 25% max cores (4 on 16-core, 2 on 8-core) to strictly limit process CPU utilization at 1.4GHz floor
+        int32_t expected_ultra = std::max(2, total_cpus / 4);
+        for (int32_t c = 0; c < expected_ultra; ++c) {
             assert(CPU_ISSET(static_cast<size_t>(c), &allowed_ultra));
         }
-        for (int32_t c = total_cpus / 2; c < total_cpus; ++c) {
+        for (int32_t c = expected_ultra; c < total_cpus; ++c) {
             assert(!CPU_ISSET(static_cast<size_t>(c), &allowed_ultra));
         }
 
