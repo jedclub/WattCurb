@@ -1,5 +1,6 @@
 #include "policy/battery_feature.hpp"
 #include "policy/mitigation_engine.hpp"
+#include "core/event_logger.hpp"
 
 #include <sched.h>
 #include <sys/syscall.h>
@@ -194,6 +195,10 @@ bool FeatureManager::actuate_anti_starvation_cap(int32_t pid, PowerProfileMode m
         // Enforce hard cgroup CPU quota (400% = 4 cores max quota per 100ms, matching 50% core limit)
         MitigationEngine::apply_cgroup_cpu_quota(pid, 400000, 100000);
     }
+    char det[128];
+    std::snprintf(det, sizeof(det), "Nice=%d, Headroom Mask applied, cgroup quota=%s",
+                  nice_val, (mode == PowerProfileMode::UltraEndurance ? "400ms/100ms" : "none"));
+    core::EventLogger::log_mitigation(pid, "runaway-task", "AntiStarvationCap", det);
     return (aff || batch);
 }
 
@@ -201,6 +206,7 @@ bool FeatureManager::actuate_anti_starvation_restore(int32_t pid, const cpu_set_
     bool aff = MitigationEngine::restore_core_affinity(pid, target_affinity);
     bool norm = MitigationEngine::restore_sched_normal(pid, orig_policy, orig_nice);
     MitigationEngine::restore_cgroup_cpu_quota(pid);
+    core::EventLogger::log_rollback(pid, "runaway-task", "Restored baseline CFS nice/affinity/cgroup quota");
     return (aff || norm);
 }
 

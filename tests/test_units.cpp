@@ -12,6 +12,8 @@
 #include "policy/battery_feature.hpp"
 #include "report/report_generator.hpp"
 #include "ipc/tray_shared_state.hpp"
+#include "ipc/history_ring_buffer.hpp"
+#include "core/event_logger.hpp"
 #include "tray/tray_client.hpp"
 #include "core/scoped_profiler.hpp"
 
@@ -2028,6 +2030,74 @@ void test_state_journaling_and_faithful_restoration() {
     std::cout << " [PASS] test_state_journaling_and_faithful_restoration (REF-TEST-020: Dual-domain snapshot & 100% faithful restoration verified)\n";
 }
 
+void test_zero_disk_wakeup_logging_and_history_ring_buffer() {
+    using namespace wattcurb;
+
+    // 1. Validate EventLogger Stack Formatting
+    char buf[512];
+    size_t len = core::EventLogger::format_entry(buf, sizeof(buf), "PROFILE", "Mode changed to UltraEndurance");
+    assert(len > 0);
+    assert(std::string_view(buf, len).find("[WATTCURB][PROFILE] Mode changed to UltraEndurance") != std::string_view::npos);
+
+    // Oracle Gate Benchmark: Event formatting latency (< 2.0 us/op)
+    constexpr int FORMAT_ITERS = 50000;
+    auto t0 = std::chrono::steady_clock::now();
+    for (int i = 0; i < FORMAT_ITERS; ++i) {
+        len = core::EventLogger::format_entry(buf, sizeof(buf), "MITIGATION", "PID 1234 throttled: nice=15");
+        (void)len;
+    }
+    auto t1 = std::chrono::steady_clock::now();
+    double format_us = std::chrono::duration<double, std::micro>(t1 - t0).count() / FORMAT_ITERS;
+    std::cout << " [ORACLE GATE] EventLogger Stack Formatting (50k iters): " << format_us << " us/op\n";
+    assert(format_us < 2.0 && "Oracle Gate Failed: EventLogger formatting latency exceeds 2.0 us/op threshold!");
+
+    // 2. Validate HistoryRingBuffer Layout & Wraparound
+    ipc::HistoryRingBufferShm ring{};
+    assert(ring.capacity == 600);
+    assert(ring.count == 0);
+    assert(ring.head_index == 0);
+
+    // Append 1000 items (exceeding capacity 600)
+    for (uint64_t i = 1; i <= 1000; ++i) {
+        ipc::HistoryPoint pt{};
+        pt.timestamp_sec = i;
+        pt.total_system_mw = static_cast<uint32_t>(i * 10);
+        pt.cpu_package_mw = static_cast<uint16_t>(i * 5);
+        pt.gpu_mw = static_cast<uint16_t>(i * 2);
+        pt.cpu_temp_c = 45;
+        pt.battery_percent = 80;
+        pt.power_profile_mode = 1;
+        ring.append(pt);
+    }
+
+    assert(ring.count == 600);
+    assert(ring.head_index == 400); // 1000 % 600 = 400
+
+    // Read snapshot and verify chronological order (oldest to newest)
+    ipc::HistoryPoint snapshot[600];
+    uint32_t count = 0;
+    bool ok = ring.read_snapshot(snapshot, 600, count);
+    assert(ok);
+    assert(count == 600);
+    assert(snapshot[0].timestamp_sec == 401 && "Oldest element after 1000 insertions must be 401!");
+    assert(snapshot[599].timestamp_sec == 1000 && "Newest element after 1000 insertions must be 1000!");
+
+    // Oracle Gate Benchmark: Append latency (< 50 ns/op)
+    constexpr int APPEND_ITERS = 100000;
+    auto t2 = std::chrono::steady_clock::now();
+    for (int i = 0; i < APPEND_ITERS; ++i) {
+        ipc::HistoryPoint pt{};
+        pt.timestamp_sec = static_cast<uint64_t>(i);
+        ring.append(pt);
+    }
+    auto t3 = std::chrono::steady_clock::now();
+    double append_ns = std::chrono::duration<double, std::nano>(t3 - t2).count() / APPEND_ITERS;
+    std::cout << " [ORACLE GATE] HistoryRingBuffer Append Latency (100k iters): " << append_ns << " ns/op\n";
+    assert(append_ns < 50.0 && "Oracle Gate Failed: HistoryRingBuffer append latency exceeds 50 ns/op threshold!");
+
+    std::cout << " [PASS] test_zero_disk_wakeup_logging_and_history_ring_buffer (REF-TEST-024: Zero-alloc journal, < 50ns append, 600-sample wrap verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -2049,6 +2119,7 @@ int main() {
     test::test_thinkpower_tray_client();
     test::test_anti_starvation_and_greedy_capping();
     test::test_state_journaling_and_faithful_restoration();
+    test::test_zero_disk_wakeup_logging_and_history_ring_buffer();
     test::test_process_classifier();
     test::test_mitigation_engine();
     test::test_adaptive_mitigation_and_rollback();

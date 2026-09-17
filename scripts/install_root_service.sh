@@ -13,8 +13,9 @@ rm -f /home/jedclub/.config/systemd/user/wattcurb.service
 rm -f /dev/shm/wattcurb_state.shm
 pkill -9 -f "/home/jedclub/.local/bin/wattcurb --daemon" 2>/dev/null || true
 
-# 2. Install binaries to /usr/local/bin or ensure ~/.local/bin is executable
+# 2. Install binaries to /usr/local/bin and ~/.local/bin
 install -m 755 "${REPO_DIR}/build/wattcurb" /usr/local/bin/wattcurb
+install -m 755 "${REPO_DIR}/build/wattcurb" /home/jedclub/.local/bin/wattcurb
 install -m 755 "${REPO_DIR}/build/wattcurb-tray" /home/jedclub/.local/bin/wattcurb-tray
 install -m 755 "${REPO_DIR}/build/wattcurb-dashboard" /home/jedclub/.local/bin/wattcurb-dashboard
 

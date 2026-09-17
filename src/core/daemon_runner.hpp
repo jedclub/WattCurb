@@ -10,6 +10,8 @@
 #include <atomic>
 #include <string>
 
+#include "core/event_logger.hpp"
+#include "ipc/history_ring_buffer.hpp"
 #include "ipc/tray_shared_state.hpp"
 
 namespace wattcurb::core {
@@ -52,6 +54,12 @@ private:
     ipc::WattCurbSharedState* shm_state_{nullptr};
     int shm_fd_{-1};
 
+    ipc::HistoryRingBufferShm* shm_history_{nullptr};
+    int shm_history_fd_{-1};
+    PowerProfileMode last_logged_profile_{PowerProfileMode::Balanced};
+    bool last_logged_battery_state_{false};
+    uint8_t last_logged_battery_pct_{100};
+
     int epoll_fd_{-1};
     int timer_fd_{-1};
     int signal_fd_{-1};
@@ -59,6 +67,7 @@ private:
     bool setup_timer();
     bool setup_signals();
     bool setup_shm();
+    bool setup_history_shm();
     void process_observation_cycle();
     void handle_ipc_datagram(int fd);
     void cleanup_descriptors() noexcept;

@@ -7,6 +7,8 @@
 #include "report/report_generator.hpp"
 #include "core/scoped_profiler.hpp"
 #include "ipc/tray_shared_state.hpp"
+#include "ipc/history_ring_buffer.hpp"
+#include "core/event_logger.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -39,6 +41,8 @@ void print_help(const char* prog) {
               << "Daemon & Live Modes:\n"
               << "  -d, --daemon           Run persistent daemon (128-byte binary Seqlock POD state in /dev/shm)\n"
               << "  -s, --status           Query live binary state from running daemon via 128-byte Seqlock POD\n"
+              << "  -H, --history          Display in-memory telemetry history (last 30 minutes, 0 disk I/O)\n"
+              << "  -L, --logs             Display recent event-driven audit logs from journald/audit.log\n"
               << "  -l, --live             Continuous live interactive terminal dashboard (Ctrl+C to stop)\n\n"
               << "Observation & Feature Tuning Options:\n"
               << "      --period <sec>     Daemon sleep period in seconds (default: 60.0s)\n"
@@ -119,6 +123,92 @@ int query_daemon_status() {
     return 1;
 }
 
+int query_daemon_history() {
+    int fd = ::open(wattcurb::ipc::HISTORY_SHM_PATH, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        std::cerr << "[!] Error: History shared memory (/dev/shm/wattcurb_history.shm) not accessible. Is wattcurb running?\n";
+        return 1;
+    }
+    void* ptr = ::mmap(nullptr, sizeof(wattcurb::ipc::HistoryRingBufferShm), PROT_READ, MAP_SHARED, fd, 0);
+    if (ptr == MAP_FAILED) {
+        ::close(fd);
+        std::cerr << "[!] Error: Failed to mmap history buffer.\n";
+        return 1;
+    }
+
+    auto* shm = static_cast<const wattcurb::ipc::HistoryRingBufferShm*>(ptr);
+    static wattcurb::ipc::HistoryPoint entries[wattcurb::ipc::HistoryRingBufferShm::CAPACITY];
+    uint32_t count = 0;
+
+    if (!shm->read_snapshot(entries, wattcurb::ipc::HistoryRingBufferShm::CAPACITY, count) || count == 0) {
+        std::cout << "[*] No history entries recorded yet. Waiting for observation cycles...\n";
+        ::munmap(ptr, sizeof(wattcurb::ipc::HistoryRingBufferShm));
+        ::close(fd);
+        return 0;
+    }
+
+    std::cout << "\033[1m[WattCurb In-Memory Telemetry History (Last " << std::max(1u, count * 3 / 60) << " min, REF-REQ-059)]\033[0m\n"
+              << std::left << std::setw(10) << "TIME"
+              << std::right << std::setw(12) << "SYSTEM(W)"
+              << std::setw(10) << "CPU(W)"
+              << std::setw(10) << "GPU(W)"
+              << std::setw(10) << "TEMP(°C)"
+              << std::setw(12) << "CLOCK(MHz)"
+              << std::setw(10) << "BATTERY"
+              << std::setw(16) << "PROFILE"
+              << "\n"
+              << std::string(80, '-') << "\n";
+
+    uint32_t start_idx = (count > 20) ? (count - 20) : 0;
+    const char* profile_names[] = {"Performance", "Balanced", "PowerSaver", "UltraEndurance"};
+
+    for (uint32_t i = start_idx; i < count; ++i) {
+        const auto& pt = entries[i];
+        std::time_t t = static_cast<std::time_t>(pt.timestamp_sec);
+        struct std::tm tm_buf{};
+        ::localtime_r(&t, &tm_buf);
+        char time_str[16];
+        std::snprintf(time_str, sizeof(time_str), "%02d:%02d:%02d",
+                      tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec);
+
+        const char* p_name = (pt.power_profile_mode <= 3) ? profile_names[pt.power_profile_mode] : "Unknown";
+
+        std::cout << std::left << std::setw(10) << time_str
+                  << std::right << std::fixed << std::setprecision(2)
+                  << std::setw(12) << (pt.total_system_mw / 1000.0)
+                  << std::setw(10) << (pt.cpu_package_mw / 1000.0)
+                  << std::setw(10) << (pt.gpu_mw / 1000.0)
+                  << std::setw(10) << pt.cpu_temp_c
+                  << std::setw(12) << pt.cpu_freq_mhz
+                  << std::setw(9) << static_cast<int>(pt.battery_percent) << "%"
+                  << std::setw(16) << p_name
+                  << "\n";
+    }
+
+    ::munmap(ptr, sizeof(wattcurb::ipc::HistoryRingBufferShm));
+    ::close(fd);
+    return 0;
+}
+
+int query_daemon_logs() {
+    std::cout << "\033[1m[WattCurb Event-Driven Audit Journal (REF-REQ-059)]\033[0m\n";
+    int ret = ::system("journalctl -u wattcurb.service -n 25 --no-pager 2>/dev/null");
+    if (ret != 0) {
+        int log_fd = ::open("/var/log/wattcurb/audit.log", O_RDONLY | O_CLOEXEC);
+        if (log_fd >= 0) {
+            char buf[4096];
+            ssize_t n;
+            while ((n = ::read(log_fd, buf, sizeof(buf))) > 0) {
+                std::cout.write(buf, n);
+            }
+            ::close(log_fd);
+        } else {
+            std::cout << "[*] No local audit log found. Daemon may be logging exclusively to journald.\n";
+        }
+    }
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     double interval_sec = 2.0;
     double duration_sec = 0.0;
@@ -130,6 +220,8 @@ int main(int argc, char* argv[]) {
     bool detail_mode = false;
     bool daemon_mode = false;
     bool status_query = false;
+    bool history_query = false;
+    bool logs_query = false;
     bool live_mode = false;
     bool dev_profile = false;
     bool feature_catalog_mode = false;
@@ -149,6 +241,10 @@ int main(int argc, char* argv[]) {
             daemon_mode = true;
         } else if (arg == "-s" || arg == "--status") {
             status_query = true;
+        } else if (arg == "-H" || arg == "--history") {
+            history_query = true;
+        } else if (arg == "-L" || arg == "--logs") {
+            logs_query = true;
         } else if (arg == "-b" || arg == "--briefing") {
             briefing_mode = true;
         } else if (arg == "--detail") {
@@ -179,6 +275,14 @@ int main(int argc, char* argv[]) {
 
     if (status_query) {
         return query_daemon_status();
+    }
+
+    if (history_query) {
+        return query_daemon_history();
+    }
+
+    if (logs_query) {
+        return query_daemon_logs();
     }
 
     // Extended High-Fidelity Executive Briefing query/execution (REF-REQ-020)

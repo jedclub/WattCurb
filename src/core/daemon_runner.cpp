@@ -40,9 +40,43 @@ void DaemonRunner::cleanup_descriptors() noexcept {
         shm_state_ = nullptr;
     }
     if (shm_fd_ >= 0) { ::close(shm_fd_); shm_fd_ = -1; }
+
+    if (shm_history_ != nullptr && shm_history_ != MAP_FAILED) {
+        ::munmap(shm_history_, sizeof(ipc::HistoryRingBufferShm));
+        shm_history_ = nullptr;
+    }
+    if (shm_history_fd_ >= 0) { ::close(shm_history_fd_); shm_history_fd_ = -1; }
+
     if (epoll_fd_ >= 0) { ::close(epoll_fd_); epoll_fd_ = -1; }
     if (timer_fd_ >= 0) { ::close(timer_fd_); timer_fd_ = -1; }
     if (signal_fd_ >= 0) { ::close(signal_fd_); signal_fd_ = -1; }
+}
+
+bool DaemonRunner::setup_history_shm() {
+    if (shm_history_ != nullptr) return true;
+
+    shm_history_fd_ = ::open(ipc::HISTORY_SHM_PATH, O_RDWR | O_CLOEXEC);
+    if (shm_history_fd_ < 0) {
+        ::unlink(ipc::HISTORY_SHM_PATH);
+        shm_history_fd_ = ::open(ipc::HISTORY_SHM_PATH, O_RDWR | O_CREAT | O_CLOEXEC, 0666);
+    }
+    if (shm_history_fd_ < 0) {
+        return false;
+    }
+    ::fchmod(shm_history_fd_, 0666);
+    if (::ftruncate(shm_history_fd_, sizeof(ipc::HistoryRingBufferShm)) < 0) {
+        ::close(shm_history_fd_);
+        shm_history_fd_ = -1;
+        return false;
+    }
+    void* ptr = ::mmap(nullptr, sizeof(ipc::HistoryRingBufferShm), PROT_READ | PROT_WRITE, MAP_SHARED, shm_history_fd_, 0);
+    if (ptr == MAP_FAILED) {
+        ::close(shm_history_fd_);
+        shm_history_fd_ = -1;
+        return false;
+    }
+    shm_history_ = static_cast<ipc::HistoryRingBufferShm*>(ptr);
+    return true;
 }
 
 bool DaemonRunner::setup_timer() {
@@ -114,7 +148,9 @@ bool DaemonRunner::initialize() {
         return false;
     }
 
+    EventLogger::initialize();
     setup_shm(); // Non-fatal: local Seqlock state remains 100% functional
+    setup_history_shm(); // Non-fatal: RAM history buffer (REF-REQ-059)
 
     // REF-REQ-055: Capture exact hardware baseline state before any actuation
     policy::MitigationEngine::capture_hardware_baseline();
@@ -147,6 +183,8 @@ bool DaemonRunner::initialize() {
     if (shm_state_ != nullptr) {
         shm_state_->power_profile_mode = local_shared_state_.power_profile_mode;
     }
+    last_logged_profile_ = initial_mode;
+    last_logged_battery_pct_ = 100;
 
     if (!setup_timer()) {
         std::cerr << "[!] Error: Failed to initialize timerfd.\n";
@@ -235,6 +273,57 @@ void DaemonRunner::process_observation_cycle() {
         }
     }
 
+    // 5. Append to In-Memory History Ring-Buffer (REF-REQ-059, REF-ARCH-035: Zero Disk I/O)
+    {
+        WATTCURB_PROFILE_SCOPE("daemon.history_update");
+        if (shm_history_ == nullptr) {
+            setup_history_shm();
+        }
+        if (shm_history_ != nullptr) {
+            ipc::HistoryPoint pt{};
+            pt.timestamp_sec = static_cast<uint64_t>(::time(nullptr));
+            pt.total_system_mw = static_cast<uint32_t>(cached_report_.hardware.total_system_watts * 1000.0);
+            pt.cpu_package_mw = static_cast<uint16_t>(cached_report_.hardware.cpu_package_watts * 1000.0);
+            pt.gpu_mw = static_cast<uint16_t>(cached_report_.hardware.gpu_watts * 1000.0);
+            pt.cpu_temp_c = static_cast<uint16_t>(cached_report_.hardware.cpu_temp_c);
+            pt.cpu_freq_mhz = static_cast<uint16_t>(cached_report_.hardware.cpu_freq_avg_mhz);
+            pt.battery_percent = static_cast<uint8_t>(cached_report_.hardware.battery_capacity_percent);
+            pt.battery_state = cached_report_.hardware.is_ac_passthrough ? 2 : (cached_report_.hardware.is_battery_discharging ? 1 : 0);
+            pt.power_profile_mode = static_cast<uint8_t>(cached_report_.mitigation_status.current_profile);
+            pt.cstate_c3_percent = static_cast<uint8_t>(cached_report_.hardware.cstate_c3_deep_percent);
+            pt.active_mitigations = static_cast<uint8_t>(cached_report_.mitigation_status.feature_summary_count);
+
+            shm_history_->append(pt);
+        }
+    }
+
+    // 6. Event-Driven Alerts & Profile Change Logging (REF-REQ-059: Zero Steady-State Writes)
+    {
+        bool cur_discharging = cached_report_.hardware.is_battery_discharging;
+        if (cur_discharging != last_logged_battery_state_) {
+            last_logged_battery_state_ = cur_discharging;
+            if (cur_discharging) {
+                EventLogger::log_alert("AC", "AC Disconnected: Operating on Battery Power");
+            } else {
+                EventLogger::log_alert("AC", "AC Connected: External Power Active");
+            }
+        }
+
+        uint8_t cur_pct = static_cast<uint8_t>(cached_report_.hardware.battery_capacity_percent);
+        if (cur_pct <= 20 && last_logged_battery_pct_ > 20) {
+            EventLogger::log_alert("BATTERY", "Battery capacity dropped below 20% threshold");
+        } else if (cur_pct <= 10 && last_logged_battery_pct_ > 10) {
+            EventLogger::log_alert("BATTERY", "Battery capacity critical: below 10% threshold");
+        }
+        last_logged_battery_pct_ = cur_pct;
+
+        PowerProfileMode cur_prof = cached_report_.mitigation_status.current_profile;
+        if (cur_prof != last_logged_profile_) {
+            EventLogger::log_profile_change(last_logged_profile_, cur_prof, "Battery Level Threshold / Dynamic Policy");
+            last_logged_profile_ = cur_prof;
+        }
+    }
+
     hw_prev_ = std::move(hw_cur);
     proc_pool_.swap(); // 0ns pointer swap
 }
@@ -245,8 +334,7 @@ int DaemonRunner::run() {
     }
 
     running_ = true;
-    std::cout << "[*] WattCurb background daemon initialized (PID: " << ::getpid()
-              << ", period: " << period_sec_ << "s, Zero-Wakeup active)\n" << std::flush;
+    EventLogger::log_raw("LIFECYCLE", "WattCurb background daemon initialized (Zero-Wakeup, Seqlock & History SHM active)");
 
     // Initial baseline capture immediately upon startup
     hw_prev_ = hw_probe_.capture_sample();
@@ -282,7 +370,7 @@ int DaemonRunner::run() {
                 ssize_t s = ::read(signal_fd_, &fdsi, sizeof(fdsi));
                 if (s == sizeof(fdsi)) {
                     if (fdsi.ssi_signo == SIGINT || fdsi.ssi_signo == SIGTERM) {
-                        std::cout << "\n[*] Received termination signal, gracefully exiting WattCurb daemon...\n" << std::flush;
+                        EventLogger::log_raw("LIFECYCLE", "Received termination signal, gracefully exiting WattCurb daemon...");
                         running_ = false;
                     } else if (fdsi.ssi_signo == SIGHUP) {
                         hw_probe_.refresh_device_paths();
@@ -432,6 +520,10 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
 
             // Immediately actuate hardware limits natively via direct sysfs (REF-REQ-055, REF-ARCH-031)
             policy::MitigationEngine::apply_power_profile(new_mode);
+
+            PowerProfileMode old_p = last_logged_profile_;
+            last_logged_profile_ = new_mode;
+            EventLogger::log_profile_change(old_p, new_mode, "User IPC Command");
 
             // Persist selected mode
             const char* hw_arg = "balanced";
