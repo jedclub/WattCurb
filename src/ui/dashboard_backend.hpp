@@ -81,6 +81,12 @@ class DashboardBackend : public QObject {
     // btop-Style Detailed Process List (Top 12 with Exhaustive Hover Telemetry)
     Q_PROPERTY(QVariantList processList READ processList NOTIFY processListChanged)
 
+    // Circular Power Share Breakdown (REF-REQ-060, REF-ARCH-036)
+    Q_PROPERTY(QVariantList devicePowerShares READ devicePowerShares NOTIFY powerSharesChanged)
+    Q_PROPERTY(QVariantList processPowerShares READ processPowerShares NOTIFY powerSharesChanged)
+    Q_PROPERTY(double totalDeviceWatts READ totalDeviceWatts NOTIFY powerSharesChanged)
+    Q_PROPERTY(double totalProcessWatts READ totalProcessWatts NOTIFY powerSharesChanged)
+
     // Status / Metadata
     Q_PROPERTY(bool isRescanning READ isRescanning NOTIFY rescanStatusChanged)
     Q_PROPERTY(QString lastUpdateTime READ lastUpdateTime NOTIFY telemetryChanged)
@@ -148,6 +154,10 @@ public:
     QString aspmPolicy() const { return aspm_policy_; }
 
     QVariantList processList() const { return process_list_; }
+    QVariantList devicePowerShares() const { return device_power_shares_; }
+    QVariantList processPowerShares() const { return process_power_shares_; }
+    double totalDeviceWatts() const noexcept { return total_device_w_; }
+    double totalProcessWatts() const noexcept { return total_process_w_; }
 
     bool isRescanning() const noexcept { return is_rescanning_; }
     QString lastUpdateTime() const { return last_update_time_; }
@@ -164,6 +174,7 @@ signals:
     void processListChanged();
     void rescanStatusChanged();
     void historyChanged();
+    void powerSharesChanged();
 
 private slots:
     void onPollTimer();
@@ -227,6 +238,13 @@ private:
     QString aspm_policy_{"powersave"};
 
     QVariantList process_list_{};
+
+    // Power Share Decomposition (REF-REQ-060, REF-ARCH-036)
+    QVariantList device_power_shares_{};
+    QVariantList process_power_shares_{};
+    double total_device_w_{0.0};
+    double total_process_w_{0.0};
+    void update_power_shares();
 };
 
 } // namespace wattcurb::ui

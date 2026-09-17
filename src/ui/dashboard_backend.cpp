@@ -111,9 +111,12 @@ void DashboardBackend::onPollTimer() {
     while (cpu_history_.size() > 35) cpu_history_.removeFirst();
     while (gpu_history_.size() > 35) gpu_history_.removeFirst();
 
+    update_power_shares();
+
     emit telemetryChanged();
     emit processListChanged();
     emit historyChanged();
+    emit powerSharesChanged();
 }
 
 bool DashboardBackend::queryDaemonTelemetry() noexcept {
@@ -404,6 +407,116 @@ void DashboardBackend::openSystemMonitor() {
 
 void DashboardBackend::refreshNow() {
     onPollTimer();
+}
+
+void DashboardBackend::update_power_shares() {
+    // 1. Compute Hardware Device Shares (REF-REQ-060, REF-ARCH-036)
+    double sys_w = systemDrainWatts();
+    double cpu_w = cpuDrainWatts();
+    double gpu_w = gpuDrainWatts();
+    double disp_w = displayDrainWatts();
+    double nvme_w = nvmeDrainWatts();
+    double fan_w = fanRpm() > 0 ? (fanRpm() / 4000.0) * 0.9 : 0.0;
+
+    double known_w = cpu_w + gpu_w + disp_w + nvme_w + fan_w;
+    double plat_w = (sys_w > known_w) ? (sys_w - known_w) : 0.0;
+    double total_dev_w = std::max(known_w + plat_w, 0.1);
+    total_device_w_ = total_dev_w;
+
+    QVariantList dev_list;
+    auto add_dev = [&](const QString& name, double w, const QString& col) {
+        if (w < 0.001) return;
+        QVariantMap m;
+        m["name"] = name;
+        m["watts"] = w;
+        m["pct"] = std::min(100.0, (w / total_dev_w) * 100.0);
+        m["color"] = col;
+        dev_list.append(m);
+    };
+
+    add_dev(QStringLiteral("CPU Subsystem"), cpu_w, QStringLiteral("#00d2ff")); // Cyan
+    add_dev(QStringLiteral("GPU Silicon"), gpu_w, QStringLiteral("#a855f7"));   // Purple
+    add_dev(QStringLiteral("Display & Light"), disp_w, QStringLiteral("#f59e0b")); // Orange
+    add_dev(QStringLiteral("NVMe Storage"), nvme_w, QStringLiteral("#10b981")); // Emerald
+    if (fan_w > 0.05) {
+        add_dev(QStringLiteral("Cooling Fan"), fan_w, QStringLiteral("#3b82f6"));   // Blue
+    }
+    if (plat_w > 0.05) {
+        add_dev(QStringLiteral("Platform & Loss"), plat_w, QStringLiteral("#64748b")); // Gray
+    }
+    device_power_shares_ = dev_list;
+
+    // 2. Compute Process Power Shares (REF-REQ-060, REF-ARCH-036)
+    QVariantList proc_list;
+    double proc_sum = 0.0;
+
+    if (!process_list_.isEmpty()) {
+        for (const auto& item : process_list_) {
+            proc_sum += item.toMap().value(QStringLiteral("totalWatts")).toDouble();
+        }
+    } else {
+        if (latest_state_.culprits[0].pid > 0) {
+            proc_sum += (latest_state_.culprits[0].drain_mw / 1000.0);
+        }
+        if (latest_state_.culprits[1].pid > 0) {
+            proc_sum += (latest_state_.culprits[1].drain_mw / 1000.0);
+        }
+    }
+
+    double total_proc_w = std::max(proc_sum, 0.1);
+    total_process_w_ = total_proc_w;
+
+    const QString proc_colors[] = {
+        QStringLiteral("#ef4444"), // Red (Top 1)
+        QStringLiteral("#f59e0b"), // Amber (Top 2)
+        QStringLiteral("#00d2ff"), // Cyan (Top 3)
+        QStringLiteral("#a855f7"), // Purple (Top 4)
+        QStringLiteral("#10b981")  // Emerald (Top 5)
+    };
+
+    double top_sum = 0.0;
+    if (!process_list_.isEmpty()) {
+        int count = std::min<int>(5, static_cast<int>(process_list_.size()));
+        for (int i = 0; i < count; ++i) {
+            QVariantMap p = process_list_[i].toMap();
+            double w = p.value(QStringLiteral("totalWatts")).toDouble();
+            if (w < 0.001) continue;
+            top_sum += w;
+            QVariantMap m;
+            m["name"] = p.value(QStringLiteral("comm")).toString();
+            m["pid"] = p.value(QStringLiteral("pid")).toInt();
+            m["watts"] = w;
+            m["pct"] = std::min(100.0, (w / total_proc_w) * 100.0);
+            m["color"] = proc_colors[i];
+            proc_list.append(m);
+        }
+    } else {
+        for (int i = 0; i < 2; ++i) {
+            if (latest_state_.culprits[i].pid > 0) {
+                double w = latest_state_.culprits[i].drain_mw / 1000.0;
+                top_sum += w;
+                QVariantMap m;
+                m["name"] = QString::fromUtf8(latest_state_.culprits[i].comm);
+                m["pid"] = latest_state_.culprits[i].pid;
+                m["watts"] = w;
+                m["pct"] = std::min(100.0, (w / total_proc_w) * 100.0);
+                m["color"] = proc_colors[i];
+                proc_list.append(m);
+            }
+        }
+    }
+
+    double other_w = std::max(0.0, proc_sum - top_sum);
+    if (other_w > 0.01) {
+        QVariantMap m;
+        m["name"] = QStringLiteral("기타 프로세스 (Other)");
+        m["pid"] = 0;
+        m["watts"] = other_w;
+        m["pct"] = std::min(100.0, (other_w / total_proc_w) * 100.0);
+        m["color"] = QStringLiteral("#64748b"); // Slate gray
+        proc_list.append(m);
+    }
+    process_power_shares_ = proc_list;
 }
 
 } // namespace wattcurb::ui

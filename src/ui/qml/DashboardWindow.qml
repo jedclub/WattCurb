@@ -686,6 +686,339 @@ ApplicationWindow {
                     }
                 }
 
+                // =============================================================
+                // DUAL-DONUT POWER SHARE MATRIX (REF-REQ-060, REF-ARCH-036)
+                // =============================================================
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 155
+                    spacing: 8
+
+                    // CARD A: Hardware Devices Power Share Donut
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        color: root.bgPanel
+                        border.color: root.borderPanel
+                        radius: 6
+                        clip: true
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            spacing: 4
+
+                            // Header
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    text: "💻 장치별 소비전력 지분 (DEVICE SHARE)"
+                                    color: root.colCyan
+                                    font.bold: true
+                                    font.pixelSize: 11
+                                }
+                                Item { Layout.fillWidth: true }
+                                Text {
+                                    text: backend.totalDeviceWatts.toFixed(2) + " W"
+                                    color: root.colCyan
+                                    font.bold: true
+                                    font.pixelSize: 12
+                                    font.family: "Monospace"
+                                }
+                            }
+
+                            Rectangle { Layout.fillWidth: true; height: 1; color: "#19202a" }
+
+                            // Donut + Legend
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                spacing: 10
+
+                                // Donut Canvas
+                                Item {
+                                    width: 105; height: 105
+                                    Canvas {
+                                        id: devDonutCanvas
+                                        anchors.fill: parent
+                                        antialiasing: true
+                                        renderStrategy: Canvas.Threaded
+                                        renderTarget: Canvas.FramebufferObject
+
+                                        Connections {
+                                            target: backend
+                                            function onPowerSharesChanged() { devDonutCanvas.requestPaint(); }
+                                        }
+
+                                        onPaint: {
+                                            var ctx = getContext("2d");
+                                            ctx.reset();
+                                            var w = width, h = height;
+                                            if (w <= 0 || h <= 0) return;
+                                            var cx = w / 2, cy = h / 2;
+                                            var rOut = Math.min(w, h) / 2 - 3;
+                                            var rIn = rOut * 0.64;
+
+                                            var data = backend.devicePowerShares;
+                                            if (!data || data.length === 0) {
+                                                ctx.beginPath();
+                                                ctx.arc(cx, cy, rOut, 0, 2 * Math.PI);
+                                                ctx.arc(cx, cy, rIn, 2 * Math.PI, 0, true);
+                                                ctx.fillStyle = "#1e293b";
+                                                ctx.fill();
+                                                return;
+                                            }
+
+                                            var start = -Math.PI / 2;
+                                            for (var i = 0; i < data.length; ++i) {
+                                                var it = data[i];
+                                                var sweep = (it.pct / 100.0) * (2 * Math.PI);
+                                                if (sweep <= 0.001) continue;
+                                                var end = start + sweep;
+
+                                                ctx.beginPath();
+                                                ctx.arc(cx, cy, rOut, start, end);
+                                                ctx.arc(cx, cy, rIn, end, start, true);
+                                                ctx.closePath();
+                                                ctx.fillStyle = it.color;
+                                                ctx.fill();
+
+                                                ctx.lineWidth = 1.5;
+                                                ctx.strokeStyle = root.bgPanel;
+                                                ctx.stroke();
+
+                                                start = end;
+                                            }
+                                        }
+                                    }
+
+                                    ColumnLayout {
+                                        anchors.centerIn: parent
+                                        spacing: 0
+                                        Text {
+                                            text: backend.totalDeviceWatts.toFixed(1) + "W"
+                                            color: root.textMain
+                                            font.bold: true
+                                            font.pixelSize: 12
+                                            font.family: "Monospace"
+                                            Layout.alignment: Qt.AlignCenter
+                                        }
+                                        Text {
+                                            text: "DEVICE"
+                                            color: root.textMuted
+                                            font.pixelSize: 8
+                                            font.bold: true
+                                            Layout.alignment: Qt.AlignCenter
+                                        }
+                                    }
+                                }
+
+                                // Legend Column
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    Layout.alignment: Qt.AlignVCenter
+                                    spacing: 2
+
+                                    Repeater {
+                                        model: backend.devicePowerShares
+                                        delegate: RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 4
+
+                                            Rectangle { width: 6; height: 6; radius: 2; color: modelData.color }
+                                            Text {
+                                                text: modelData.name
+                                                color: root.textMain
+                                                font.pixelSize: 9
+                                                font.bold: true
+                                                Layout.fillWidth: true
+                                                elide: Text.ElideRight
+                                            }
+                                            Text {
+                                                text: modelData.watts.toFixed(1) + "W"
+                                                color: modelData.color
+                                                font.pixelSize: 9
+                                                font.family: "Monospace"
+                                            }
+                                            Text {
+                                                text: modelData.pct.toFixed(0) + "%"
+                                                color: root.textDim
+                                                font.pixelSize: 9
+                                                font.family: "Monospace"
+                                                Layout.preferredWidth: 26
+                                                horizontalAlignment: Text.AlignRight
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // CARD B: Processes Power Share Donut
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        color: root.bgPanel
+                        border.color: root.borderPanel
+                        radius: 6
+                        clip: true
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            spacing: 4
+
+                            // Header
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    text: "🚀 프로세스별 소비전력 지분 (PROCESS SHARE)"
+                                    color: root.colOrange
+                                    font.bold: true
+                                    font.pixelSize: 11
+                                }
+                                Item { Layout.fillWidth: true }
+                                Text {
+                                    text: backend.totalProcessWatts.toFixed(2) + " W"
+                                    color: root.colOrange
+                                    font.bold: true
+                                    font.pixelSize: 12
+                                    font.family: "Monospace"
+                                }
+                            }
+
+                            Rectangle { Layout.fillWidth: true; height: 1; color: "#19202a" }
+
+                            // Donut + Legend
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                spacing: 10
+
+                                // Donut Canvas
+                                Item {
+                                    width: 105; height: 105
+                                    Canvas {
+                                        id: procDonutCanvas
+                                        anchors.fill: parent
+                                        antialiasing: true
+                                        renderStrategy: Canvas.Threaded
+                                        renderTarget: Canvas.FramebufferObject
+
+                                        Connections {
+                                            target: backend
+                                            function onPowerSharesChanged() { procDonutCanvas.requestPaint(); }
+                                        }
+
+                                        onPaint: {
+                                            var ctx = getContext("2d");
+                                            ctx.reset();
+                                            var w = width, h = height;
+                                            if (w <= 0 || h <= 0) return;
+                                            var cx = w / 2, cy = h / 2;
+                                            var rOut = Math.min(w, h) / 2 - 3;
+                                            var rIn = rOut * 0.64;
+
+                                            var data = backend.processPowerShares;
+                                            if (!data || data.length === 0) {
+                                                ctx.beginPath();
+                                                ctx.arc(cx, cy, rOut, 0, 2 * Math.PI);
+                                                ctx.arc(cx, cy, rIn, 2 * Math.PI, 0, true);
+                                                ctx.fillStyle = "#1e293b";
+                                                ctx.fill();
+                                                return;
+                                            }
+
+                                            var start = -Math.PI / 2;
+                                            for (var i = 0; i < data.length; ++i) {
+                                                var it = data[i];
+                                                var sweep = (it.pct / 100.0) * (2 * Math.PI);
+                                                if (sweep <= 0.001) continue;
+                                                var end = start + sweep;
+
+                                                ctx.beginPath();
+                                                ctx.arc(cx, cy, rOut, start, end);
+                                                ctx.arc(cx, cy, rIn, end, start, true);
+                                                ctx.closePath();
+                                                ctx.fillStyle = it.color;
+                                                ctx.fill();
+
+                                                ctx.lineWidth = 1.5;
+                                                ctx.strokeStyle = root.bgPanel;
+                                                ctx.stroke();
+
+                                                start = end;
+                                            }
+                                        }
+                                    }
+
+                                    ColumnLayout {
+                                        anchors.centerIn: parent
+                                        spacing: 0
+                                        Text {
+                                            text: backend.totalProcessWatts.toFixed(1) + "W"
+                                            color: root.textMain
+                                            font.bold: true
+                                            font.pixelSize: 12
+                                            font.family: "Monospace"
+                                            Layout.alignment: Qt.AlignCenter
+                                        }
+                                        Text {
+                                            text: "PROCESS"
+                                            color: root.textMuted
+                                            font.pixelSize: 8
+                                            font.bold: true
+                                            Layout.alignment: Qt.AlignCenter
+                                        }
+                                    }
+                                }
+
+                                // Legend Column
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    Layout.alignment: Qt.AlignVCenter
+                                    spacing: 2
+
+                                    Repeater {
+                                        model: backend.processPowerShares
+                                        delegate: RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 4
+
+                                            Rectangle { width: 6; height: 6; radius: 2; color: modelData.color }
+                                            Text {
+                                                text: modelData.name + (modelData.pid > 0 ? (" (" + modelData.pid + ")") : "")
+                                                color: root.textMain
+                                                font.pixelSize: 9
+                                                font.bold: true
+                                                Layout.fillWidth: true
+                                                elide: Text.ElideRight
+                                            }
+                                            Text {
+                                                text: modelData.watts.toFixed(1) + "W"
+                                                color: modelData.color
+                                                font.pixelSize: 9
+                                                font.family: "Monospace"
+                                            }
+                                            Text {
+                                                text: modelData.pct.toFixed(0) + "%"
+                                                color: root.textDim
+                                                font.pixelSize: 9
+                                                font.family: "Monospace"
+                                                Layout.preferredWidth: 26
+                                                horizontalAlignment: Text.AlignRight
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // BOTTOM: btop Process Power Matrix Table (Fills Remainder)
                 Rectangle {
                     Layout.fillWidth: true
