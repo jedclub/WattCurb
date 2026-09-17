@@ -33,9 +33,20 @@ However, user experience feedback identified that:
   `📈 정밀 분석 매트릭 창 열기 (Matrix Dashboard)`
 - Clicking this menu item executes a clean fork/exec of `/home/jedclub/.local/bin/wattcurb-dashboard` with prior instance deduplication (`pkill -f wattcurb-dashboard 2>/dev/null`).
 
+### 3.3. Ephemeral Lifecycle & Absolute Zero Inactive Resource Footprint
+- **Zero Inactive Footprint**: When the dashboard window is closed, the process terminates completely via `QGuiApplication::exit(0)`, returning all resident memory (RSS), GPU buffers, and file descriptors to the Linux kernel.
+- In the closed/inactive state:
+  - **CPU Consumption**: Exactly **0.0%** (0 cycles, 0 scheduling wakeups).
+  - **Memory RSS**: Exactly **0 MB** (process does not exist in memory).
+  - **GPU / VRAM Consumption**: Exactly **0.0% / 0 MB**.
+  - **Daemon IPC Overhead**: Exactly **0 calls** (the root daemon performs zero JSON serialization or socket writes while the dashboard is closed).
+- The dashboard shall never run as a hidden background daemon or resident system service.
+
 ---
 
 ## 4. Verification & Testing
 - Unit tests (`tests/test_units.cpp`) and tray operation verified.
 - Left-clicking the tray icon triggers profile cycling and icon/label updates without spawning GUI processes.
 - The Matrix Dashboard window launches only upon explicit menu selection.
+- Process inspection (`ps aux | grep wattcurb-dashboard`) verifies 0 running processes and 0 MB memory footprint when closed.
+
