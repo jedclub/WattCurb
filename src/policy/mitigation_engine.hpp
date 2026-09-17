@@ -52,7 +52,7 @@ public:
     static bool restore_core_affinity(int32_t pid, const cpu_set_t* target_affinity = nullptr) noexcept;
     static bool apply_sched_batch(int32_t pid, int nice_val = 10) noexcept;
 
-    // Hardware Baseline & Actuation Primitives (REF-REQ-055, REF-ARCH-031)
+    // Hardware Baseline & Actuation Primitives (REF-REQ-055, REF-ARCH-031, REF-REQ-063)
     struct alignas(64) HardwareBaselineState {
         bool captured{false};
         char platform_profile[32]{"balanced"};
@@ -62,6 +62,14 @@ public:
         uint32_t scaling_max_freq_khz{0};
         uint32_t panel_power_savings{1};
         char gpu_dpm_level[32]{"auto"};
+        char smt_control[16]{"on"};
+        bool bluetooth_blocked{false};
+        uint32_t backlight_brightness{0};
+        uint32_t backlight_max{0};
+        bool backlight_capped{false};
+        bool kwin_blur_unloaded{false};
+        bool drrs_applied{false};
+        bool baloo_suspended{false};
     };
 
     static void capture_hardware_baseline() noexcept;
@@ -78,8 +86,13 @@ public:
     static bool set_gpu_max_clock(uint32_t mhz) noexcept;
     static bool restore_gpu_max_clock() noexcept;
     static bool set_gpu_dpm_level(const char* level) noexcept;
+    static bool set_smt_control(const char* state) noexcept;
+    static bool set_bluetooth_blocked(bool block) noexcept;
     static bool cap_display_backlight(double max_pct) noexcept;
     static bool restore_display_backlight() noexcept;
+    static bool set_display_refresh_rate(uint32_t hz) noexcept;
+    static bool set_kwin_effects_suspended(bool suspend) noexcept;
+    static bool set_baloo_suspended(bool suspend) noexcept;
     static bool apply_power_profile(PowerProfileMode mode) noexcept;
 
     // Process Immunity & Audio Protection (REF-REQ-049, REF-REQ-054)

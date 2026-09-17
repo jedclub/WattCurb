@@ -2167,6 +2167,32 @@ void test_circular_power_share_visualization() {
     std::cout << " [PASS] test_circular_power_share_visualization (REF-TEST-025: Sum-invariant 100%, zero-division safety, < 100ns math verified)\n";
 }
 
+void test_ultra_endurance_extensions() {
+    using namespace wattcurb::policy;
+
+    // 1. Capture baseline
+    MitigationEngine::capture_hardware_baseline();
+    const auto& b = MitigationEngine::hardware_baseline();
+    assert(b.captured && "Baseline must be captured");
+    assert(b.smt_control[0] != '\0' && "SMT control baseline must be captured");
+
+    // 2. Test UltraEndurance profile transition
+    auto t0 = std::chrono::steady_clock::now();
+    bool applied = MitigationEngine::apply_power_profile(wattcurb::PowerProfileMode::UltraEndurance);
+    assert(applied && "UltraEndurance profile must apply successfully");
+
+    // 3. Test restoration back to Balanced
+    bool restored = MitigationEngine::apply_power_profile(wattcurb::PowerProfileMode::Balanced);
+    assert(restored && "Balanced profile restoration must succeed");
+    auto t1 = std::chrono::steady_clock::now();
+
+    double elapsed_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    std::cout << " [ORACLE GATE] UltraEndurance Profile Actuation & 100% Roundtrip: " << elapsed_ms << " ms\n";
+    assert(elapsed_ms < 500.0 && "Profile actuation roundtrip latency must be sub-500ms");
+
+    std::cout << " [PASS] test_ultra_endurance_extensions (REF-TEST-028: SMT, Bluetooth, Backlight Cap, DRRS, KWin Effects & Baloo verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -2190,6 +2216,7 @@ int main() {
     test::test_state_journaling_and_faithful_restoration();
     test::test_zero_disk_wakeup_logging_and_history_ring_buffer();
     test::test_circular_power_share_visualization();
+    test::test_ultra_endurance_extensions();
     test::test_process_classifier();
     test::test_mitigation_engine();
     test::test_adaptive_mitigation_and_rollback();

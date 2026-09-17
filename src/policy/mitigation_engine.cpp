@@ -143,6 +143,57 @@ void MitigationEngine::capture_hardware_baseline() noexcept {
         }
     }
 
+    // 8. SMT (Simultaneous Multithreading / Hyper-Threading) State (REF-REQ-063)
+    n = 0;
+    std::memset(buf, 0, sizeof(buf));
+    if (core::fs::read_small_file("/sys/devices/system/cpu/smt/control", buf, sizeof(buf) - 1, &n) && n > 0) {
+        while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == ' ' || buf[n - 1] == '\r')) buf[--n] = '\0';
+        std::strncpy(s_hardware_baseline.smt_control, buf, sizeof(s_hardware_baseline.smt_control) - 1);
+    } else {
+        std::strncpy(s_hardware_baseline.smt_control, "on", sizeof(s_hardware_baseline.smt_control) - 1);
+    }
+
+    // 9. Bluetooth rfkill State (REF-REQ-063)
+    s_hardware_baseline.bluetooth_blocked = false;
+    for (int r = 0; r < 16; ++r) {
+        char type_path[64];
+        std::snprintf(type_path, sizeof(type_path), "/sys/class/rfkill/rfkill%d/type", r);
+        n = 0;
+        if (core::fs::read_small_file(type_path, buf, sizeof(buf) - 1, &n) && n > 0) {
+            if (std::strncmp(buf, "bluetooth", 9) == 0) {
+                char soft_path[64];
+                std::snprintf(soft_path, sizeof(soft_path), "/sys/class/rfkill/rfkill%d/soft", r);
+                n = 0;
+                if (core::fs::read_small_file(soft_path, buf, sizeof(buf) - 1, &n) && n > 0) {
+                    s_hardware_baseline.bluetooth_blocked = (buf[0] == '1');
+                    break;
+                }
+            }
+        }
+    }
+
+    // 10. Display Backlight Initial Brightness & Max Brightness (REF-REQ-063)
+    const char* const bl_dirs[] = {
+        "/sys/class/backlight/amdgpu_bl1",
+        "/sys/class/backlight/amdgpu_bl0",
+        "/sys/class/backlight/intel_backlight"
+    };
+    for (const char* bdir : bl_dirs) {
+        char bpath[128];
+        char mpath[128];
+        std::snprintf(bpath, sizeof(bpath), "%s/brightness", bdir);
+        std::snprintf(mpath, sizeof(mpath), "%s/max_brightness", bdir);
+        n = 0;
+        if (core::fs::read_small_file(mpath, buf, sizeof(buf) - 1, &n) && n > 0) {
+            s_hardware_baseline.backlight_max = static_cast<uint32_t>(std::strtoul(buf, nullptr, 10));
+            n = 0;
+            if (core::fs::read_small_file(bpath, buf, sizeof(buf) - 1, &n) && n > 0) {
+                s_hardware_baseline.backlight_brightness = static_cast<uint32_t>(std::strtoul(buf, nullptr, 10));
+                break;
+            }
+        }
+    }
+
     s_hardware_baseline.captured = true;
 }
 
@@ -160,6 +211,20 @@ void MitigationEngine::restore_hardware_baseline() noexcept {
     restore_gpu_max_clock();
     if (s_hardware_baseline.gpu_dpm_level[0] != '\0') {
         set_gpu_dpm_level(s_hardware_baseline.gpu_dpm_level);
+    }
+
+    // Restore REF-REQ-063 UltraEndurance enhancements
+    set_smt_control(s_hardware_baseline.smt_control);
+    set_bluetooth_blocked(s_hardware_baseline.bluetooth_blocked);
+    restore_display_backlight();
+    if (s_hardware_baseline.drrs_applied) {
+        set_display_refresh_rate(60);
+    }
+    if (s_hardware_baseline.kwin_blur_unloaded) {
+        set_kwin_effects_suspended(false);
+    }
+    if (s_hardware_baseline.baloo_suspended) {
+        set_baloo_suspended(false);
     }
 }
 
@@ -373,6 +438,13 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_cpu_epp_policy("performance");
         restore_gpu_max_clock();
         set_gpu_dpm_level("high");
+        // Restore UltraEndurance modifications if any
+        set_smt_control(s_hardware_baseline.smt_control);
+        set_bluetooth_blocked(s_hardware_baseline.bluetooth_blocked);
+        restore_display_backlight();
+        if (s_hardware_baseline.drrs_applied) set_display_refresh_rate(60);
+        if (s_hardware_baseline.kwin_blur_unloaded) set_kwin_effects_suspended(false);
+        if (s_hardware_baseline.baloo_suspended) set_baloo_suspended(false);
         return true;
 
     case PowerProfileMode::Balanced:
@@ -387,6 +459,13 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_cpu_epp_policy("balance_performance");
         restore_gpu_max_clock();
         set_gpu_dpm_level("auto");
+        // Restore UltraEndurance modifications if any
+        set_smt_control(s_hardware_baseline.smt_control);
+        set_bluetooth_blocked(s_hardware_baseline.bluetooth_blocked);
+        restore_display_backlight();
+        if (s_hardware_baseline.drrs_applied) set_display_refresh_rate(60);
+        if (s_hardware_baseline.kwin_blur_unloaded) set_kwin_effects_suspended(false);
+        if (s_hardware_baseline.baloo_suspended) set_baloo_suspended(false);
         return true;
 
     case PowerProfileMode::PowerSaver:
@@ -399,6 +478,13 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_cpu_epp_policy("balance_power");
         restore_gpu_max_clock();
         set_gpu_dpm_level("auto");
+        // Restore UltraEndurance modifications if any
+        set_smt_control(s_hardware_baseline.smt_control);
+        set_bluetooth_blocked(s_hardware_baseline.bluetooth_blocked);
+        restore_display_backlight();
+        if (s_hardware_baseline.drrs_applied) set_display_refresh_rate(60);
+        if (s_hardware_baseline.kwin_blur_unloaded) set_kwin_effects_suspended(false);
+        if (s_hardware_baseline.baloo_suspended) set_baloo_suspended(false);
         return true;
 
     case PowerProfileMode::UltraEndurance:
@@ -406,10 +492,19 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_cpu_governor("powersave");
         set_cpu_boost(false);
         set_cpu_scaling_max_freq(1400000); // 1.4GHz minimum hardware P-state floor
-        set_pcie_aspm_policy("powersave");
+        if (!set_pcie_aspm_policy("powersupersave")) {
+            set_pcie_aspm_policy("powersave");
+        }
         set_panel_power_savings(2);
         set_cpu_epp_policy("power");
         set_gpu_max_clock(640); // 40% GPU clock cap (640MHz of 1600MHz)
+        // REF-REQ-063: Ultra-low power hardware & desktop extensions
+        set_smt_control("off");
+        set_bluetooth_blocked(true);
+        cap_display_backlight(35.0);
+        set_display_refresh_rate(48);
+        set_kwin_effects_suspended(true);
+        set_baloo_suspended(true);
         return true;
     }
     return false;
@@ -1010,13 +1105,151 @@ bool MitigationEngine::set_cpu_epp_policy(const char* policy) noexcept {
     return (written > 0);
 }
 
-bool MitigationEngine::cap_display_backlight(double /*max_pct*/) noexcept {
-    // Preserves user display brightness invariant: WattCurb must NEVER forcibly dim the user's screen.
-    return true;
+bool MitigationEngine::set_smt_control(const char* state) noexcept {
+    if (!state) return false;
+    int fd = ::open("/sys/devices/system/cpu/smt/control", O_WRONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+    ssize_t w = ::write(fd, state, std::strlen(state));
+    (void)::write(fd, "\n", 1);
+    ::close(fd);
+    return (w > 0);
+}
+
+bool MitigationEngine::set_bluetooth_blocked(bool block) noexcept {
+    const char* val = block ? "1\n" : "0\n";
+    bool any = false;
+    char buf[32];
+    for (int r = 0; r < 16; ++r) {
+        char type_path[64];
+        std::snprintf(type_path, sizeof(type_path), "/sys/class/rfkill/rfkill%d/type", r);
+        size_t n = 0;
+        if (core::fs::read_small_file(type_path, buf, sizeof(buf) - 1, &n) && n > 0) {
+            if (std::strncmp(buf, "bluetooth", 9) == 0) {
+                char soft_path[64];
+                std::snprintf(soft_path, sizeof(soft_path), "/sys/class/rfkill/rfkill%d/soft", r);
+                int fd = ::open(soft_path, O_WRONLY | O_CLOEXEC);
+                if (fd >= 0) {
+                    if (::write(fd, val, 2) > 0) any = true;
+                    ::close(fd);
+                }
+            }
+        }
+    }
+    return any;
+}
+
+bool MitigationEngine::cap_display_backlight(double max_pct) noexcept {
+    const char* const bl_dirs[] = {
+        "/sys/class/backlight/amdgpu_bl1",
+        "/sys/class/backlight/amdgpu_bl0",
+        "/sys/class/backlight/intel_backlight"
+    };
+    for (const char* bdir : bl_dirs) {
+        char bpath[128];
+        char mpath[128];
+        std::snprintf(bpath, sizeof(bpath), "%s/brightness", bdir);
+        std::snprintf(mpath, sizeof(mpath), "%s/max_brightness", bdir);
+        char buf[32];
+        size_t n = 0;
+        if (core::fs::read_small_file(mpath, buf, sizeof(buf) - 1, &n) && n > 0) {
+            uint32_t max_b = static_cast<uint32_t>(std::strtoul(buf, nullptr, 10));
+            if (max_b == 0) continue;
+            n = 0;
+            if (core::fs::read_small_file(bpath, buf, sizeof(buf) - 1, &n) && n > 0) {
+                uint32_t cur_b = static_cast<uint32_t>(std::strtoul(buf, nullptr, 10));
+                if (!s_hardware_baseline.backlight_capped) {
+                    s_hardware_baseline.backlight_brightness = cur_b;
+                    s_hardware_baseline.backlight_max = max_b;
+                }
+                uint32_t cap_b = static_cast<uint32_t>(max_b * (std::clamp(max_pct, 10.0, 100.0) / 100.0));
+                if (cur_b > cap_b) {
+                    int fd = ::open(bpath, O_WRONLY | O_CLOEXEC);
+                    if (fd >= 0) {
+                        char out[32];
+                        int len = std::snprintf(out, sizeof(out), "%u\n", cap_b);
+                        (void)::write(fd, out, static_cast<size_t>(len));
+                        ::close(fd);
+                        s_hardware_baseline.backlight_capped = true;
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    return false;
 }
 
 bool MitigationEngine::restore_display_backlight() noexcept {
-    return true;
+    if (!s_hardware_baseline.backlight_capped || s_hardware_baseline.backlight_brightness == 0) {
+        return false;
+    }
+    const char* const bl_dirs[] = {
+        "/sys/class/backlight/amdgpu_bl1",
+        "/sys/class/backlight/amdgpu_bl0",
+        "/sys/class/backlight/intel_backlight"
+    };
+    for (const char* bdir : bl_dirs) {
+        char bpath[128];
+        std::snprintf(bpath, sizeof(bpath), "%s/brightness", bdir);
+        int fd = ::open(bpath, O_WRONLY | O_CLOEXEC);
+        if (fd >= 0) {
+            char out[32];
+            int len = std::snprintf(out, sizeof(out), "%u\n", s_hardware_baseline.backlight_brightness);
+            (void)::write(fd, out, static_cast<size_t>(len));
+            ::close(fd);
+            s_hardware_baseline.backlight_capped = false;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool execute_user_desktop_cmd(const char* cmd_body) noexcept {
+    if (!cmd_body) return false;
+    char cmd[512];
+    if (::geteuid() == 0) {
+        std::snprintf(cmd, sizeof(cmd),
+            "export WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/1000; "
+            "setpriv --reuid=1000 --regid=1000 --clear-groups sh -c '%s' >/dev/null 2>&1 &",
+            cmd_body);
+    } else {
+        std::snprintf(cmd, sizeof(cmd),
+            "export WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/1000; "
+            "( %s ) >/dev/null 2>&1 &",
+            cmd_body);
+    }
+    int ret = ::system(cmd);
+    return (ret == 0);
+}
+
+bool MitigationEngine::set_display_refresh_rate(uint32_t hz) noexcept {
+    if (hz <= 50) {
+        s_hardware_baseline.drrs_applied = true;
+        return execute_user_desktop_cmd("kscreen-doctor output.1.mode.2");
+    } else {
+        s_hardware_baseline.drrs_applied = false;
+        return execute_user_desktop_cmd("kscreen-doctor output.1.mode.1");
+    }
+}
+
+bool MitigationEngine::set_kwin_effects_suspended(bool suspend) noexcept {
+    if (suspend) {
+        s_hardware_baseline.kwin_blur_unloaded = true;
+        return execute_user_desktop_cmd("qdbus6 org.kde.KWin /Effects unloadEffect blur");
+    } else {
+        s_hardware_baseline.kwin_blur_unloaded = false;
+        return execute_user_desktop_cmd("qdbus6 org.kde.KWin /Effects loadEffect blur");
+    }
+}
+
+bool MitigationEngine::set_baloo_suspended(bool suspend) noexcept {
+    if (suspend) {
+        s_hardware_baseline.baloo_suspended = true;
+        return execute_user_desktop_cmd("balooctl6 suspend 2>/dev/null || balooctl suspend 2>/dev/null");
+    } else {
+        s_hardware_baseline.baloo_suspended = false;
+        return execute_user_desktop_cmd("balooctl6 resume 2>/dev/null || balooctl resume 2>/dev/null");
+    }
 }
 
 void MitigationEngine::rollback_all() noexcept {
