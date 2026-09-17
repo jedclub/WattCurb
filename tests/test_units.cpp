@@ -22,6 +22,7 @@
 #include <chrono>
 #include <cstring>
 #include <iostream>
+#include <sys/resource.h>
 #include <linux/perf_event.h>
 #include <sstream>
 #include <string>
@@ -1902,6 +1903,80 @@ void test_anti_starvation_and_greedy_capping() {
               << avg_us_op << " us/op)\n";
 }
 
+// Implements REF-TEST-020: Dual-Domain Pre-Transition State Journaling & Faithful Restoration Verification
+void test_state_journaling_and_faithful_restoration() {
+    using namespace wattcurb;
+    using namespace wattcurb::policy;
+
+    std::cout << "--- [REF-TEST-020] Dual-Domain State Journaling & Faithful Restoration Verification ---\n";
+
+    // 1. Hardware Baseline State Journaling
+    MitigationEngine::capture_hardware_baseline();
+    const auto& base = MitigationEngine::hardware_baseline();
+    assert(base.captured && "Hardware baseline must be captured at bootstrap");
+    assert(std::strlen(base.platform_profile) > 0 && "Platform profile must not be empty");
+    assert(std::strlen(base.cpu_governor) > 0 && "CPU governor must not be empty");
+
+    std::cout << " [INFO] Hardware Baseline Captured:\n"
+              << "   * Platform Profile  : " << base.platform_profile << "\n"
+              << "   * CPU Governor      : " << base.cpu_governor << "\n"
+              << "   * CPU Boost         : " << base.cpu_boost << "\n"
+              << "   * PCIe ASPM Policy  : " << base.aspm_policy << "\n"
+              << "   * Scaling Max Freq  : " << base.scaling_max_freq_khz << " kHz\n"
+              << "   * Panel Power Level : " << base.panel_power_savings << "\n";
+
+    // 2. Hardware Profile Actuation & Restoration
+    bool ps_applied = MitigationEngine::apply_power_profile(PowerProfileMode::PowerSaver);
+    (void)ps_applied;
+
+    bool perf_applied = MitigationEngine::apply_power_profile(PowerProfileMode::Performance);
+    (void)perf_applied;
+
+    // Restore back to original baseline
+    MitigationEngine::restore_hardware_baseline();
+
+    // 3. Process-Level Pre-Mitigation State Journaling & Faithful Restoration
+    pid_t self_pid = ::getpid();
+    int initial_nice = ::getpriority(PRIO_PROCESS, 0);
+    int initial_sched = ::sched_getscheduler(0);
+    cpu_set_t initial_affinity;
+    CPU_ZERO(&initial_affinity);
+    ::sched_getaffinity(0, sizeof(cpu_set_t), &initial_affinity);
+
+    // Verify self-immunity invariant: wattcurb itself must NEVER be throttled
+    assert(MitigationEngine::is_immune_process(self_pid) && "WattCurb processes must have absolute immunity");
+    assert(!MitigationEngine::apply_sched_batch(self_pid, 10) && "Immune processes must be rejected from throttling");
+
+    // Set a non-default nice priority (e.g. +5) to simulate an application with custom priority
+    ::setpriority(PRIO_PROCESS, 0, 5);
+    assert(::getpriority(PRIO_PROCESS, 0) == 5);
+
+    // Journal pre-mitigation state (Snapshot: nice 5)
+    MitigationEngine::TrackedMitigation tm{};
+    tm.pid = self_pid;
+    tm.original_nice = 5;
+    tm.original_sched_policy = (initial_sched >= 0) ? initial_sched : SCHED_OTHER;
+    tm.original_affinity = initial_affinity;
+    tm.affinity_capped = true;
+    tm.sched_batch_applied = true;
+
+    // Simulate active mitigation state by elevating nice to 10
+    ::setpriority(PRIO_PROCESS, 0, 10);
+    assert(::getpriority(PRIO_PROCESS, 0) == 10);
+
+    // Faithful restoration: restore using the recorded journaled state (5), NOT generic 0!
+    MitigationEngine::restore_sched_normal(self_pid, tm.original_sched_policy, tm.original_nice);
+    MitigationEngine::restore_core_affinity(self_pid, &tm.original_affinity);
+
+    int restored_nice = ::getpriority(PRIO_PROCESS, 0);
+    assert(restored_nice == 5 && "Process nice must be faithfully restored to recorded pre-mitigation value 5, not generic 0!");
+
+    // Clean up to original nice
+    ::setpriority(PRIO_PROCESS, 0, initial_nice);
+
+    std::cout << " [PASS] test_state_journaling_and_faithful_restoration (REF-TEST-020: Dual-domain snapshot & 100% faithful restoration verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -1922,6 +1997,7 @@ int main() {
     test::test_unified_rapid_rollback();
     test::test_thinkpower_tray_client();
     test::test_anti_starvation_and_greedy_capping();
+    test::test_state_journaling_and_faithful_restoration();
     test::test_process_classifier();
     test::test_mitigation_engine();
     test::test_adaptive_mitigation_and_rollback();

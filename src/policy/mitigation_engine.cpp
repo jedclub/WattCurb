@@ -36,11 +36,243 @@ namespace {
 static uint32_t s_saved_backlight_level{0};
 static char s_saved_backlight_device[64]{0};
 
+// REF-REQ-055: Hardware baseline state recorded at bootstrap
+static MitigationEngine::HardwareBaselineState s_hardware_baseline{};
+
 } // anonymous namespace
 
 MitigationEngine::MitigationEngine() noexcept {
     // Implements REF-REQ-049: Instant immunity audit and self-healing at daemon startup
     audit_and_heal_audio_stack();
+    if (!s_hardware_baseline.captured) {
+        capture_hardware_baseline();
+    }
+}
+
+void MitigationEngine::capture_hardware_baseline() noexcept {
+    if (s_hardware_baseline.captured) {
+        return;
+    }
+
+    // 1. /sys/firmware/acpi/platform_profile
+    char buf[128]{};
+    size_t n = 0;
+    if (core::fs::read_small_file("/sys/firmware/acpi/platform_profile", buf, sizeof(buf) - 1, &n) && n > 0) {
+        while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r' || buf[n - 1] == ' ')) buf[--n] = '\0';
+        std::strncpy(s_hardware_baseline.platform_profile, buf, sizeof(s_hardware_baseline.platform_profile) - 1);
+    } else {
+        std::strncpy(s_hardware_baseline.platform_profile, "balanced", sizeof(s_hardware_baseline.platform_profile) - 1);
+    }
+
+    // 2. /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+    n = 0;
+    std::memset(buf, 0, sizeof(buf));
+    if (core::fs::read_small_file("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", buf, sizeof(buf) - 1, &n) && n > 0) {
+        while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r' || buf[n - 1] == ' ')) buf[--n] = '\0';
+        std::strncpy(s_hardware_baseline.cpu_governor, buf, sizeof(s_hardware_baseline.cpu_governor) - 1);
+    } else {
+        std::strncpy(s_hardware_baseline.cpu_governor, "schedutil", sizeof(s_hardware_baseline.cpu_governor) - 1);
+    }
+
+    // 3. /sys/devices/system/cpu/cpufreq/boost
+    n = 0;
+    std::memset(buf, 0, sizeof(buf));
+    if (core::fs::read_small_file("/sys/devices/system/cpu/cpufreq/boost", buf, sizeof(buf) - 1, &n) && n > 0) {
+        s_hardware_baseline.cpu_boost = (buf[0] == '1' ? 1 : 0);
+    } else {
+        s_hardware_baseline.cpu_boost = 1;
+    }
+
+    // 4. /sys/module/pcie_aspm/parameters/policy
+    // Format: "default [performance] powersave powersupersave"
+    n = 0;
+    std::memset(buf, 0, sizeof(buf));
+    if (core::fs::read_small_file("/sys/module/pcie_aspm/parameters/policy", buf, sizeof(buf) - 1, &n) && n > 0) {
+        const char* lbracket = std::strchr(buf, '[');
+        const char* rbracket = std::strchr(buf, ']');
+        if (lbracket && rbracket && rbracket > lbracket + 1) {
+            size_t plen = static_cast<size_t>(rbracket - lbracket - 1);
+            plen = std::min(plen, sizeof(s_hardware_baseline.aspm_policy) - 1);
+            std::memcpy(s_hardware_baseline.aspm_policy, lbracket + 1, plen);
+            s_hardware_baseline.aspm_policy[plen] = '\0';
+        } else {
+            std::strncpy(s_hardware_baseline.aspm_policy, "default", sizeof(s_hardware_baseline.aspm_policy) - 1);
+        }
+    } else {
+        std::strncpy(s_hardware_baseline.aspm_policy, "default", sizeof(s_hardware_baseline.aspm_policy) - 1);
+    }
+
+    // 5. /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
+    n = 0;
+    std::memset(buf, 0, sizeof(buf));
+    if (core::fs::read_small_file("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", buf, sizeof(buf) - 1, &n) && n > 0) {
+        long f = std::strtol(buf, nullptr, 10);
+        s_hardware_baseline.scaling_max_freq_khz = (f > 0) ? static_cast<uint32_t>(f) : 1700000;
+    } else {
+        s_hardware_baseline.scaling_max_freq_khz = 1700000;
+    }
+
+    // 6. /sys/class/drm/card1-eDP-1/amdgpu/panel_power_savings or card0
+    n = 0;
+    std::memset(buf, 0, sizeof(buf));
+    if (core::fs::read_small_file("/sys/class/drm/card1-eDP-1/amdgpu/panel_power_savings", buf, sizeof(buf) - 1, &n) && n > 0) {
+        s_hardware_baseline.panel_power_savings = static_cast<uint32_t>(std::strtoul(buf, nullptr, 10));
+    } else if (core::fs::read_small_file("/sys/class/drm/card0-eDP-1/amdgpu/panel_power_savings", buf, sizeof(buf) - 1, &n) && n > 0) {
+        s_hardware_baseline.panel_power_savings = static_cast<uint32_t>(std::strtoul(buf, nullptr, 10));
+    } else {
+        s_hardware_baseline.panel_power_savings = 1;
+    }
+
+    s_hardware_baseline.captured = true;
+}
+
+void MitigationEngine::restore_hardware_baseline() noexcept {
+    if (!s_hardware_baseline.captured) return;
+
+    set_platform_profile(s_hardware_baseline.platform_profile);
+    set_cpu_governor(s_hardware_baseline.cpu_governor);
+    set_cpu_boost(s_hardware_baseline.cpu_boost != 0);
+    set_pcie_aspm_policy(s_hardware_baseline.aspm_policy);
+    if (s_hardware_baseline.scaling_max_freq_khz > 0) {
+        set_cpu_scaling_max_freq(s_hardware_baseline.scaling_max_freq_khz);
+    }
+    set_panel_power_savings(s_hardware_baseline.panel_power_savings);
+}
+
+const MitigationEngine::HardwareBaselineState& MitigationEngine::hardware_baseline() noexcept {
+    return s_hardware_baseline;
+}
+
+bool MitigationEngine::set_platform_profile(const char* profile) noexcept {
+    if (!profile) return false;
+    int fd = ::open("/sys/firmware/acpi/platform_profile", O_WRONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+    size_t len = std::strlen(profile);
+    ssize_t w = ::write(fd, profile, len);
+    (void)::write(fd, "\n", 1);
+    ::close(fd);
+    return (w > 0);
+}
+
+bool MitigationEngine::set_cpu_governor(const char* governor) noexcept {
+    if (!governor) return false;
+    size_t glen = std::strlen(governor);
+    bool any_success = false;
+    int total_cpus = get_total_online_cpus();
+
+    for (int i = 0; i < total_cpus; ++i) {
+        char path[128];
+        std::snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_governor", i);
+        int fd = ::open(path, O_WRONLY | O_CLOEXEC);
+        if (fd >= 0) {
+            if (::write(fd, governor, glen) > 0) {
+                any_success = true;
+            }
+            ::close(fd);
+        }
+    }
+    return any_success;
+}
+
+bool MitigationEngine::set_cpu_boost(bool enable) noexcept {
+    int fd = ::open("/sys/devices/system/cpu/cpufreq/boost", O_WRONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+    const char* val = enable ? "1\n" : "0\n";
+    ssize_t w = ::write(fd, val, 2);
+    ::close(fd);
+    return (w > 0);
+}
+
+bool MitigationEngine::set_cpu_scaling_max_freq(uint32_t khz) noexcept {
+    if (khz == 0) return false;
+    char freq_buf[32];
+    int flen = std::snprintf(freq_buf, sizeof(freq_buf), "%u\n", khz);
+    bool any_success = false;
+    int total_cpus = get_total_online_cpus();
+
+    for (int i = 0; i < total_cpus; ++i) {
+        char path[128];
+        std::snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_max_freq", i);
+        int fd = ::open(path, O_WRONLY | O_CLOEXEC);
+        if (fd >= 0) {
+            if (::write(fd, freq_buf, static_cast<size_t>(flen)) > 0) {
+                any_success = true;
+            }
+            ::close(fd);
+        }
+    }
+    return any_success;
+}
+
+bool MitigationEngine::set_panel_power_savings(uint32_t level) noexcept {
+    char lvl_buf[16];
+    int len = std::snprintf(lvl_buf, sizeof(lvl_buf), "%u\n", level);
+    const char* paths[] = {
+        "/sys/class/drm/card1-eDP-1/amdgpu/panel_power_savings",
+        "/sys/class/drm/card0-eDP-1/amdgpu/panel_power_savings"
+    };
+    for (const char* p : paths) {
+        int fd = ::open(p, O_WRONLY | O_CLOEXEC);
+        if (fd >= 0) {
+            ssize_t w = ::write(fd, lvl_buf, static_cast<size_t>(len));
+            ::close(fd);
+            if (w > 0) return true;
+        }
+    }
+    return false;
+}
+
+bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
+    if (!s_hardware_baseline.captured) {
+        capture_hardware_baseline();
+    }
+
+    switch (mode) {
+    case PowerProfileMode::Performance:
+        set_platform_profile("performance");
+        set_cpu_governor("performance");
+        set_cpu_boost(true);
+        if (s_hardware_baseline.scaling_max_freq_khz > 0) {
+            set_cpu_scaling_max_freq(s_hardware_baseline.scaling_max_freq_khz);
+        }
+        set_pcie_aspm_policy("performance");
+        set_panel_power_savings(0);
+        set_cpu_epp_policy("performance");
+        return true;
+
+    case PowerProfileMode::Balanced:
+        set_platform_profile("balanced");
+        set_cpu_governor("schedutil");
+        set_cpu_boost(true);
+        if (s_hardware_baseline.scaling_max_freq_khz > 0) {
+            set_cpu_scaling_max_freq(s_hardware_baseline.scaling_max_freq_khz);
+        }
+        set_pcie_aspm_policy(s_hardware_baseline.aspm_policy);
+        set_panel_power_savings(1);
+        set_cpu_epp_policy("balance_performance");
+        return true;
+
+    case PowerProfileMode::PowerSaver:
+        set_platform_profile("low-power");
+        set_cpu_governor("schedutil");
+        set_cpu_boost(false);
+        set_cpu_scaling_max_freq(1700000); // 1.7GHz base clock cap
+        set_pcie_aspm_policy("powersave");
+        set_panel_power_savings(2);
+        set_cpu_epp_policy("balance_power");
+        return true;
+
+    case PowerProfileMode::UltraEndurance:
+        set_platform_profile("low-power");
+        set_cpu_governor("powersave");
+        set_cpu_boost(false);
+        set_cpu_scaling_max_freq(1400000); // 1.4GHz minimum P-state cap
+        set_pcie_aspm_policy("powersave");
+        set_panel_power_savings(2);
+        set_cpu_epp_policy("power");
+        return true;
+    }
+    return false;
 }
 
 PowerProfileMode MitigationEngine::determine_profile(bool on_battery, double battery_pct) const noexcept {
@@ -273,12 +505,18 @@ bool MitigationEngine::apply_core_affinity_cap(int32_t pid, const cpu_set_t* all
     return any_success;
 }
 
-bool MitigationEngine::restore_core_affinity(int32_t pid) noexcept {
+bool MitigationEngine::restore_core_affinity(int32_t pid, const cpu_set_t* target_affinity) noexcept {
     WATTCURB_PROFILE_SCOPE("mitig.restore_affinity");
     if (pid <= 1) return false;
 
-    cpu_set_t all_cores = get_all_cores_cpuset();
-    bool any_success = (::sched_setaffinity(pid, sizeof(cpu_set_t), &all_cores) == 0);
+    cpu_set_t all_cores;
+    const cpu_set_t* mask_to_set = target_affinity;
+    if (!mask_to_set) {
+        all_cores = get_all_cores_cpuset();
+        mask_to_set = &all_cores;
+    }
+
+    bool any_success = (::sched_setaffinity(pid, sizeof(cpu_set_t), mask_to_set) == 0);
 
     char task_dir[64];
     std::snprintf(task_dir, sizeof(task_dir), "/proc/%d/task", pid);
@@ -294,7 +532,7 @@ bool MitigationEngine::restore_core_affinity(int32_t pid) noexcept {
         char* endptr = nullptr;
         long tid = std::strtol(entry->d_name, &endptr, 10);
         if (tid > 0 && *endptr == '\0') {
-            if (::sched_setaffinity(static_cast<pid_t>(tid), sizeof(cpu_set_t), &all_cores) == 0) {
+            if (::sched_setaffinity(static_cast<pid_t>(tid), sizeof(cpu_set_t), mask_to_set) == 0) {
                 any_success = true;
             }
         }
@@ -424,19 +662,38 @@ bool MitigationEngine::apply_sched_idle(int32_t pid) noexcept {
 #endif
 }
 
-bool MitigationEngine::restore_sched_normal(int32_t pid) noexcept {
+bool MitigationEngine::restore_sched_normal(int32_t pid, int original_policy, int original_nice) noexcept {
     if (pid <= 1) return false;
 
-    // REF-REQ-049: If nice is negative, unprivileged sched_setscheduler fails with EPERM.
-    // Resetting nice to 0 allows unprivileged transition back to SCHED_OTHER.
-    ::setpriority(PRIO_PROCESS, pid, 0);
+    int target_policy = (original_policy >= 0) ? original_policy : SCHED_OTHER;
 
-    // 1. Restore CPU scheduler to SCHED_OTHER (CFS)
+    // 1. Reset nice priority to original_nice
+    ::setpriority(PRIO_PROCESS, pid, original_nice);
+
+    // 2. Restore CPU scheduler to original_policy
     struct sched_param sp{};
     sp.sched_priority = 0;
-    int sched_ret = ::sched_setscheduler(pid, SCHED_OTHER, &sp);
+    int sched_ret = ::sched_setscheduler(pid, target_policy, &sp);
 
-    // 2. Restore Block I/O scheduler to Best-Effort (IOPRIO_CLASS_BE, priority 4)
+    // Thread-level traversal for all tasks
+    char task_dir[64];
+    std::snprintf(task_dir, sizeof(task_dir), "/proc/%d/task", pid);
+    DIR* dir = ::opendir(task_dir);
+    if (dir) {
+        struct dirent* entry = nullptr;
+        while ((entry = ::readdir(dir)) != nullptr) {
+            if (entry->d_name[0] == '.') continue;
+            char* endptr = nullptr;
+            long tid = std::strtol(entry->d_name, &endptr, 10);
+            if (tid > 0 && *endptr == '\0') {
+                ::sched_setscheduler(static_cast<pid_t>(tid), target_policy, &sp);
+                ::setpriority(PRIO_PROCESS, static_cast<pid_t>(tid), original_nice);
+            }
+        }
+        ::closedir(dir);
+    }
+
+    // 3. Restore Block I/O scheduler to Best-Effort (IOPRIO_CLASS_BE, priority 4)
 #ifdef SYS_ioprio_set
     int prio_val = IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, 4);
     int io_ret = static_cast<int>(::syscall(SYS_ioprio_set, IOPRIO_WHO_PROCESS, pid, prio_val));
@@ -550,21 +807,20 @@ bool MitigationEngine::restore_display_backlight() noexcept {
 
 void MitigationEngine::rollback_all() noexcept {
     WATTCURB_PROFILE_SCOPE("mitig.rollback_all");
-    // Implements REF-REQ-031 Sec 3.2 & REF-REQ-049: Restore all mitigated processes and heal audio stack
+    // Implements REF-REQ-031 Sec 3.2, REF-REQ-049 & REF-REQ-055: Restore all mitigated processes faithfully and heal audio stack
     audit_and_heal_audio_stack();
 
     for (const auto& tm : m_tracked) {
         if (tm.affinity_capped) {
-            restore_core_affinity(tm.pid);
+            restore_core_affinity(tm.pid, &tm.original_affinity);
         }
-        if (tm.sched_batch_applied) {
-            restore_sched_normal(tm.pid);
-        }
-        if (tm.current_action == MitigationAction::CgroupFreeze) {
-            apply_cgroup_freeze(tm.pid, false);
-            restore_sched_normal(tm.pid);
-        } else if (tm.current_action == MitigationAction::SchedIdle) {
-            restore_sched_normal(tm.pid);
+        if (tm.sched_batch_applied || tm.sched_idle_applied ||
+            tm.current_action == MitigationAction::SchedIdle ||
+            tm.current_action == MitigationAction::CgroupFreeze) {
+            if (tm.current_action == MitigationAction::CgroupFreeze) {
+                apply_cgroup_freeze(tm.pid, false);
+            }
+            restore_sched_normal(tm.pid, tm.original_sched_policy, tm.original_nice);
         }
         if (tm.original_timerslack_ns > 0) {
             apply_timer_slack(tm.pid, tm.original_timerslack_ns);
@@ -573,14 +829,16 @@ void MitigationEngine::rollback_all() noexcept {
     m_tracked.clear();
 
     if (m_aspm_modified) {
-        set_pcie_aspm_policy("default");
+        set_pcie_aspm_policy(s_hardware_baseline.aspm_policy);
         m_aspm_modified = false;
     }
     if (m_backlight_capped) {
         restore_display_backlight();
         m_backlight_capped = false;
     }
-    set_cpu_epp_policy("balance_performance");
+    if (s_hardware_baseline.captured) {
+        restore_hardware_baseline();
+    }
 }
 
 void MitigationEngine::thaw_all_frozen() noexcept {
@@ -615,22 +873,17 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
     PowerProfileMode old_profile = m_current_profile;
 
     if (old_profile != target_profile) {
+        apply_power_profile(target_profile);
         if (target_profile == PowerProfileMode::Performance) {
             rollback_all();
-            set_cpu_epp_policy("performance");
         } else if (target_profile == PowerProfileMode::Balanced) {
             rollback_all();
         } else if (old_profile == PowerProfileMode::UltraEndurance && target_profile == PowerProfileMode::PowerSaver) {
             thaw_all_frozen();
-            set_cpu_epp_policy("balance_power");
         } else if (target_profile == PowerProfileMode::PowerSaver) {
-            set_pcie_aspm_policy("powersave");
             m_aspm_modified = true;
-            set_cpu_epp_policy("balance_power");
         } else if (target_profile == PowerProfileMode::UltraEndurance) {
-            set_pcie_aspm_policy("powersave");
             m_aspm_modified = true;
-            set_cpu_epp_policy("power");
             cap_display_backlight(50.0);
             m_backlight_capped = true;
         }
@@ -746,6 +999,12 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
 
         // Apply Actuations (Zero-Freeze: Only SchedIdle, TimerSlack, MemoryReclaim)
         if (should_throttle && !already_tracked) {
+            int orig_nice = ::getpriority(PRIO_PROCESS, proc.pid);
+            int orig_sched = ::sched_getscheduler(proc.pid);
+            cpu_set_t orig_aff;
+            CPU_ZERO(&orig_aff);
+            ::sched_getaffinity(proc.pid, sizeof(cpu_set_t), &orig_aff);
+
             if (apply_sched_idle(proc.pid)) {
                 ++status.throttled_count;
                 status.estimated_savings_watts += (proc.cpu_watts * 0.4);
@@ -755,7 +1014,13 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
                         .tier = tier,
                         .current_action = MitigationAction::SchedIdle,
                         .applied_timestamp_sec = 0,
-                        .original_timerslack_ns = proc.timerslack_ns
+                        .original_nice = orig_nice,
+                        .original_sched_policy = (orig_sched >= 0) ? orig_sched : SCHED_OTHER,
+                        .original_timerslack_ns = proc.timerslack_ns,
+                        .original_affinity = orig_aff,
+                        .affinity_capped = false,
+                        .sched_batch_applied = false,
+                        .sched_idle_applied = true
                     });
                 }
             }
@@ -785,6 +1050,12 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
         }
 
         if (should_cap_affinity) {
+            int orig_nice = ::getpriority(PRIO_PROCESS, proc.pid);
+            int orig_sched = ::sched_getscheduler(proc.pid);
+            cpu_set_t orig_aff;
+            CPU_ZERO(&orig_aff);
+            ::sched_getaffinity(proc.pid, sizeof(cpu_set_t), &orig_aff);
+
             cpu_set_t allowed_set = get_headroom_allowed_cpuset();
             if (apply_core_affinity_cap(proc.pid, &allowed_set)) {
                 apply_sched_batch(proc.pid, 10);
@@ -794,9 +1065,13 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
                         .tier = tier,
                         .current_action = MitigationAction::AffinityCap,
                         .applied_timestamp_sec = 0,
+                        .original_nice = orig_nice,
+                        .original_sched_policy = (orig_sched >= 0) ? orig_sched : SCHED_OTHER,
                         .original_timerslack_ns = proc.timerslack_ns,
+                        .original_affinity = orig_aff,
                         .affinity_capped = true,
-                        .sched_batch_applied = true
+                        .sched_batch_applied = true,
+                        .sched_idle_applied = false
                     });
                     already_tracked = true;
                 } else if (already_tracked) {

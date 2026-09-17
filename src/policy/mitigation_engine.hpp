@@ -36,7 +36,7 @@ public:
 
     // Process-Level Actuation Primitives
     static bool apply_sched_idle(int32_t pid) noexcept;
-    static bool restore_sched_normal(int32_t pid) noexcept;
+    static bool restore_sched_normal(int32_t pid, int original_policy = 0, int original_nice = 0) noexcept;
     static bool apply_timer_slack(int32_t pid, uint64_t slack_ns) noexcept;
     static bool apply_memory_reclaim(int32_t pid, uint64_t bytes) noexcept;
     static bool apply_cgroup_freeze(int32_t pid, bool freeze) noexcept;
@@ -47,14 +47,34 @@ public:
     static cpu_set_t get_headroom_allowed_cpuset() noexcept;
     static cpu_set_t get_all_cores_cpuset() noexcept;
     static bool apply_core_affinity_cap(int32_t pid, const cpu_set_t* allowed_set = nullptr) noexcept;
-    static bool restore_core_affinity(int32_t pid) noexcept;
+    static bool restore_core_affinity(int32_t pid, const cpu_set_t* target_affinity = nullptr) noexcept;
     static bool apply_sched_batch(int32_t pid, int nice_val = 10) noexcept;
 
-    // Hardware-Level Actuation Primitives (REF-REQ-031 Sec 3.3)
+    // Hardware Baseline & Actuation Primitives (REF-REQ-055, REF-ARCH-031)
+    struct alignas(64) HardwareBaselineState {
+        bool captured{false};
+        char platform_profile[32]{"balanced"};
+        char cpu_governor[32]{"schedutil"};
+        int cpu_boost{1};
+        char aspm_policy[32]{"default"};
+        uint32_t scaling_max_freq_khz{0};
+        uint32_t panel_power_savings{1};
+    };
+
+    static void capture_hardware_baseline() noexcept;
+    static void restore_hardware_baseline() noexcept;
+    [[nodiscard]] static const HardwareBaselineState& hardware_baseline() noexcept;
+
+    static bool set_platform_profile(const char* profile) noexcept;
+    static bool set_cpu_governor(const char* governor) noexcept;
+    static bool set_cpu_boost(bool enable) noexcept;
+    static bool set_cpu_scaling_max_freq(uint32_t khz) noexcept;
+    static bool set_panel_power_savings(uint32_t level) noexcept;
     static bool set_pcie_aspm_policy(const char* policy) noexcept;
     static bool set_cpu_epp_policy(const char* policy) noexcept;
     static bool cap_display_backlight(double max_pct) noexcept;
     static bool restore_display_backlight() noexcept;
+    static bool apply_power_profile(PowerProfileMode mode) noexcept;
 
     // Process Immunity & Audio Protection (REF-REQ-049, REF-REQ-054)
     static bool is_immune_process(int32_t pid) noexcept;
@@ -63,16 +83,22 @@ public:
     // Fast resolution of cgroup v2 path for a given pid without heap allocations
     static bool resolve_cgroup_path(int32_t pid, char* out_buf, size_t out_cap) noexcept;
 
-    // Internal tracking structure for rollback & idempotency
+    // Internal tracking structure for rollback & idempotency (REF-REQ-055)
     static constexpr size_t MAX_TRACKED_MITIGATIONS = 128;
-    struct TrackedMitigation {
+    struct alignas(64) TrackedMitigation {
         int32_t pid{0};
         ProcessSafetyTier tier{ProcessSafetyTier::BackgroundWorker};
         MitigationAction current_action{MitigationAction::None};
         uint64_t applied_timestamp_sec{0};
+        
+        // Exact Pre-Mitigation Baseline State Journal (REF-REQ-055)
+        int original_nice{0};
+        int original_sched_policy{0}; // SCHED_OTHER
         uint64_t original_timerslack_ns{50000};
+        cpu_set_t original_affinity{};
         bool affinity_capped{false};
         bool sched_batch_applied{false};
+        bool sched_idle_applied{false};
     };
 
     [[nodiscard]] const core::FixedVector<TrackedMitigation, MAX_TRACKED_MITIGATIONS>& tracked_mitigations() const noexcept {

@@ -1,6 +1,7 @@
 #include "core/daemon_runner.hpp"
 #include "report/report_generator.hpp"
 #include "core/scoped_profiler.hpp"
+#include "policy/mitigation_engine.hpp"
 
 #include <chrono>
 #include <csignal>
@@ -29,6 +30,7 @@ DaemonRunner::DaemonRunner(double period_sec, double window_sec, std::string_vie
 
 DaemonRunner::~DaemonRunner() {
     stop();
+    policy::MitigationEngine::restore_hardware_baseline();
     cleanup_descriptors();
 }
 
@@ -114,28 +116,34 @@ bool DaemonRunner::initialize() {
 
     setup_shm(); // Non-fatal: local Seqlock state remains 100% functional
 
+    // REF-REQ-055: Capture exact hardware baseline state before any actuation
+    policy::MitigationEngine::capture_hardware_baseline();
+
     // Load persisted profile mode if available (REF-REQ-053)
+    PowerProfileMode initial_mode = PowerProfileMode::Balanced;
     char mode_buf[32]{};
     int r_mode = core::fs::read_small_file("/home/jedclub/.cache/power_profile_mode", mode_buf, sizeof(mode_buf) - 1);
     if (r_mode > 0) {
         std::string_view m(mode_buf, static_cast<size_t>(r_mode));
         if (m.find("performance") != std::string_view::npos) {
-            feature_manager_.set_override_profile(PowerProfileMode::Performance);
+            initial_mode = PowerProfileMode::Performance;
             local_shared_state_.power_profile_mode = 0;
         } else if (m.find("ultra") != std::string_view::npos) {
-            feature_manager_.set_override_profile(PowerProfileMode::UltraEndurance);
+            initial_mode = PowerProfileMode::UltraEndurance;
             local_shared_state_.power_profile_mode = 3;
         } else if (m.find("save") != std::string_view::npos) {
-            feature_manager_.set_override_profile(PowerProfileMode::PowerSaver);
+            initial_mode = PowerProfileMode::PowerSaver;
             local_shared_state_.power_profile_mode = 2;
         } else {
-            feature_manager_.set_override_profile(PowerProfileMode::Balanced);
+            initial_mode = PowerProfileMode::Balanced;
             local_shared_state_.power_profile_mode = 1;
         }
     } else {
-        feature_manager_.set_override_profile(PowerProfileMode::Balanced);
+        initial_mode = PowerProfileMode::Balanced;
         local_shared_state_.power_profile_mode = 1;
     }
+    feature_manager_.set_override_profile(initial_mode);
+    policy::MitigationEngine::apply_power_profile(initial_mode);
     if (shm_state_ != nullptr) {
         shm_state_->power_profile_mode = local_shared_state_.power_profile_mode;
     }
@@ -422,29 +430,21 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
                 shm_state_->power_profile_mode = static_cast<uint8_t>(new_mode);
             }
 
-            // Immediately actuate hardware limits via power-profile-manager (REF-REQ-043)
+            // Immediately actuate hardware limits natively via direct sysfs (REF-REQ-055, REF-ARCH-031)
+            policy::MitigationEngine::apply_power_profile(new_mode);
+
+            // Persist selected mode
             const char* hw_arg = "balanced";
             if (new_mode == PowerProfileMode::Performance) hw_arg = "performance";
             else if (new_mode == PowerProfileMode::PowerSaver) hw_arg = "save";
             else if (new_mode == PowerProfileMode::UltraEndurance) hw_arg = "ultra";
 
-            // Persist selected mode
             int mode_fd = ::open("/home/jedclub/.cache/power_profile_mode", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
             if (mode_fd >= 0) {
                 ::fchmod(mode_fd, 0666);
                 (void)::write(mode_fd, hw_arg, std::strlen(hw_arg));
                 (void)::write(mode_fd, "\n", 1);
                 ::close(mode_fd);
-            }
-
-            pid_t pid = ::fork();
-            if (pid == 0) {
-                ::setsid();
-                const char* ppm = "/home/jedclub/.local/bin/power-profile-manager";
-                if (::access(ppm, X_OK) == 0) {
-                    ::execl(ppm, "power-profile-manager", hw_arg, "--internal", nullptr);
-                }
-                ::_exit(0);
             }
 
             // Immediately refresh observation and shared memory state

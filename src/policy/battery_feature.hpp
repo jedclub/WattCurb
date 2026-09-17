@@ -77,7 +77,7 @@ public:
     static bool actuate_cgroup_freeze(int32_t pid, bool freeze) noexcept;
     static bool actuate_ccx_affinity(int32_t pid, int32_t target_core) noexcept;
     static bool actuate_anti_starvation_cap(int32_t pid) noexcept;
-    static bool actuate_anti_starvation_restore(int32_t pid) noexcept;
+    static bool actuate_anti_starvation_restore(int32_t pid, const cpu_set_t* target_affinity = nullptr, int orig_policy = 0, int orig_nice = 0) noexcept;
 
 private:
     std::array<FeatureMetrics, static_cast<size_t>(FeatureId::Count)> m_metrics{};
@@ -87,6 +87,10 @@ private:
         int32_t pid{0};
         FeatureId applied_feature{FeatureId::SchedIdleThrottle};
         uint64_t timestamp_sec{0};
+        int original_nice{0};
+        int original_sched_policy{0};
+        uint64_t original_timerslack_ns{50000};
+        cpu_set_t original_affinity{};
     };
     core::FixedVector<TrackedMitigation, MAX_TRACKED_MITIGATIONS> m_tracked{};
     std::optional<PowerProfileMode> m_profile_override{};

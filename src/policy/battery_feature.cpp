@@ -3,6 +3,7 @@
 
 #include <sched.h>
 #include <sys/syscall.h>
+#include <sys/resource.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <cstdio>
@@ -186,9 +187,9 @@ bool FeatureManager::actuate_anti_starvation_cap(int32_t pid) noexcept {
     return (aff || batch);
 }
 
-bool FeatureManager::actuate_anti_starvation_restore(int32_t pid) noexcept {
-    bool aff = MitigationEngine::restore_core_affinity(pid);
-    bool norm = MitigationEngine::restore_sched_normal(pid);
+bool FeatureManager::actuate_anti_starvation_restore(int32_t pid, const cpu_set_t* target_affinity, int orig_policy, int orig_nice) noexcept {
+    bool aff = MitigationEngine::restore_core_affinity(pid, target_affinity);
+    bool norm = MitigationEngine::restore_sched_normal(pid, orig_policy, orig_nice);
     return (aff || norm);
 }
 
@@ -229,17 +230,17 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
     status.current_profile = eff_profile;
 
     if (eff_profile == PowerProfileMode::Performance) {
-        // Performance Mode: All features suppressed, max throughput, zero throttling (REF-REQ-043)
+        // Performance Mode: All features suppressed, max throughput, zero throttling (REF-REQ-043, REF-REQ-055)
         for (const auto& tm : m_tracked) {
             if (tm.applied_feature == FeatureId::CgroupFreezer) {
                 actuate_cgroup_freeze(tm.pid, false);
-                MitigationEngine::restore_sched_normal(tm.pid);
+                MitigationEngine::restore_sched_normal(tm.pid, tm.original_sched_policy, tm.original_nice);
             } else if (tm.applied_feature == FeatureId::SchedIdleThrottle) {
-                MitigationEngine::restore_sched_normal(tm.pid);
+                MitigationEngine::restore_sched_normal(tm.pid, tm.original_sched_policy, tm.original_nice);
             } else if (tm.applied_feature == FeatureId::AntiStarvationHeadroom) {
-                actuate_anti_starvation_restore(tm.pid);
+                actuate_anti_starvation_restore(tm.pid, &tm.original_affinity, tm.original_sched_policy, tm.original_nice);
             }
-            MitigationEngine::apply_timer_slack(tm.pid, 50'000ULL);
+            MitigationEngine::apply_timer_slack(tm.pid, tm.original_timerslack_ns > 0 ? tm.original_timerslack_ns : 50'000ULL);
         }
         m_tracked.clear();
 
@@ -415,23 +416,35 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
                     }
                 }
 
-                if (!already_tracked && actuate_anti_starvation_cap(proc.pid)) {
-                    auto& m = m_metrics[static_cast<size_t>(FeatureId::AntiStarvationHeadroom)];
-                    ++m.actions_taken;
-                    double savings = proc.cpu_watts * 0.15; // Energy reduction from mitigating SMT cross-thread thrashing
-                    m.estimated_power_saved_watts += savings;
-                    if (m.targeted_pid_count < m.targeted_pids.size()) {
-                        m.targeted_pids[m.targeted_pid_count++] = proc.pid;
+                if (!already_tracked) {
+                    int orig_nice = ::getpriority(PRIO_PROCESS, proc.pid);
+                    int orig_sched = ::sched_getscheduler(proc.pid);
+                    cpu_set_t orig_aff;
+                    CPU_ZERO(&orig_aff);
+                    ::sched_getaffinity(proc.pid, sizeof(cpu_set_t), &orig_aff);
+
+                    if (actuate_anti_starvation_cap(proc.pid)) {
+                        auto& m = m_metrics[static_cast<size_t>(FeatureId::AntiStarvationHeadroom)];
+                        ++m.actions_taken;
+                        double savings = proc.cpu_watts * 0.15; // Energy reduction from mitigating SMT cross-thread thrashing
+                        m.estimated_power_saved_watts += savings;
+                        if (m.targeted_pid_count < m.targeted_pids.size()) {
+                            m.targeted_pids[m.targeted_pid_count++] = proc.pid;
+                        }
+                        if (m_tracked.size() < MAX_TRACKED_MITIGATIONS) {
+                            m_tracked.push_back(TrackedMitigation{
+                                .pid = proc.pid,
+                                .applied_feature = FeatureId::AntiStarvationHeadroom,
+                                .timestamp_sec = 0,
+                                .original_nice = orig_nice,
+                                .original_sched_policy = (orig_sched >= 0) ? orig_sched : SCHED_OTHER,
+                                .original_timerslack_ns = proc.timerslack_ns,
+                                .original_affinity = orig_aff
+                            });
+                        }
+                        ++status.throttled_count;
+                        status.estimated_savings_watts += savings;
                     }
-                    if (m_tracked.size() < MAX_TRACKED_MITIGATIONS) {
-                        m_tracked.push_back(TrackedMitigation{
-                            .pid = proc.pid,
-                            .applied_feature = FeatureId::AntiStarvationHeadroom,
-                            .timestamp_sec = 0
-                        });
-                    }
-                    ++status.throttled_count;
-                    status.estimated_savings_watts += savings;
                 }
             }
         }
@@ -450,7 +463,7 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
                 }
             }
             if (!still_greedy) {
-                actuate_anti_starvation_restore(m_tracked[i].pid);
+                actuate_anti_starvation_restore(m_tracked[i].pid, &m_tracked[i].original_affinity, m_tracked[i].original_sched_policy, m_tracked[i].original_nice);
                 m_tracked[i] = m_tracked.back();
                 m_tracked.pop_back();
                 continue;
