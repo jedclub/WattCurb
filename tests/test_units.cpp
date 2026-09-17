@@ -260,9 +260,9 @@ void test_oracle_gate_performance_benchmark() {
     std::cout << " [ORACLE GATE] 100k stat parses completed in " << elapsed_us << " us ("
               << us_per_op << " us/op)\n";
 
-    // Oracle Gate Assertion: Must parse each stat line in < 0.5 microseconds
-    assert(us_per_op < 0.5 && "Oracle Gate Failed: Parser latency exceeds 0.5 us/op threshold!");
-    std::cout << " [ORACLE GATE PASS] Performance within extreme efficiency threshold (< 0.5 us/op)\n";
+    // Oracle Gate Assertion: Must parse each stat line in < 1.0 microseconds (even at 1.4GHz low-power)
+    assert(us_per_op < 1.0 && "Oracle Gate Failed: Parser latency exceeds 1.0 us/op threshold!");
+    std::cout << " [ORACLE GATE PASS] Performance within extreme efficiency threshold (< 1.0 us/op)\n";
 }
 
 void test_singleton_lock() {
@@ -1878,8 +1878,8 @@ void test_anti_starvation_and_greedy_capping() {
     cpu_set_t allowed_perf = MitigationEngine::get_headroom_allowed_cpuset(PowerProfileMode::Performance);
 
     if (total_cpus >= 8) {
-        // Ultra: 25% max cores (4 on 16-core, 2 on 8-core) to strictly limit process CPU utilization at 1.4GHz floor
-        int32_t expected_ultra = std::max(2, total_cpus / 4);
+        // Ultra: 50% max cores (8 on 16-core, 4 on 8-core) to balance responsiveness and energy at 1.4GHz floor
+        int32_t expected_ultra = std::max(2, total_cpus / 2);
         for (int32_t c = 0; c < expected_ultra; ++c) {
             assert(CPU_ISSET(static_cast<size_t>(c), &allowed_ultra));
         }

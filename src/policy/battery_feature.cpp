@@ -185,14 +185,14 @@ bool FeatureManager::actuate_anti_starvation_cap(int32_t pid, PowerProfileMode m
     bool aff = MitigationEngine::apply_core_affinity_cap(pid, &allowed_set);
     int nice_val = 10;
     if (mode == PowerProfileMode::UltraEndurance) {
-        nice_val = 19; // Maximum CFS deprioritization in UltraEndurance
+        nice_val = 15; // Balanced CFS deprioritization in UltraEndurance
     } else if (mode == PowerProfileMode::Performance) {
         nice_val = 5;
     }
     bool batch = MitigationEngine::apply_sched_batch(pid, nice_val);
     if (mode == PowerProfileMode::UltraEndurance) {
-        // Enforce hard cgroup CPU quota (200% = 2 cores max quota per 100ms)
-        MitigationEngine::apply_cgroup_cpu_quota(pid, 200000, 100000);
+        // Enforce hard cgroup CPU quota (400% = 4 cores max quota per 100ms, matching 50% core limit)
+        MitigationEngine::apply_cgroup_cpu_quota(pid, 400000, 100000);
     }
     return (aff || batch);
 }

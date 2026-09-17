@@ -587,9 +587,9 @@ cpu_set_t MitigationEngine::get_headroom_allowed_cpuset(PowerProfileMode mode) n
     if (n >= 8) {
         switch (mode) {
             case PowerProfileMode::UltraEndurance:
-                // Ultra Mode: Strict 25% max cores (e.g. 4 cores on 16-core, 2 cores on 8-core)
-                // to hard-limit maximum process CPU utilization while operating at 1.4GHz floor
-                allowed = std::max(2, n / 4);
+                // Ultra Mode: Balanced 50% max cores (e.g. 8 cores on 16-core, 4 cores on 8-core)
+                // to prevent starvation and excess power drain while operating at 1.4GHz floor
+                allowed = std::max(2, n / 2);
                 break;
             case PowerProfileMode::PowerSaver:
                 // PowerSaver Mode: 75% max cores (e.g. 12 cores on 16-core)
@@ -604,7 +604,7 @@ cpu_set_t MitigationEngine::get_headroom_allowed_cpuset(PowerProfileMode mode) n
     } else if (n >= 4) {
         switch (mode) {
             case PowerProfileMode::UltraEndurance:
-                allowed = 1; // 1 core max on 4-core (25% max CPU)
+                allowed = std::max(1, n / 2); // 2 cores on 4-core (50% max CPU)
                 break;
             case PowerProfileMode::PowerSaver:
             case PowerProfileMode::Balanced:
