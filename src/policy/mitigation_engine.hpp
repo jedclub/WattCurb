@@ -59,6 +59,7 @@ public:
         char aspm_policy[32]{"default"};
         uint32_t scaling_max_freq_khz{0};
         uint32_t panel_power_savings{1};
+        char gpu_dpm_level[32]{"auto"};
     };
 
     static void capture_hardware_baseline() noexcept;
@@ -72,6 +73,9 @@ public:
     static bool set_panel_power_savings(uint32_t level) noexcept;
     static bool set_pcie_aspm_policy(const char* policy) noexcept;
     static bool set_cpu_epp_policy(const char* policy) noexcept;
+    static bool set_gpu_max_clock(uint32_t mhz) noexcept;
+    static bool restore_gpu_max_clock() noexcept;
+    static bool set_gpu_dpm_level(const char* level) noexcept;
     static bool cap_display_backlight(double max_pct) noexcept;
     static bool restore_display_backlight() noexcept;
     static bool apply_power_profile(PowerProfileMode mode) noexcept;

@@ -123,6 +123,26 @@ void MitigationEngine::capture_hardware_baseline() noexcept {
         s_hardware_baseline.panel_power_savings = 1;
     }
 
+    // 7. /sys/class/drm/card1/device/power_dpm_force_performance_level or card0
+    const char* const gpu_dirs[] = {
+        "/sys/class/drm/card1/device",
+        "/sys/class/drm/card0/device"
+    };
+    for (const char* dir : gpu_dirs) {
+        char path[128];
+        std::snprintf(path, sizeof(path), "%s/power_dpm_force_performance_level", dir);
+        n = 0;
+        std::memset(buf, 0, sizeof(buf));
+        if (core::fs::read_small_file(path, buf, sizeof(buf) - 1, &n) && n > 0) {
+            buf[n] = '\0';
+            while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == ' ' || buf[n - 1] == '\r')) {
+                buf[--n] = '\0';
+            }
+            std::strncpy(s_hardware_baseline.gpu_dpm_level, buf, sizeof(s_hardware_baseline.gpu_dpm_level) - 1);
+            break;
+        }
+    }
+
     s_hardware_baseline.captured = true;
 }
 
@@ -137,6 +157,10 @@ void MitigationEngine::restore_hardware_baseline() noexcept {
         set_cpu_scaling_max_freq(s_hardware_baseline.scaling_max_freq_khz);
     }
     set_panel_power_savings(s_hardware_baseline.panel_power_savings);
+    restore_gpu_max_clock();
+    if (s_hardware_baseline.gpu_dpm_level[0] != '\0') {
+        set_gpu_dpm_level(s_hardware_baseline.gpu_dpm_level);
+    }
 }
 
 const MitigationEngine::HardwareBaselineState& MitigationEngine::hardware_baseline() noexcept {
@@ -185,8 +209,19 @@ bool MitigationEngine::set_cpu_boost(bool enable) noexcept {
 
 bool MitigationEngine::set_cpu_scaling_max_freq(uint32_t khz) noexcept {
     if (khz == 0) return false;
+
+    // Detect hardware min freq to prevent kernel -EINVAL when requested freq is below hardware floor
+    char min_buf[32];
+    size_t mn = 0;
+    uint32_t hw_min = 0;
+    if (core::fs::read_small_file("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq", min_buf, sizeof(min_buf) - 1, &mn) && mn > 0) {
+        min_buf[mn] = '\0';
+        hw_min = static_cast<uint32_t>(std::strtoul(min_buf, nullptr, 10));
+    }
+    uint32_t target_khz = (hw_min > 0 && khz < hw_min) ? hw_min : khz;
+
     char freq_buf[32];
-    int flen = std::snprintf(freq_buf, sizeof(freq_buf), "%u\n", khz);
+    int flen = std::snprintf(freq_buf, sizeof(freq_buf), "%u\n", target_khz);
     bool any_success = false;
     int total_cpus = get_total_online_cpus();
 
@@ -222,6 +257,104 @@ bool MitigationEngine::set_panel_power_savings(uint32_t level) noexcept {
     return false;
 }
 
+bool MitigationEngine::set_gpu_max_clock(uint32_t mhz) noexcept {
+    const char* const gpu_dirs[] = {
+        "/sys/class/drm/card1/device",
+        "/sys/class/drm/card0/device"
+    };
+
+    for (const char* dir : gpu_dirs) {
+        char dpm_path[128];
+        char od_path[128];
+        std::snprintf(dpm_path, sizeof(dpm_path), "%s/power_dpm_force_performance_level", dir);
+        std::snprintf(od_path, sizeof(od_path), "%s/pp_od_clk_voltage", dir);
+
+        if (::access(dpm_path, W_OK) == 0 && ::access(od_path, W_OK) == 0) {
+            // Set performance level to manual
+            int dpm_fd = ::open(dpm_path, O_WRONLY | O_CLOEXEC);
+            if (dpm_fd >= 0) {
+                (void)::write(dpm_fd, "manual\n", 7);
+                ::close(dpm_fd);
+            }
+
+            // Set overdrive SCLK max to target mhz (s 1 <mhz>)
+            int od_fd = ::open(od_path, O_WRONLY | O_CLOEXEC);
+            if (od_fd >= 0) {
+                char cmd[32];
+                int n = std::snprintf(cmd, sizeof(cmd), "s 1 %u\n", mhz);
+                (void)::write(od_fd, cmd, static_cast<size_t>(n));
+                (void)::write(od_fd, "c\n", 2);
+                ::close(od_fd);
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+bool MitigationEngine::restore_gpu_max_clock() noexcept {
+    const char* const gpu_dirs[] = {
+        "/sys/class/drm/card1/device",
+        "/sys/class/drm/card0/device"
+    };
+
+    for (const char* dir : gpu_dirs) {
+        char dpm_path[128];
+        char od_path[128];
+        char sclk_path[128];
+        std::snprintf(dpm_path, sizeof(dpm_path), "%s/power_dpm_force_performance_level", dir);
+        std::snprintf(od_path, sizeof(od_path), "%s/pp_od_clk_voltage", dir);
+        std::snprintf(sclk_path, sizeof(sclk_path), "%s/pp_dpm_sclk", dir);
+
+        if (::access(od_path, W_OK) == 0) {
+            int od_fd = ::open(od_path, O_WRONLY | O_CLOEXEC);
+            if (od_fd >= 0) {
+                (void)::write(od_fd, "r\n", 2); // reset table
+                (void)::write(od_fd, "c\n", 2); // commit reset
+                ::close(od_fd);
+            }
+        }
+
+        if (::access(sclk_path, W_OK) == 0) {
+            int sclk_fd = ::open(sclk_path, O_WRONLY | O_CLOEXEC);
+            if (sclk_fd >= 0) {
+                (void)::write(sclk_fd, "0 1 2\n", 6); // re-enable all states
+                ::close(sclk_fd);
+            }
+        }
+
+        if (::access(dpm_path, W_OK) == 0) {
+            int dpm_fd = ::open(dpm_path, O_WRONLY | O_CLOEXEC);
+            if (dpm_fd >= 0) {
+                (void)::write(dpm_fd, "auto\n", 5);
+                ::close(dpm_fd);
+            }
+        }
+    }
+    return true;
+}
+
+bool MitigationEngine::set_gpu_dpm_level(const char* level) noexcept {
+    if (!level) return false;
+    const char* const gpu_dirs[] = {
+        "/sys/class/drm/card1/device",
+        "/sys/class/drm/card0/device"
+    };
+
+    for (const char* dir : gpu_dirs) {
+        char dpm_path[128];
+        std::snprintf(dpm_path, sizeof(dpm_path), "%s/power_dpm_force_performance_level", dir);
+        int fd = ::open(dpm_path, O_WRONLY | O_CLOEXEC);
+        if (fd >= 0) {
+            (void)::write(fd, level, std::strlen(level));
+            (void)::write(fd, "\n", 1);
+            ::close(fd);
+            return true;
+        }
+    }
+    return false;
+}
+
 bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
     if (!s_hardware_baseline.captured) {
         capture_hardware_baseline();
@@ -238,6 +371,8 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_pcie_aspm_policy("performance");
         set_panel_power_savings(0);
         set_cpu_epp_policy("performance");
+        restore_gpu_max_clock();
+        set_gpu_dpm_level("high");
         return true;
 
     case PowerProfileMode::Balanced:
@@ -250,6 +385,8 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_pcie_aspm_policy(s_hardware_baseline.aspm_policy);
         set_panel_power_savings(1);
         set_cpu_epp_policy("balance_performance");
+        restore_gpu_max_clock();
+        set_gpu_dpm_level("auto");
         return true;
 
     case PowerProfileMode::PowerSaver:
@@ -260,16 +397,19 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_pcie_aspm_policy("powersave");
         set_panel_power_savings(2);
         set_cpu_epp_policy("balance_power");
+        restore_gpu_max_clock();
+        set_gpu_dpm_level("auto");
         return true;
 
     case PowerProfileMode::UltraEndurance:
         set_platform_profile("low-power");
         set_cpu_governor("powersave");
         set_cpu_boost(false);
-        set_cpu_scaling_max_freq(1400000); // 1.4GHz minimum P-state cap
+        set_cpu_scaling_max_freq(1000000); // 1.0GHz strict ultra-endurance cap
         set_pcie_aspm_policy("powersave");
         set_panel_power_savings(2);
         set_cpu_epp_policy("power");
+        set_gpu_max_clock(640); // 40% GPU clock cap (640MHz of 1600MHz)
         return true;
     }
     return false;

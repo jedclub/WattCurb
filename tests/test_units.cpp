@@ -1976,6 +1976,9 @@ void test_state_journaling_and_faithful_restoration() {
     bool ps_applied = MitigationEngine::apply_power_profile(PowerProfileMode::PowerSaver);
     (void)ps_applied;
 
+    bool ultra_applied = MitigationEngine::apply_power_profile(PowerProfileMode::UltraEndurance);
+    (void)ultra_applied;
+
     bool perf_applied = MitigationEngine::apply_power_profile(PowerProfileMode::Performance);
     (void)perf_applied;
 
