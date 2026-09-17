@@ -180,10 +180,16 @@ bool FeatureManager::actuate_ccx_affinity(int32_t pid, int32_t target_core) noex
     return (::sched_setaffinity(pid, sizeof(cpu_set_t), &cpuset) == 0);
 }
 
-bool FeatureManager::actuate_anti_starvation_cap(int32_t pid) noexcept {
-    cpu_set_t allowed_set = MitigationEngine::get_headroom_allowed_cpuset();
+bool FeatureManager::actuate_anti_starvation_cap(int32_t pid, PowerProfileMode mode) noexcept {
+    cpu_set_t allowed_set = MitigationEngine::get_headroom_allowed_cpuset(mode);
     bool aff = MitigationEngine::apply_core_affinity_cap(pid, &allowed_set);
-    bool batch = MitigationEngine::apply_sched_batch(pid, 10);
+    int nice_val = 10;
+    if (mode == PowerProfileMode::UltraEndurance) {
+        nice_val = 15;
+    } else if (mode == PowerProfileMode::Performance) {
+        nice_val = 5;
+    }
+    bool batch = MitigationEngine::apply_sched_batch(pid, nice_val);
     return (aff || batch);
 }
 
@@ -229,24 +235,26 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
     }
     status.current_profile = eff_profile;
 
-    if (eff_profile == PowerProfileMode::Performance) {
-        // Performance Mode: All features suppressed, max throughput, zero throttling (REF-REQ-043, REF-REQ-055)
-        for (const auto& tm : m_tracked) {
-            if (tm.applied_feature == FeatureId::CgroupFreezer) {
-                actuate_cgroup_freeze(tm.pid, false);
-                MitigationEngine::restore_sched_normal(tm.pid, tm.original_sched_policy, tm.original_nice);
-            } else if (tm.applied_feature == FeatureId::SchedIdleThrottle) {
-                MitigationEngine::restore_sched_normal(tm.pid, tm.original_sched_policy, tm.original_nice);
-            } else if (tm.applied_feature == FeatureId::AntiStarvationHeadroom) {
-                actuate_anti_starvation_restore(tm.pid, &tm.original_affinity, tm.original_sched_policy, tm.original_nice);
-            }
-            MitigationEngine::apply_timer_slack(tm.pid, tm.original_timerslack_ns > 0 ? tm.original_timerslack_ns : 50'000ULL);
-        }
-        m_tracked.clear();
+    bool is_perf_mode = (eff_profile == PowerProfileMode::Performance);
 
-        status.active_summary = "Performance Mode (Boost 4.1GHz, Zero Throttling)";
-        report.mitigation_status = status;
-        return status;
+    if (is_perf_mode) {
+        // Performance Mode: Throttling & freezer features suppressed, but AntiStarvationHeadroom preserved! (REF-REQ-057)
+        for (size_t i = 0; i < m_tracked.size(); ) {
+            if (m_tracked[i].applied_feature == FeatureId::CgroupFreezer) {
+                actuate_cgroup_freeze(m_tracked[i].pid, false);
+                MitigationEngine::restore_sched_normal(m_tracked[i].pid, m_tracked[i].original_sched_policy, m_tracked[i].original_nice);
+                MitigationEngine::apply_timer_slack(m_tracked[i].pid, m_tracked[i].original_timerslack_ns > 0 ? m_tracked[i].original_timerslack_ns : 50'000ULL);
+                m_tracked[i] = m_tracked.back();
+                m_tracked.pop_back();
+            } else if (m_tracked[i].applied_feature == FeatureId::SchedIdleThrottle) {
+                MitigationEngine::restore_sched_normal(m_tracked[i].pid, m_tracked[i].original_sched_policy, m_tracked[i].original_nice);
+                MitigationEngine::apply_timer_slack(m_tracked[i].pid, m_tracked[i].original_timerslack_ns > 0 ? m_tracked[i].original_timerslack_ns : 50'000ULL);
+                m_tracked[i] = m_tracked.back();
+                m_tracked.pop_back();
+            } else {
+                ++i;
+            }
+        }
     }
 
     enum class Aggressiveness {
@@ -274,134 +282,154 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
             continue;
         }
 
-        // Feature 3: Proactive Memory Reclaim on Desktop Shell (Tier 2)
-        if (tier == ProcessSafetyTier::DesktopShell && is_feature_enabled(FeatureId::ProactiveMemoryReclaim)) {
-            if (profile == Aggressiveness::Progressive && proc.pss_kib > 250 * 1024) {
-                uint64_t reclaim_target = 64ULL * 1024 * 1024; // 64 MB
-                if (actuate_memory_reclaim(proc.pid, reclaim_target)) {
-                    auto& m = m_metrics[static_cast<size_t>(FeatureId::ProactiveMemoryReclaim)];
-                    ++m.actions_taken;
-                    m.resource_reclaimed_bytes += reclaim_target;
-                    m.estimated_power_saved_watts += 0.05;
-                    if (m.targeted_pid_count < m.targeted_pids.size()) {
-                        m.targeted_pids[m.targeted_pid_count++] = proc.pid;
+        if (!is_perf_mode) {
+            // Feature 3: Proactive Memory Reclaim on Desktop Shell (Tier 2)
+            if (tier == ProcessSafetyTier::DesktopShell && is_feature_enabled(FeatureId::ProactiveMemoryReclaim)) {
+                if (profile == Aggressiveness::Progressive && proc.pss_kib > 250 * 1024) {
+                    uint64_t reclaim_target = 64ULL * 1024 * 1024; // 64 MB
+                    if (actuate_memory_reclaim(proc.pid, reclaim_target)) {
+                        auto& m = m_metrics[static_cast<size_t>(FeatureId::ProactiveMemoryReclaim)];
+                        ++m.actions_taken;
+                        m.resource_reclaimed_bytes += reclaim_target;
+                        m.estimated_power_saved_watts += 0.05;
+                        if (m.targeted_pid_count < m.targeted_pids.size()) {
+                            m.targeted_pids[m.targeted_pid_count++] = proc.pid;
+                        }
+                        status.reclaimed_bytes += reclaim_target;
+                        status.estimated_savings_watts += 0.05;
                     }
-                    status.reclaimed_bytes += reclaim_target;
-                    status.estimated_savings_watts += 0.05;
+                }
+                continue;
+            }
+
+            // Feature 1: SchedIdleThrottle
+            if (is_feature_enabled(FeatureId::SchedIdleThrottle)) {
+                bool should_throttle = false;
+                if (tier == ProcessSafetyTier::BackgroundWorker) {
+                    should_throttle = (profile == Aggressiveness::Progressive) ||
+                                      (profile == Aggressiveness::Moderate && (proc.wdi_score > 3.0 || proc.wakeups_per_sec > 50)) ||
+                                      (proc.wdi_score > 10.0 || proc.cpu_watts > 1.5);
+                } else if (tier == ProcessSafetyTier::RunawayCandidate) {
+                    should_throttle = (proc.is_runaway_candidate || proc.wdi_score > 10.0);
+                }
+
+                if (should_throttle) {
+                    if (actuate_sched_idle(proc.pid)) {
+                        auto& m = m_metrics[static_cast<size_t>(FeatureId::SchedIdleThrottle)];
+                        ++m.actions_taken;
+                        double savings = proc.cpu_watts * 0.4;
+                        m.estimated_power_saved_watts += savings;
+                        if (m.targeted_pid_count < m.targeted_pids.size()) {
+                            m.targeted_pids[m.targeted_pid_count++] = proc.pid;
+                        }
+                        ++status.throttled_count;
+                        status.estimated_savings_watts += savings;
+                    }
                 }
             }
-            continue;
-        }
 
-        // Feature 1: SchedIdleThrottle
-        if (is_feature_enabled(FeatureId::SchedIdleThrottle)) {
-            bool should_throttle = false;
-            if (tier == ProcessSafetyTier::BackgroundWorker) {
-                should_throttle = (profile == Aggressiveness::Progressive) ||
-                                  (profile == Aggressiveness::Moderate && (proc.wdi_score > 3.0 || proc.wakeups_per_sec > 50)) ||
-                                  (proc.wdi_score > 10.0 || proc.cpu_watts > 1.5);
-            } else if (tier == ProcessSafetyTier::RunawayCandidate) {
-                should_throttle = (proc.is_runaway_candidate || proc.wdi_score > 10.0);
+            // Feature 2: TimerSlackCoalescing
+            if (is_feature_enabled(FeatureId::TimerSlackCoalescing)) {
+                bool should_relax = false;
+                if (tier == ProcessSafetyTier::BackgroundWorker && proc.wakeups_per_sec > 80) {
+                    should_relax = true;
+                } else if (tier == ProcessSafetyTier::UserInteractive && profile == Aggressiveness::Progressive && proc.wakeups_per_sec > 250) {
+                    should_relax = true;
+                } else if (tier == ProcessSafetyTier::RunawayCandidate && proc.wakeups_per_sec > 100) {
+                    should_relax = true;
+                }
+
+                if (should_relax && proc.timerslack_ns < 100'000'000ULL) {
+                    if (actuate_timer_slack(proc.pid, 100'000'000ULL)) {
+                        auto& m = m_metrics[static_cast<size_t>(FeatureId::TimerSlackCoalescing)];
+                        ++m.actions_taken;
+                        double savings = proc.wakeup_tax_watts * 0.5;
+                        m.estimated_power_saved_watts += savings;
+                        if (m.targeted_pid_count < m.targeted_pids.size()) {
+                            m.targeted_pids[m.targeted_pid_count++] = proc.pid;
+                        }
+                        status.estimated_savings_watts += savings;
+                    }
+                }
             }
 
-            if (should_throttle) {
-                if (actuate_sched_idle(proc.pid)) {
-                    auto& m = m_metrics[static_cast<size_t>(FeatureId::SchedIdleThrottle)];
-                    ++m.actions_taken;
-                    double savings = proc.cpu_watts * 0.4;
-                    m.estimated_power_saved_watts += savings;
-                    if (m.targeted_pid_count < m.targeted_pids.size()) {
-                        m.targeted_pids[m.targeted_pid_count++] = proc.pid;
+            // Feature 3: ProactiveMemoryReclaim for user apps & workers
+            if (is_feature_enabled(FeatureId::ProactiveMemoryReclaim)) {
+                bool should_reclaim = false;
+                if (tier == ProcessSafetyTier::BackgroundWorker && proc.pss_kib > 80 * 1024) {
+                    should_reclaim = true;
+                } else if (tier == ProcessSafetyTier::UserInteractive && profile != Aggressiveness::Conservative &&
+                           proc.pss_kib > 400 * 1024 && proc.cpu_watts < 0.2) {
+                    should_reclaim = true;
+                }
+
+                if (should_reclaim) {
+                    uint64_t reclaim_bytes = std::min(proc.pss_kib * 1024ULL / 2, 128ULL * 1024 * 1024);
+                    if (reclaim_bytes > 0 && actuate_memory_reclaim(proc.pid, reclaim_bytes)) {
+                        auto& m = m_metrics[static_cast<size_t>(FeatureId::ProactiveMemoryReclaim)];
+                        ++m.actions_taken;
+                        m.resource_reclaimed_bytes += reclaim_bytes;
+                        m.estimated_power_saved_watts += 0.04;
+                        if (m.targeted_pid_count < m.targeted_pids.size()) {
+                            m.targeted_pids[m.targeted_pid_count++] = proc.pid;
+                        }
+                        status.reclaimed_bytes += reclaim_bytes;
+                        status.estimated_savings_watts += 0.04;
                     }
-                    ++status.throttled_count;
-                    status.estimated_savings_watts += savings;
+                }
+            }
+
+            // Feature 4: CgroupFreezer (Disabled & Replaced by Non-Halting Graceful Throttle per REF-REQ-044)
+            if (is_feature_enabled(FeatureId::CgroupFreezer)) {
+                // REF-REQ-044: Processes must NEVER be frozen or killed!
+                // Graceful non-halting throttle fallback only
+                if (profile == Aggressiveness::Progressive &&
+                    (tier == ProcessSafetyTier::BackgroundWorker || tier == ProcessSafetyTier::RunawayCandidate)) {
+                    actuate_sched_idle(proc.pid);
+                    actuate_timer_slack(proc.pid, 100'000'000ULL);
+                }
+            }
+
+            // Feature 5: ZenCcxAffinityPinning
+            if (is_feature_enabled(FeatureId::ZenCcxAffinityPinning)) {
+                if (proc.cross_ccx_migration && proc.cpu_core >= 0) {
+                    if (actuate_ccx_affinity(proc.pid, proc.cpu_core)) {
+                        auto& m = m_metrics[static_cast<size_t>(FeatureId::ZenCcxAffinityPinning)];
+                        ++m.actions_taken;
+                        m.estimated_power_saved_watts += 0.15; // Infinity Fabric cache transfer savings
+                        if (m.targeted_pid_count < m.targeted_pids.size()) {
+                            m.targeted_pids[m.targeted_pid_count++] = proc.pid;
+                        }
+                        status.estimated_savings_watts += 0.15;
+                    }
                 }
             }
         }
 
-        // Feature 2: TimerSlackCoalescing
-        if (is_feature_enabled(FeatureId::TimerSlackCoalescing)) {
-            bool should_relax = false;
-            if (tier == ProcessSafetyTier::BackgroundWorker && proc.wakeups_per_sec > 80) {
-                should_relax = true;
-            } else if (tier == ProcessSafetyTier::UserInteractive && profile == Aggressiveness::Progressive && proc.wakeups_per_sec > 250) {
-                should_relax = true;
-            } else if (tier == ProcessSafetyTier::RunawayCandidate && proc.wakeups_per_sec > 100) {
-                should_relax = true;
-            }
-
-            if (should_relax && proc.timerslack_ns < 100'000'000ULL) {
-                if (actuate_timer_slack(proc.pid, 100'000'000ULL)) {
-                    auto& m = m_metrics[static_cast<size_t>(FeatureId::TimerSlackCoalescing)];
-                    ++m.actions_taken;
-                    double savings = proc.wakeup_tax_watts * 0.5;
-                    m.estimated_power_saved_watts += savings;
-                    if (m.targeted_pid_count < m.targeted_pids.size()) {
-                        m.targeted_pids[m.targeted_pid_count++] = proc.pid;
-                    }
-                    status.estimated_savings_watts += savings;
-                }
-            }
-        }
-
-        // Feature 3: ProactiveMemoryReclaim for user apps & workers
-        if (is_feature_enabled(FeatureId::ProactiveMemoryReclaim)) {
-            bool should_reclaim = false;
-            if (tier == ProcessSafetyTier::BackgroundWorker && proc.pss_kib > 80 * 1024) {
-                should_reclaim = true;
-            } else if (tier == ProcessSafetyTier::UserInteractive && profile != Aggressiveness::Conservative &&
-                       proc.pss_kib > 400 * 1024 && proc.cpu_watts < 0.2) {
-                should_reclaim = true;
-            }
-
-            if (should_reclaim) {
-                uint64_t reclaim_bytes = std::min(proc.pss_kib * 1024ULL / 2, 128ULL * 1024 * 1024);
-                if (reclaim_bytes > 0 && actuate_memory_reclaim(proc.pid, reclaim_bytes)) {
-                    auto& m = m_metrics[static_cast<size_t>(FeatureId::ProactiveMemoryReclaim)];
-                    ++m.actions_taken;
-                    m.resource_reclaimed_bytes += reclaim_bytes;
-                    m.estimated_power_saved_watts += 0.04;
-                    if (m.targeted_pid_count < m.targeted_pids.size()) {
-                        m.targeted_pids[m.targeted_pid_count++] = proc.pid;
-                    }
-                    status.reclaimed_bytes += reclaim_bytes;
-                    status.estimated_savings_watts += 0.04;
-                }
-            }
-        }
-
-        // Feature 4: CgroupFreezer (Disabled & Replaced by Non-Halting Graceful Throttle per REF-REQ-044)
-        if (is_feature_enabled(FeatureId::CgroupFreezer)) {
-            // REF-REQ-044: Processes must NEVER be frozen or killed!
-            // Graceful non-halting throttle fallback only
-            if (profile == Aggressiveness::Progressive &&
-                (tier == ProcessSafetyTier::BackgroundWorker || tier == ProcessSafetyTier::RunawayCandidate)) {
-                actuate_sched_idle(proc.pid);
-                actuate_timer_slack(proc.pid, 100'000'000ULL);
-            }
-        }
-
-        // Feature 5: ZenCcxAffinityPinning
-        if (is_feature_enabled(FeatureId::ZenCcxAffinityPinning)) {
-            if (proc.cross_ccx_migration && proc.cpu_core >= 0) {
-                if (actuate_ccx_affinity(proc.pid, proc.cpu_core)) {
-                    auto& m = m_metrics[static_cast<size_t>(FeatureId::ZenCcxAffinityPinning)];
-                    ++m.actions_taken;
-                    m.estimated_power_saved_watts += 0.15; // Infinity Fabric cache transfer savings
-                    if (m.targeted_pid_count < m.targeted_pids.size()) {
-                        m.targeted_pids[m.targeted_pid_count++] = proc.pid;
-                    }
-                    status.estimated_savings_watts += 0.15;
-                }
-            }
-        }
-
-        // Feature 8: AntiStarvationHeadroom (REF-REQ-054, REF-ARCH-030)
+        // Feature 8: AntiStarvationHeadroom (REF-REQ-054, REF-ARCH-030, REF-REQ-057)
+        // Runs across ALL 4 power profiles (including Performance mode) to prevent 100% all-core starvation!
         if (is_feature_enabled(FeatureId::AntiStarvationHeadroom)) {
             bool should_cap = false;
             if (tier != ProcessSafetyTier::CriticalImmune && tier != ProcessSafetyTier::DesktopCore && !MitigationEngine::is_immune_process(proc.pid)) {
-                if (proc.cpu_watts > 1.5 || proc.wdi_score > 8.0 || proc.is_runaway_candidate ||
-                    (tier == ProcessSafetyTier::BackgroundWorker && proc.cpu_watts > 1.0)) {
+                double cpu_w_threshold = 1.2;
+                if (eff_profile == PowerProfileMode::UltraEndurance) {
+                    cpu_w_threshold = 0.35; // Scaled to 4W TDP limit
+                } else if (eff_profile == PowerProfileMode::PowerSaver) {
+                    cpu_w_threshold = 0.70; // Scaled to 10W TDP limit
+                } else if (eff_profile == PowerProfileMode::Performance) {
+                    cpu_w_threshold = 2.0;
+                }
+
+                if (proc.cpu_watts > cpu_w_threshold) {
+                    should_cap = true;
+                } else if (proc.num_threads >= 4 && proc.cpu_watts > 0.25) {
+                    // Multi-threaded parallel workload attempting to saturate cores
+                    should_cap = true;
+                } else if (proc.wdi_score > 6.0 || proc.is_runaway_candidate) {
+                    should_cap = true;
+                } else if (tier == ProcessSafetyTier::BackgroundWorker && proc.cpu_watts > 0.20) {
+                    should_cap = true;
+                } else if (tier == ProcessSafetyTier::RunawayCandidate && proc.cpu_watts > 0.25) {
                     should_cap = true;
                 }
             }
@@ -423,7 +451,7 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
                     CPU_ZERO(&orig_aff);
                     ::sched_getaffinity(proc.pid, sizeof(cpu_set_t), &orig_aff);
 
-                    if (actuate_anti_starvation_cap(proc.pid)) {
+                    if (actuate_anti_starvation_cap(proc.pid, eff_profile)) {
                         auto& m = m_metrics[static_cast<size_t>(FeatureId::AntiStarvationHeadroom)];
                         ++m.actions_taken;
                         double savings = proc.cpu_watts * 0.15; // Energy reduction from mitigating SMT cross-thread thrashing
@@ -451,12 +479,17 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
     }
 
     // Dynamic De-escalation: uncap any process whose CPU consumption has subsided
+    double deescalate_w = 0.40;
+    if (eff_profile == PowerProfileMode::UltraEndurance) deescalate_w = 0.15;
+    else if (eff_profile == PowerProfileMode::PowerSaver) deescalate_w = 0.25;
+    else if (eff_profile == PowerProfileMode::Performance) deescalate_w = 0.80;
+
     for (size_t i = 0; i < m_tracked.size(); ) {
         if (m_tracked[i].applied_feature == FeatureId::AntiStarvationHeadroom) {
             bool still_greedy = false;
             for (const auto& proc : report.top_processes) {
                 if (proc.pid == m_tracked[i].pid) {
-                    if (proc.cpu_watts > 0.5 || proc.wdi_score > 4.0) {
+                    if (proc.cpu_watts > deescalate_w || proc.wdi_score > 3.5 || (proc.num_threads >= 4 && proc.cpu_watts > 0.15)) {
                         still_greedy = true;
                     }
                     break;
@@ -521,7 +554,15 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
 
     // Summary string
     char summary_buf[128];
-    if (status.throttled_count == 0 && status.frozen_count == 0 && status.reclaimed_bytes == 0) {
+    if (is_perf_mode) {
+        if (status.throttled_count > 0) {
+            std::snprintf(summary_buf, sizeof(summary_buf),
+                          "Performance Mode (Boost 4.1GHz, Anti-Starvation capped %zu greedy PID(s))",
+                          status.throttled_count);
+        } else {
+            std::snprintf(summary_buf, sizeof(summary_buf), "Performance Mode (Boost 4.1GHz, Headroom Clear)");
+        }
+    } else if (status.throttled_count == 0 && status.frozen_count == 0 && status.reclaimed_bytes == 0) {
         std::snprintf(summary_buf, sizeof(summary_buf), "Optimal baseline (No intrusive throttling needed)");
     } else {
         std::snprintf(summary_buf, sizeof(summary_buf),

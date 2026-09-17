@@ -440,20 +440,45 @@ int32_t MitigationEngine::get_reserved_headroom_cores() noexcept {
     return s_reserved;
 }
 
-cpu_set_t MitigationEngine::get_headroom_allowed_cpuset() noexcept {
-    static const cpu_set_t s_allowed = []() noexcept {
-        int32_t n = get_total_online_cpus();
-        int32_t r = get_reserved_headroom_cores();
-        int32_t allowed = std::max(1, n - r);
+cpu_set_t MitigationEngine::get_headroom_allowed_cpuset(PowerProfileMode mode) noexcept {
+    int32_t n = get_total_online_cpus();
+    int32_t allowed = n;
 
-        cpu_set_t cpuset;
-        CPU_ZERO(&cpuset);
-        for (int32_t c = 0; c < allowed; ++c) {
-            CPU_SET(static_cast<size_t>(c), &cpuset);
+    if (n >= 8) {
+        switch (mode) {
+            case PowerProfileMode::UltraEndurance:
+                // Ultra Mode: 50% max cores (e.g. 8 cores on 16-core) to avoid low-clock runqueue starvation
+                allowed = std::max(2, n / 2);
+                break;
+            case PowerProfileMode::PowerSaver:
+                // PowerSaver Mode: 75% max cores (e.g. 12 cores on 16-core)
+                allowed = std::max(4, (n * 3) / 4);
+                break;
+            case PowerProfileMode::Balanced:
+            case PowerProfileMode::Performance:
+                // Balanced & Performance: Reserve 2 clean headroom cores (e.g. 14 cores on 16-core)
+                allowed = std::max(1, n - 2);
+                break;
         }
-        return cpuset;
-    }();
-    return s_allowed;
+    } else if (n >= 4) {
+        switch (mode) {
+            case PowerProfileMode::UltraEndurance:
+                allowed = std::max(1, n / 2);
+                break;
+            case PowerProfileMode::PowerSaver:
+            case PowerProfileMode::Balanced:
+            case PowerProfileMode::Performance:
+                allowed = std::max(1, n - 1);
+                break;
+        }
+    }
+
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    for (int32_t c = 0; c < allowed; ++c) {
+        CPU_SET(static_cast<size_t>(c), &cpuset);
+    }
+    return cpuset;
 }
 
 cpu_set_t MitigationEngine::get_all_cores_cpuset() noexcept {
@@ -581,7 +606,9 @@ void MitigationEngine::audit_and_heal_audio_stack() noexcept {
         "pipewire.service",
         "pipewire-pulse.service",
         "wireplumber.service",
-        "pulseaudio.service"
+        "pulseaudio.service",
+        "plasma-kwin_wayland.service",
+        "app-kwin_wayland.service"
     };
     const char* slices[] = {"session.slice", "app.slice"};
 
@@ -614,6 +641,9 @@ void MitigationEngine::audit_and_heal_audio_stack() noexcept {
                     size_t n = 0;
                     if (!core::fs::read_small_file(path, buf, sizeof(buf), &n) || n == 0) continue;
 
+                    bool is_comp = (std::strstr(svc, "kwin") != nullptr);
+                    int target_nice = is_comp ? -10 : -19;
+
                     const char* p = buf;
                     while (*p) {
                         while (*p == ' ' || *p == '\n' || *p == '\r') ++p;
@@ -626,9 +656,9 @@ void MitigationEngine::audit_and_heal_audio_stack() noexcept {
                             if (sched == SCHED_IDLE) {
                                 restore_sched_normal(audio_pid);
                             }
-                            // Elevate priority to real-time interactive level (-19)
-                            ::setpriority(PRIO_PROCESS, audio_pid, -19);
-                            // Ensure audio thread has full access to all cores including clean headroom
+                            // Elevate priority to real-time interactive level (-19 for audio, -10 for compositor)
+                            ::setpriority(PRIO_PROCESS, audio_pid, target_nice);
+                            // Ensure audio/compositor threads have full access to all cores including clean headroom
                             ::sched_setaffinity(audio_pid, sizeof(cpu_set_t), &all_cores);
                         }
                         if (next == p) break;
@@ -1040,11 +1070,38 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
             }
         }
 
-        // Anti-Starvation & CPU Headroom Protection (REF-REQ-054, REF-ARCH-030)
+        // Anti-Starvation & CPU Headroom Protection (REF-REQ-054, REF-ARCH-030, REF-REQ-057)
+        if (tier == ProcessSafetyTier::DesktopCore) {
+            // Proactive compositor shield: prioritize to nice -10 and ensure all cores access
+            if (::getpriority(PRIO_PROCESS, proc.pid) > -10) {
+                ::setpriority(PRIO_PROCESS, proc.pid, -10);
+            }
+            cpu_set_t all_c = get_all_cores_cpuset();
+            ::sched_setaffinity(proc.pid, sizeof(cpu_set_t), &all_c);
+            continue;
+        }
+
         bool should_cap_affinity = false;
         if (tier != ProcessSafetyTier::CriticalImmune && tier != ProcessSafetyTier::DesktopCore && !is_immune_process(proc.pid)) {
-            if (proc.cpu_watts > 1.5 || proc.wdi_score > 8.0 || proc.is_runaway_candidate ||
-                (tier == ProcessSafetyTier::BackgroundWorker && proc.cpu_watts > 1.0)) {
+            double cpu_w_threshold = 1.2;
+            if (m_current_profile == PowerProfileMode::UltraEndurance) {
+                cpu_w_threshold = 0.35; // Scaled to 4W TDP
+            } else if (m_current_profile == PowerProfileMode::PowerSaver) {
+                cpu_w_threshold = 0.70; // Scaled to 10W TDP
+            } else if (m_current_profile == PowerProfileMode::Performance) {
+                cpu_w_threshold = 2.0;
+            }
+
+            if (proc.cpu_watts > cpu_w_threshold) {
+                should_cap_affinity = true;
+            } else if (proc.num_threads >= 4 && proc.cpu_watts > 0.25) {
+                // Multi-threaded parallel workload attempting to saturate cores
+                should_cap_affinity = true;
+            } else if (proc.wdi_score > 6.0 || proc.is_runaway_candidate) {
+                should_cap_affinity = true;
+            } else if (tier == ProcessSafetyTier::BackgroundWorker && proc.cpu_watts > 0.20) {
+                should_cap_affinity = true;
+            } else if (tier == ProcessSafetyTier::RunawayCandidate && proc.cpu_watts > 0.25) {
                 should_cap_affinity = true;
             }
         }
@@ -1056,9 +1113,12 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
             CPU_ZERO(&orig_aff);
             ::sched_getaffinity(proc.pid, sizeof(cpu_set_t), &orig_aff);
 
-            cpu_set_t allowed_set = get_headroom_allowed_cpuset();
+            cpu_set_t allowed_set = get_headroom_allowed_cpuset(m_current_profile);
             if (apply_core_affinity_cap(proc.pid, &allowed_set)) {
-                apply_sched_batch(proc.pid, 10);
+                int nice_val = 10;
+                if (m_current_profile == PowerProfileMode::UltraEndurance) nice_val = 15;
+                else if (m_current_profile == PowerProfileMode::Performance) nice_val = 5;
+                apply_sched_batch(proc.pid, nice_val);
                 if (!already_tracked && m_tracked.size() < MAX_TRACKED_MITIGATIONS) {
                     m_tracked.push_back(TrackedMitigation{
                         .pid = proc.pid,

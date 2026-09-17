@@ -1843,6 +1843,7 @@ void test_thinkpower_tray_client() {
 // Implements REF-TEST-019: Anti-Starvation & Greedy Capping Oracle Gate Verification (REF-REQ-054, REF-ARCH-030)
 void test_anti_starvation_and_greedy_capping() {
     using namespace wattcurb::policy;
+    using wattcurb::PowerProfileMode;
 
     // 1. Topological Core Partitioning Math
     int32_t total_cpus = MitigationEngine::get_total_online_cpus();
@@ -1868,6 +1869,40 @@ void test_anti_starvation_and_greedy_capping() {
     }
     for (int32_t c = 0; c < total_cpus; ++c) {
         assert(CPU_ISSET(static_cast<size_t>(c), &all_cores) && "All CPUs must be present in all_cores set");
+    }
+
+    // 1-1. Multi-Profile Tiered Allowed Cpuset Verification (REF-REQ-057, REF-TEST-022)
+    cpu_set_t allowed_ultra = MitigationEngine::get_headroom_allowed_cpuset(PowerProfileMode::UltraEndurance);
+    cpu_set_t allowed_save = MitigationEngine::get_headroom_allowed_cpuset(PowerProfileMode::PowerSaver);
+    cpu_set_t allowed_bal = MitigationEngine::get_headroom_allowed_cpuset(PowerProfileMode::Balanced);
+    cpu_set_t allowed_perf = MitigationEngine::get_headroom_allowed_cpuset(PowerProfileMode::Performance);
+
+    if (total_cpus >= 8) {
+        // Ultra: 50% max cores (8 on 16-core)
+        for (int32_t c = 0; c < total_cpus / 2; ++c) {
+            assert(CPU_ISSET(static_cast<size_t>(c), &allowed_ultra));
+        }
+        for (int32_t c = total_cpus / 2; c < total_cpus; ++c) {
+            assert(!CPU_ISSET(static_cast<size_t>(c), &allowed_ultra));
+        }
+
+        // PowerSaver: 75% max cores (12 on 16-core)
+        for (int32_t c = 0; c < (total_cpus * 3) / 4; ++c) {
+            assert(CPU_ISSET(static_cast<size_t>(c), &allowed_save));
+        }
+        for (int32_t c = (total_cpus * 3) / 4; c < total_cpus; ++c) {
+            assert(!CPU_ISSET(static_cast<size_t>(c), &allowed_save));
+        }
+
+        // Performance & Balanced: 14 cores allowed, 2 headroom cores reserved
+        for (int32_t c = 0; c < total_cpus - 2; ++c) {
+            assert(CPU_ISSET(static_cast<size_t>(c), &allowed_perf));
+            assert(CPU_ISSET(static_cast<size_t>(c), &allowed_bal));
+        }
+        for (int32_t c = total_cpus - 2; c < total_cpus; ++c) {
+            assert(!CPU_ISSET(static_cast<size_t>(c), &allowed_perf) && "Performance mode must reserve clean headroom cores");
+            assert(!CPU_ISSET(static_cast<size_t>(c), &allowed_bal));
+        }
     }
 
     // 2. Self-Immunity Verification (REF-REQ-049, REF-REQ-054)

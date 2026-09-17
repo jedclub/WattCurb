@@ -41,10 +41,10 @@ public:
     static bool apply_memory_reclaim(int32_t pid, uint64_t bytes) noexcept;
     static bool apply_cgroup_freeze(int32_t pid, bool freeze) noexcept;
 
-    // Anti-Starvation & CPU Headroom Partitioning (REF-REQ-054, REF-ARCH-030)
+    // Anti-Starvation & CPU Headroom Partitioning (REF-REQ-054, REF-ARCH-030, REF-REQ-057)
     static int32_t get_total_online_cpus() noexcept;
     static int32_t get_reserved_headroom_cores() noexcept;
-    static cpu_set_t get_headroom_allowed_cpuset() noexcept;
+    static cpu_set_t get_headroom_allowed_cpuset(PowerProfileMode mode = PowerProfileMode::Balanced) noexcept;
     static cpu_set_t get_all_cores_cpuset() noexcept;
     static bool apply_core_affinity_cap(int32_t pid, const cpu_set_t* allowed_set = nullptr) noexcept;
     static bool restore_core_affinity(int32_t pid, const cpu_set_t* target_affinity = nullptr) noexcept;
