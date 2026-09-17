@@ -643,11 +643,23 @@ void test_custom_containers() {
     assert(heap.size() == 3);
     auto top3 = heap.extract_sorted();
     assert(top3.size() == 3);
-    assert(top3[0] == 95);
-    assert(top3[1] == 88);
-    assert(top3[2] == 32);
+    assert(top3[0] == 95 && top3[1] == 88 && top3[2] == 32);
 
-    std::cout << " [PASS] test_custom_containers (FixedVector, FixedString, TopKHeap, Canary & Guards verified)\n";
+    // 5. Test DoubleBufferedPool (Ping-Pong Storage & Data Preservation)
+    DoubleBufferedPool<int, 16> pool;
+    pool.current().push_back(100);
+    pool.current().push_back(200);
+    assert(pool.current().size() == 2);
+    assert(pool.next().empty());
+
+    pool.next().push_back(300);
+    pool.swap();
+    // After swap, current() must preserve the newly written data (300), and previous() must be cleared!
+    assert(pool.current().size() == 1 && "Active buffer must retain newly captured data after swap");
+    assert(pool.current()[0] == 300);
+    assert(pool.previous().empty() && "Previous buffer must be cleanly cleared for next write cycle");
+
+    std::cout << " [PASS] test_custom_containers (FixedVector, FixedString, TopKHeap, DoubleBufferedPool, Canary & Guards verified)\n";
 }
 
 void test_process_classifier() {

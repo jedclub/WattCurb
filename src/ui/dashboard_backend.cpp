@@ -118,7 +118,7 @@ void DashboardBackend::onPollTimer() {
 
 bool DashboardBackend::queryDaemonTelemetry() noexcept {
     std::string resp;
-    if (!core::SingletonLock::query_daemon("FULL_TELEMETRY\n", resp, "wattcurb.lock", 80)) {
+    if (!core::SingletonLock::query_daemon("FULL_TELEMETRY\n", resp, "wattcurb.lock", 300)) {
         return false;
     }
 

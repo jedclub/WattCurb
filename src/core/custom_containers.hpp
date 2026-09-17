@@ -436,7 +436,7 @@ public:
     // Ping-pong pointer swap
     void swap() noexcept {
         std::swap(current_, previous_);
-        current_->clear();
+        previous_->clear();
     }
 
     [[nodiscard]] VectorType& current() noexcept { return *current_; }
