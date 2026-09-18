@@ -1217,6 +1217,11 @@ bool MitigationEngine::restore_display_backlight() noexcept {
 
 static bool execute_user_desktop_cmd(const char* cmd_body) noexcept {
     if (!cmd_body) return false;
+    // REF-REQ-071 & REF-ARCH-048: Test harness isolation guard.
+    // Prevents automated tests from interfering with physical user display / compositor.
+    if (::getenv("WATTCURB_TEST_MOCK_DESKTOP") != nullptr) {
+        return true;
+    }
     char cmd[512];
     if (::geteuid() == 0) {
         std::snprintf(cmd, sizeof(cmd),
@@ -1234,31 +1239,41 @@ static bool execute_user_desktop_cmd(const char* cmd_body) noexcept {
 }
 
 bool MitigationEngine::set_display_refresh_rate(uint32_t hz) noexcept {
-    if (hz <= 50) {
-        s_hardware_baseline.drrs_applied = true;
+    // REF-REQ-071 & REF-ARCH-048: Idempotent guard to eliminate DRM modeset blackout
+    bool target_drrs = (hz <= 50);
+    if (s_hardware_baseline.drrs_applied == target_drrs) {
+        return true; // Already in target mode; prevent redundant modeset flicker
+    }
+    s_hardware_baseline.drrs_applied = target_drrs;
+    if (target_drrs) {
         return execute_user_desktop_cmd("kscreen-doctor output.1.mode.2");
     } else {
-        s_hardware_baseline.drrs_applied = false;
         return execute_user_desktop_cmd("kscreen-doctor output.1.mode.1");
     }
 }
 
 bool MitigationEngine::set_kwin_effects_suspended(bool suspend) noexcept {
+    // REF-REQ-071 & REF-ARCH-048: Idempotent guard to eliminate compositor shader rebuild
+    if (s_hardware_baseline.kwin_blur_unloaded == suspend) {
+        return true; // Already in target state; prevent redundant effect toggling
+    }
+    s_hardware_baseline.kwin_blur_unloaded = suspend;
     if (suspend) {
-        s_hardware_baseline.kwin_blur_unloaded = true;
         return execute_user_desktop_cmd("qdbus6 org.kde.KWin /Effects unloadEffect blur");
     } else {
-        s_hardware_baseline.kwin_blur_unloaded = false;
         return execute_user_desktop_cmd("qdbus6 org.kde.KWin /Effects loadEffect blur");
     }
 }
 
 bool MitigationEngine::set_baloo_suspended(bool suspend) noexcept {
+    // REF-REQ-071 & REF-ARCH-048: Idempotent guard for baloo state
+    if (s_hardware_baseline.baloo_suspended == suspend) {
+        return true; // Already in target state
+    }
+    s_hardware_baseline.baloo_suspended = suspend;
     if (suspend) {
-        s_hardware_baseline.baloo_suspended = true;
         return execute_user_desktop_cmd("balooctl6 suspend 2>/dev/null || balooctl suspend 2>/dev/null");
     } else {
-        s_hardware_baseline.baloo_suspended = false;
         return execute_user_desktop_cmd("balooctl6 resume 2>/dev/null || balooctl resume 2>/dev/null");
     }
 }

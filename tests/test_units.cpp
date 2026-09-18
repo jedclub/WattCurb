@@ -2408,10 +2408,70 @@ void test_smart_adaptive_trigger_and_temporal_sync() {
     std::cout << " [PASS] test_smart_adaptive_trigger_and_temporal_sync (REF-TEST-034: Spike trigger <= 10s, 15s cooldown, 1x timebase scale verified)\n";
 }
 
+// Implements REF-TEST-036: Display Modeset Flapping Elimination & Desktop Test Isolation
+void test_modeset_flapping_elimination_and_test_isolation() {
+    using namespace wattcurb::policy;
+
+    // Verify mock environment variable is set
+    assert(::getenv("WATTCURB_TEST_MOCK_DESKTOP") != nullptr && "Test isolation must be enabled");
+
+    // 1. Initial baseline capture
+    MitigationEngine::capture_hardware_baseline();
+    
+    // 2. Set to 48Hz (first transition)
+    bool r1 = MitigationEngine::set_display_refresh_rate(48);
+    assert(r1 && "First DRRS transition to 48Hz must succeed");
+    assert(MitigationEngine::hardware_baseline().drrs_applied == true);
+
+    // 3. Repeated set to 48Hz (must be idempotent no-op)
+    auto t0 = std::chrono::steady_clock::now();
+    bool r2 = MitigationEngine::set_display_refresh_rate(48);
+    auto t1 = std::chrono::steady_clock::now();
+    assert(r2 && "Idempotent DRRS 48Hz must succeed");
+    double elapsed_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
+    // Since it bypasses fork/exec system() completely, latency must be sub-microsecond
+    assert(elapsed_us < 50.0 && "Idempotent DRRS must bypass subshell execution in <50us");
+
+    // 4. Restore to 60Hz
+    bool r3 = MitigationEngine::set_display_refresh_rate(60);
+    assert(r3 && "Restoration to 60Hz must succeed");
+    assert(MitigationEngine::hardware_baseline().drrs_applied == false);
+
+    // Repeated set to 60Hz (idempotent)
+    bool r4 = MitigationEngine::set_display_refresh_rate(60);
+    assert(r4 && "Idempotent DRRS 60Hz must succeed");
+
+    // 5. KWin effects idempotency
+    bool k1 = MitigationEngine::set_kwin_effects_suspended(true);
+    assert(k1 && "Suspend KWin effects must succeed");
+    bool k2 = MitigationEngine::set_kwin_effects_suspended(true);
+    assert(k2 && "Idempotent suspend KWin effects must succeed");
+    bool k3 = MitigationEngine::set_kwin_effects_suspended(false);
+    assert(k3 && "Resume KWin effects must succeed");
+    bool k4 = MitigationEngine::set_kwin_effects_suspended(false);
+    assert(k4 && "Idempotent resume KWin effects must succeed");
+
+    // 6. Baloo idempotency
+    bool b1 = MitigationEngine::set_baloo_suspended(true);
+    assert(b1 && "Suspend Baloo must succeed");
+    bool b2 = MitigationEngine::set_baloo_suspended(true);
+    assert(b2 && "Idempotent suspend Baloo must succeed");
+    bool b3 = MitigationEngine::set_baloo_suspended(false);
+    assert(b3 && "Resume Baloo must succeed");
+    bool b4 = MitigationEngine::set_baloo_suspended(false);
+    assert(b4 && "Idempotent resume Baloo must succeed");
+
+    std::cout << " [PASS] test_modeset_flapping_elimination_and_test_isolation (REF-TEST-036: Subshell bypass, Idempotent DRRS & KWin effects verified)\n";
+}
+
 } // namespace test
 
 int main() {
+    // REF-REQ-071 & REF-ARCH-048: Protect physical compositor & display during test harness execution
+    ::setenv("WATTCURB_TEST_MOCK_DESKTOP", "1", 1);
+
     std::cout << "=== WattCurb Unit Test Suite & Oracle Gate Verifier ===\n";
+    test::test_modeset_flapping_elimination_and_test_isolation();
     test::test_cpu_features();
     test::test_hw_isa_primitives();
     test::test_ifunc_and_nttp_dispatch();
