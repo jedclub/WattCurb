@@ -34,6 +34,9 @@ public:
         char* out_desc, size_t desc_cap
     ) noexcept;
 
+    // Static helper: Instant live sensor probe upon hover (REF-REQ-050, REF-REQ-072)
+    static void probe_sensors_for_hover(ipc::WattCurbSharedState& state) noexcept;
+
     // Static helper: Resolves freedesktop battery icon based on power & charge status
     static void resolve_icon_name(
         const ipc::WattCurbSharedState& state,
@@ -42,6 +45,9 @@ public:
 
     // Sends command to daemon via non-blocking Unix Domain Socket
     static bool send_daemon_command(const char* cmd) noexcept;
+
+    // Prints ScopedProfiler hotspot breakdown table to stdout (REF-REQ-072)
+    static void print_profiler_summary() noexcept;
 
     // Cycles power profile (Left click handler)
     void cycle_power_profile() noexcept;

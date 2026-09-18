@@ -126,6 +126,7 @@ bool TrayClient::read_state(ipc::WattCurbSharedState& out) const noexcept {
 }
 
 static void build_unicode_bar(char* out, size_t out_cap, unsigned int percent, unsigned int total_blocks) noexcept {
+    WATTCURB_PROFILE_SCOPE("tray.tooltip.build_bars");
     if (out_cap < 1) return;
     unsigned int filled = (percent * total_blocks + 50) / 100;
     if (filled > total_blocks) filled = total_blocks;
@@ -151,6 +152,7 @@ static void build_unicode_bar(char* out, size_t out_cap, unsigned int percent, u
 // Ensures that if snprintf truncates in the middle of a multibyte UTF-8 character,
 // the incomplete byte sequence is cleanly terminated, preventing D-Bus -EINVAL rejection.
 static void sanitize_utf8_inplace(char* s) noexcept {
+    WATTCURB_PROFILE_SCOPE("tray.tooltip.sanitize_utf8");
     if (!s) return;
     size_t len = std::strlen(s);
     if (len == 0) return;
@@ -183,63 +185,72 @@ static void sanitize_utf8_inplace(char* s) noexcept {
     }
 }
 
-static void probe_live_sensors_on_hover(ipc::WattCurbSharedState& state) noexcept {
-    WATTCURB_PROFILE_SCOPE("tray.probe_live_sensors");
-    // Implements REF-REQ-050: Sub-5us on-demand hardware telemetry probe upon mouse hover
+void TrayClient::probe_sensors_for_hover(ipc::WattCurbSharedState& state) noexcept {
+    WATTCURB_PROFILE_SCOPE("tray.probe_sensors.total");
+    // Implements REF-REQ-050 & REF-REQ-072: Sub-5us on-demand hardware telemetry probe upon mouse hover
     // 1. Live Battery Telemetry: /sys/class/power_supply/BAT0/uevent
-    char ubuf[1024]{};
-    ssize_t n = core::fs::read_small_file("/sys/class/power_supply/BAT0/uevent", ubuf, sizeof(ubuf) - 1);
-    if (n <= 0) {
-        n = core::fs::read_small_file("/sys/class/power_supply/BAT1/uevent", ubuf, sizeof(ubuf) - 1);
-    }
-    if (n > 0) {
-        const char* p = ubuf;
-        uint32_t power_now = 0;
-        uint32_t current_now = 0;
-        uint32_t voltage_now = 0;
-        while (*p) {
-            if (std::strncmp(p, "POWER_SUPPLY_POWER_NOW=", 23) == 0) {
-                power_now = static_cast<uint32_t>(std::strtoul(p + 23, nullptr, 10));
-            } else if (std::strncmp(p, "POWER_SUPPLY_CURRENT_NOW=", 25) == 0) {
-                current_now = static_cast<uint32_t>(std::strtoul(p + 25, nullptr, 10));
-            } else if (std::strncmp(p, "POWER_SUPPLY_VOLTAGE_NOW=", 25) == 0) {
-                voltage_now = static_cast<uint32_t>(std::strtoul(p + 25, nullptr, 10));
-            } else if (std::strncmp(p, "POWER_SUPPLY_CAPACITY=", 22) == 0) {
-                uint8_t cap = static_cast<uint8_t>(std::strtoul(p + 22, nullptr, 10));
-                if (cap > 0 && cap <= 100) state.battery_percent = cap;
-            } else if (std::strncmp(p, "POWER_SUPPLY_STATUS=Discharging", 31) == 0) {
-                state.battery_state = 1;
-            } else if (std::strncmp(p, "POWER_SUPPLY_STATUS=Charging", 28) == 0) {
-                state.battery_state = 0;
-            } else if (std::strncmp(p, "POWER_SUPPLY_STATUS=Full", 24) == 0 ||
-                       std::strncmp(p, "POWER_SUPPLY_STATUS=Not charging", 32) == 0) {
-                state.battery_state = 2;
-            }
-            while (*p && *p != '\n') ++p;
-            if (*p == '\n') ++p;
+    {
+        WATTCURB_PROFILE_SCOPE("tray.probe_sensors.bat_uevent");
+        char ubuf[1024]{};
+        ssize_t n = core::fs::read_small_file("/sys/class/power_supply/BAT0/uevent", ubuf, sizeof(ubuf) - 1);
+        if (n <= 0) {
+            n = core::fs::read_small_file("/sys/class/power_supply/BAT1/uevent", ubuf, sizeof(ubuf) - 1);
         }
-        if (power_now > 0) {
-            state.system_drain_mw = power_now / 1000;
-        } else if (current_now > 0 && voltage_now > 0) {
-            state.system_drain_mw = static_cast<uint32_t>((static_cast<uint64_t>(current_now) * voltage_now) / 1'000'000'000ULL);
+        if (n > 0) {
+            const char* p = ubuf;
+            uint32_t power_now = 0;
+            uint32_t current_now = 0;
+            uint32_t voltage_now = 0;
+            while (*p) {
+                if (std::strncmp(p, "POWER_SUPPLY_POWER_NOW=", 23) == 0) {
+                    power_now = static_cast<uint32_t>(std::strtoul(p + 23, nullptr, 10));
+                } else if (std::strncmp(p, "POWER_SUPPLY_CURRENT_NOW=", 25) == 0) {
+                    current_now = static_cast<uint32_t>(std::strtoul(p + 25, nullptr, 10));
+                } else if (std::strncmp(p, "POWER_SUPPLY_VOLTAGE_NOW=", 25) == 0) {
+                    voltage_now = static_cast<uint32_t>(std::strtoul(p + 25, nullptr, 10));
+                } else if (std::strncmp(p, "POWER_SUPPLY_CAPACITY=", 22) == 0) {
+                    uint8_t cap = static_cast<uint8_t>(std::strtoul(p + 22, nullptr, 10));
+                    if (cap > 0 && cap <= 100) state.battery_percent = cap;
+                } else if (std::strncmp(p, "POWER_SUPPLY_STATUS=Discharging", 31) == 0) {
+                    state.battery_state = 1;
+                } else if (std::strncmp(p, "POWER_SUPPLY_STATUS=Charging", 28) == 0) {
+                    state.battery_state = 0;
+                } else if (std::strncmp(p, "POWER_SUPPLY_STATUS=Full", 24) == 0 ||
+                           std::strncmp(p, "POWER_SUPPLY_STATUS=Not charging", 32) == 0) {
+                    state.battery_state = 2;
+                }
+                while (*p && *p != '\n') ++p;
+                if (*p == '\n') ++p;
+            }
+            if (power_now > 0) {
+                state.system_drain_mw = power_now / 1000;
+            } else if (current_now > 0 && voltage_now > 0) {
+                state.system_drain_mw = static_cast<uint32_t>((static_cast<uint64_t>(current_now) * voltage_now) / 1'000'000'000ULL);
+            }
         }
     }
 
     // 2. Live CPU Thermal Sensor: /sys/class/thermal/thermal_zone0/temp
-    char tbuf[32]{};
-    if (core::fs::read_small_file("/sys/class/thermal/thermal_zone0/temp", tbuf, sizeof(tbuf) - 1) > 0) {
-        long temp_mc = std::strtol(tbuf, nullptr, 10);
-        if (temp_mc > 0) {
-            state.cpu_temp_c = static_cast<uint16_t>(temp_mc / 1000);
+    {
+        WATTCURB_PROFILE_SCOPE("tray.probe_sensors.thermal");
+        char tbuf[32]{};
+        if (core::fs::read_small_file("/sys/class/thermal/thermal_zone0/temp", tbuf, sizeof(tbuf) - 1) > 0) {
+            long temp_mc = std::strtol(tbuf, nullptr, 10);
+            if (temp_mc > 0) {
+                state.cpu_temp_c = static_cast<uint16_t>(temp_mc / 1000);
+            }
         }
     }
 
     // 3. Live CPU Core Frequency: scaling_cur_freq
-    char fbuf[32]{};
-    if (core::fs::read_small_file("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", fbuf, sizeof(fbuf) - 1) > 0) {
-        long khz = std::strtol(fbuf, nullptr, 10);
-        if (khz > 0) {
-            state.cpu_freq_mhz = static_cast<uint16_t>(khz / 1000);
+    {
+        WATTCURB_PROFILE_SCOPE("tray.probe_sensors.cpufreq");
+        char fbuf[32]{};
+        if (core::fs::read_small_file("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", fbuf, sizeof(fbuf) - 1) > 0) {
+            long khz = std::strtol(fbuf, nullptr, 10);
+            if (khz > 0) {
+                state.cpu_freq_mhz = static_cast<uint16_t>(khz / 1000);
+            }
         }
     }
 }
@@ -249,7 +260,7 @@ void TrayClient::render_tooltip(
     char* out_title, size_t title_cap,
     char* out_desc, size_t desc_cap
 ) noexcept {
-    WATTCURB_PROFILE_SCOPE("tray.render_tooltip");
+    WATTCURB_PROFILE_SCOPE("tray.tooltip.render_total");
     unsigned int sys_w = state.system_drain_mw / 1000;
     unsigned int sys_frac = (state.system_drain_mw % 1000) / 100;
 
@@ -299,23 +310,26 @@ void TrayClient::render_tooltip(
 
     // Top 2 processes in single compact line
     char culprits_line[512]{};
-    if (state.culprits[0].comm[0] && state.culprits[1].comm[0]) {
-        unsigned int c1_w = state.culprits[0].drain_mw / 1000;
-        unsigned int c1_f = (state.culprits[0].drain_mw % 1000) / 100;
-        unsigned int c2_w = state.culprits[1].drain_mw / 1000;
-        unsigned int c2_f = (state.culprits[1].drain_mw % 1000) / 100;
-        std::snprintf(culprits_line, sizeof(culprits_line),
-            "<font color=\"#ffffff\"><b>%.12s</b></font> <font color=\"#f43f5e\">%u.%u W</font> <font color=\"#475569\">·</font> <font color=\"#ffffff\"><b>%.12s</b></font> <font color=\"#fb923c\">%u.%u W</font>",
-            state.culprits[0].comm, c1_w, c1_f, state.culprits[1].comm, c2_w, c2_f);
-    } else if (state.culprits[0].comm[0]) {
-        unsigned int c1_w = state.culprits[0].drain_mw / 1000;
-        unsigned int c1_f = (state.culprits[0].drain_mw % 1000) / 100;
-        std::snprintf(culprits_line, sizeof(culprits_line),
-            "<font color=\"#ffffff\"><b>%.12s</b></font> <font color=\"#f43f5e\">%u.%u W</font>",
-            state.culprits[0].comm, c1_w, c1_f);
-    } else {
-        std::snprintf(culprits_line, sizeof(culprits_line),
-            "<font color=\"#94a3b8\"><i>유휴 안정 (누수 없음)</i></font>");
+    {
+        WATTCURB_PROFILE_SCOPE("tray.tooltip.culprits");
+        if (state.culprits[0].comm[0] && state.culprits[1].comm[0]) {
+            unsigned int c1_w = state.culprits[0].drain_mw / 1000;
+            unsigned int c1_f = (state.culprits[0].drain_mw % 1000) / 100;
+            unsigned int c2_w = state.culprits[1].drain_mw / 1000;
+            unsigned int c2_f = (state.culprits[1].drain_mw % 1000) / 100;
+            std::snprintf(culprits_line, sizeof(culprits_line),
+                "<font color=\"#ffffff\"><b>%.12s</b></font> <font color=\"#f43f5e\">%u.%u W</font> <font color=\"#475569\">·</font> <font color=\"#ffffff\"><b>%.12s</b></font> <font color=\"#fb923c\">%u.%u W</font>",
+                state.culprits[0].comm, c1_w, c1_f, state.culprits[1].comm, c2_w, c2_f);
+        } else if (state.culprits[0].comm[0]) {
+            unsigned int c1_w = state.culprits[0].drain_mw / 1000;
+            unsigned int c1_f = (state.culprits[0].drain_mw % 1000) / 100;
+            std::snprintf(culprits_line, sizeof(culprits_line),
+                "<font color=\"#ffffff\"><b>%.12s</b></font> <font color=\"#f43f5e\">%u.%u W</font>",
+                state.culprits[0].comm, c1_w, c1_f);
+        } else {
+            std::snprintf(culprits_line, sizeof(culprits_line),
+                "<font color=\"#94a3b8\"><i>유휴 안정 (누수 없음)</i></font>");
+        }
     }
 
     char bat_detail[64]{};
@@ -331,26 +345,26 @@ void TrayClient::render_tooltip(
         std::snprintf(bat_detail, sizeof(bat_detail), "충전 중");
     }
 
-    // Ref-Req-050: Clean, fixed-column progressive bar layout.
-    // Every line starts with a fixed-width 4-character prefix (BAT , CPU , GPU , TOP , SYS ),
-    // immediately followed by the fixed-width progressive bar [████░░░░], preventing any horizontal jitter.
-    // Wrapped in <nobr> to strictly eliminate word-wrapping in KDE Plasma.
-    std::snprintf(out_desc, desc_cap,
-        "<div style=\"font-family: 'JetBrains Mono', 'Hack', monospace; font-size: 11px; line-height: 1.35;\"><font size=\"2\">"
-        "<nobr><b><font color=\"#00f0ff\">⚡ WATTCURB CYBER HUD</font></b> &nbsp;<font color=\"#10b981\">● LIVE</font> &nbsp;<font color=\"#475569\">|</font> &nbsp;<b><font color=\"#f59e0b\">%c%u.%u W</font></b></nobr><br/>"
-        "<nobr><font color=\"#64748b\">BAT</font> <font color=\"%s\"><b>[%s]</b></font> <font color=\"#ffffff\"><b>%2u%%</b></font> <font color=\"#475569\">·</font> <font color=\"%s\">%s</font> <font color=\"#475569\">·</font> <font color=\"#94a3b8\">%urpm</font></nobr><br/>"
-        "<nobr><font color=\"#64748b\">CPU</font> <font color=\"#00f0ff\"><b>[%s]</b></font> <font color=\"#ffffff\"><b>%2u%%</b></font> <font color=\"#475569\">·</font> <b><font color=\"#00f0ff\">%u.%u W</font></b> <font color=\"#475569\">·</font> <font color=\"#38bdf8\">%u.%02uGHz</font> <font color=\"%s\">%u°C</font></nobr><br/>"
-        "<nobr><font color=\"#64748b\">GPU</font> <font color=\"#a855f7\"><b>[%s]</b></font> <b><font color=\"#a855f7\">%u.%u W</font></b> <font color=\"#475569\">·</font> <font color=\"#cbd5e1\">C3 %u%%</font> <font color=\"#475569\">·</font> <font color=\"#94a3b8\">IO %u.%u W</font></nobr><br/>"
-        "<nobr><font color=\"#64748b\">TOP</font> %s</nobr><br/>"
-        "<nobr><font color=\"#64748b\">SYS</font> <b><font color=\"#00f0ff\">%s</font></b> <font color=\"#475569\">|</font> <font color=\"#10b981\">PipeWire RT(-12)</font></nobr>"
-        "</font></div>",
-        sign, sys_w, sys_frac,
-        bat_color, bat_bar, state.battery_percent, bat_color, bat_detail, state.fan_rpm,
-        cpu_bar, cpu_pct, cpu_w, cpu_frac, freq_ghz, freq_mhz_frac, temp_color, state.cpu_temp_c,
-        gpu_bar, gpu_w, gpu_frac, state.cstate_c3_percent, plat_w, plat_frac,
-        culprits_line,
-        profile_short
-    );
+    // Ref-Req-050 & REF-REQ-072: Clean, fixed-column progressive bar layout with ScopedProfiler
+    {
+        WATTCURB_PROFILE_SCOPE("tray.tooltip.snprintf_hud");
+        std::snprintf(out_desc, desc_cap,
+            "<div style=\"font-family: 'JetBrains Mono', 'Hack', monospace; font-size: 11px; line-height: 1.35;\"><font size=\"2\">"
+            "<nobr><b><font color=\"#00f0ff\">⚡ WATTCURB CYBER HUD</font></b> &nbsp;<font color=\"#10b981\">● LIVE</font> &nbsp;<font color=\"#475569\">|</font> &nbsp;<b><font color=\"#f59e0b\">%c%u.%u W</font></b></nobr><br/>"
+            "<nobr><font color=\"#64748b\">BAT</font> <font color=\"%s\"><b>[%s]</b></font> <font color=\"#ffffff\"><b>%2u%%</b></font> <font color=\"#475569\">·</font> <font color=\"%s\">%s</font> <font color=\"#475569\">·</font> <font color=\"#94a3b8\">%urpm</font></nobr><br/>"
+            "<nobr><font color=\"#64748b\">CPU</font> <font color=\"#00f0ff\"><b>[%s]</b></font> <font color=\"#ffffff\"><b>%2u%%</b></font> <font color=\"#475569\">·</font> <b><font color=\"#00f0ff\">%u.%u W</font></b> <font color=\"#475569\">·</font> <font color=\"#38bdf8\">%u.%02uGHz</font> <font color=\"%s\">%u°C</font></nobr><br/>"
+            "<nobr><font color=\"#64748b\">GPU</font> <font color=\"#a855f7\"><b>[%s]</b></font> <b><font color=\"#a855f7\">%u.%u W</font></b> <font color=\"#475569\">·</font> <font color=\"#cbd5e1\">C3 %u%%</font> <font color=\"#475569\">·</font> <font color=\"#94a3b8\">IO %u.%u W</font></nobr><br/>"
+            "<nobr><font color=\"#64748b\">TOP</font> %s</nobr><br/>"
+            "<nobr><font color=\"#64748b\">SYS</font> <b><font color=\"#00f0ff\">%s</font></b> <font color=\"#475569\">|</font> <font color=\"#10b981\">PipeWire RT(-12)</font></nobr>"
+            "</font></div>",
+            sign, sys_w, sys_frac,
+            bat_color, bat_bar, state.battery_percent, bat_color, bat_detail, state.fan_rpm,
+            cpu_bar, cpu_pct, cpu_w, cpu_frac, freq_ghz, freq_mhz_frac, temp_color, state.cpu_temp_c,
+            gpu_bar, gpu_w, gpu_frac, state.cstate_c3_percent, plat_w, plat_frac,
+            culprits_line,
+            profile_short
+        );
+    }
 
     sanitize_utf8_inplace(out_desc);
     sanitize_utf8_inplace(out_title);
@@ -403,9 +417,14 @@ static void apply_hardware_profile(const char* mode) noexcept {
 }
 
 bool TrayClient::send_daemon_command(const char* cmd) noexcept {
+    WATTCURB_PROFILE_SCOPE("tray.ipc.send_daemon_cmd");
     if (!cmd) return false;
     std::string resp;
     return core::SingletonLock::query_daemon(cmd, resp, "wattcurb.lock", 250);
+}
+
+void TrayClient::print_profiler_summary() noexcept {
+    core::ScopedProfilerRegistry::instance().print_summary(std::cout);
 }
 
 void TrayClient::cycle_power_profile() noexcept {
@@ -519,13 +538,20 @@ int TrayClient::run() noexcept {
     read_state(prev_state);
 
     while (running_) {
-        int r = sd_bus_process(bus_, nullptr);
+        int r = 0;
+        {
+            WATTCURB_PROFILE_SCOPE("tray.loop.bus_process");
+            r = sd_bus_process(bus_, nullptr);
+        }
         if (r < 0) break;
         if (r > 0) continue; // More work to do immediately
 
         // Sleep with 1-second timeout (1'000'000 us):
         // Wakes up on D-Bus events instantly, or at least once every 1s to sync live telemetry
-        r = sd_bus_wait(bus_, 1'000'000ULL);
+        {
+            WATTCURB_PROFILE_SCOPE("tray.loop.bus_wait");
+            r = sd_bus_wait(bus_, 1'000'000ULL);
+        }
         if (r < 0 && r != -EINTR) break;
 
         // Implements REF-REQ-047: If initial registration failed during desktop cold boot,
@@ -536,28 +562,33 @@ int TrayClient::run() noexcept {
 
         // Periodic state check: read 128-byte Seqlock SHM (< 50ns, zero-allocation)
         ipc::WattCurbSharedState cur_state{};
-        if (read_state(cur_state)) {
-            bool changed = (cur_state.seq_version != prev_state.seq_version) ||
-                           (cur_state.battery_percent != prev_state.battery_percent) ||
-                           (cur_state.battery_state != prev_state.battery_state) ||
-                           (std::abs(static_cast<int>(cur_state.system_drain_mw) - static_cast<int>(prev_state.system_drain_mw)) > 50) ||
-                           (std::abs(static_cast<int>(cur_state.cpu_drain_mw) - static_cast<int>(prev_state.cpu_drain_mw)) > 100) ||
-                           (cur_state.cpu_temp_c != prev_state.cpu_temp_c) ||
-                           (cur_state.power_profile_mode != prev_state.power_profile_mode);
-
-            if (changed) {
-                prev_state = cur_state;
-                sd_bus_emit_signal(bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewIcon", nullptr);
-                sd_bus_emit_signal(bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewToolTip", nullptr);
-
-                char label[32]{};
-                unsigned int sys_w = cur_state.system_drain_mw / 1000;
-                unsigned int sys_frac = (cur_state.system_drain_mw % 1000) / 100;
-                char sign = (cur_state.battery_state == 2) ? '+' : '-';
-                std::snprintf(label, sizeof(label), "%u%% (%c%u.%uW)", cur_state.battery_percent, sign, sys_w, sys_frac);
-                sd_bus_emit_signal(bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "XAyatanaNewLabel", "ss", label, "");
-                sd_bus_emit_signal(bus_, "/MenuBar", "com.canonical.dbusmenu", "LayoutUpdated", "ui", ++menu_revision_, 0);
+        bool changed = false;
+        {
+            WATTCURB_PROFILE_SCOPE("tray.loop.poll_shm");
+            if (read_state(cur_state)) {
+                changed = (cur_state.seq_version != prev_state.seq_version) ||
+                          (cur_state.battery_percent != prev_state.battery_percent) ||
+                          (cur_state.battery_state != prev_state.battery_state) ||
+                          (std::abs(static_cast<int>(cur_state.system_drain_mw) - static_cast<int>(prev_state.system_drain_mw)) > 50) ||
+                          (std::abs(static_cast<int>(cur_state.cpu_drain_mw) - static_cast<int>(prev_state.cpu_drain_mw)) > 100) ||
+                          (cur_state.cpu_temp_c != prev_state.cpu_temp_c) ||
+                          (cur_state.power_profile_mode != prev_state.power_profile_mode);
             }
+        }
+
+        if (changed) {
+            WATTCURB_PROFILE_SCOPE("tray.loop.emit_signals");
+            prev_state = cur_state;
+            sd_bus_emit_signal(bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewIcon", nullptr);
+            sd_bus_emit_signal(bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewToolTip", nullptr);
+
+            char label[32]{};
+            unsigned int sys_w = cur_state.system_drain_mw / 1000;
+            unsigned int sys_frac = (cur_state.system_drain_mw % 1000) / 100;
+            char sign = (cur_state.battery_state == 2) ? '+' : '-';
+            std::snprintf(label, sizeof(label), "%u%% (%c%u.%uW)", cur_state.battery_percent, sign, sys_w, sys_frac);
+            sd_bus_emit_signal(bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "XAyatanaNewLabel", "ss", label, "");
+            sd_bus_emit_signal(bus_, "/MenuBar", "com.canonical.dbusmenu", "LayoutUpdated", "ui", ++menu_revision_, 0);
         }
     }
     return 0;
@@ -604,13 +635,13 @@ int TrayClient::property_get_icon_name(sd_bus*, const char*, const char*, const 
 }
 
 int TrayClient::property_get_tooltip(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*) {
-    WATTCURB_PROFILE_SCOPE("tray.property_get_tooltip");
+    WATTCURB_PROFILE_SCOPE("tray.property_get_tooltip.total");
     auto* self = static_cast<TrayClient*>(userdata);
     ipc::WattCurbSharedState state{};
     self->read_state(state);
 
-    // Implements REF-REQ-050: Instant live hardware sensor probe upon hover!
-    probe_live_sensors_on_hover(state);
+    // Implements REF-REQ-050 & REF-REQ-072: Instant live hardware sensor probe upon hover!
+    probe_sensors_for_hover(state);
 
     char icon[64]{};
     resolve_icon_name(state, icon, sizeof(icon));
@@ -622,29 +653,32 @@ int TrayClient::property_get_tooltip(sd_bus*, const char*, const char*, const ch
     sanitize_utf8_inplace(title);
     sanitize_utf8_inplace(desc);
 
-    // Open structure (sa(iiay)ss)
-    int r = sd_bus_message_open_container(reply, 'r', "sa(iiay)ss");
-    if (r < 0) return r;
+    {
+        WATTCURB_PROFILE_SCOPE("tray.property_get_tooltip.dbus_pack");
+        // Open structure (sa(iiay)ss)
+        int r = sd_bus_message_open_container(reply, 'r', "sa(iiay)ss");
+        if (r < 0) return r;
 
-    // icon_name (s)
-    r = sd_bus_message_append(reply, "s", icon);
-    if (r < 0) return r;
+        // icon_name (s)
+        r = sd_bus_message_append(reply, "s", icon);
+        if (r < 0) return r;
 
-    // icon_data a(iiay) -> empty array
-    r = sd_bus_message_open_container(reply, 'a', "(iiay)");
-    if (r < 0) return r;
-    r = sd_bus_message_close_container(reply);
-    if (r < 0) return r;
+        // icon_data a(iiay) -> empty array
+        r = sd_bus_message_open_container(reply, 'a', "(iiay)");
+        if (r < 0) return r;
+        r = sd_bus_message_close_container(reply);
+        if (r < 0) return r;
 
-    // title (s)
-    r = sd_bus_message_append(reply, "s", title);
-    if (r < 0) return r;
+        // title (s)
+        r = sd_bus_message_append(reply, "s", title);
+        if (r < 0) return r;
 
-    // description (s)
-    r = sd_bus_message_append(reply, "s", desc);
-    if (r < 0) return r;
+        // description (s)
+        r = sd_bus_message_append(reply, "s", desc);
+        if (r < 0) return r;
 
-    return sd_bus_message_close_container(reply);
+        return sd_bus_message_close_container(reply);
+    }
 }
 
 int TrayClient::property_get_icon_theme_path(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void*, sd_bus_error*) {
@@ -732,6 +766,7 @@ static void append_menu_node(
     const char* toggle_type,
     int toggle_state
 ) {
+    WATTCURB_PROFILE_SCOPE("tray.menu.build_nodes");
     sd_bus_message_open_container(reply, 'r', "ia{sv}av");
     sd_bus_message_append(reply, "i", id);
 
@@ -784,6 +819,7 @@ static void append_menu_node(
 }
 
 int TrayClient::dbusmenu_method_get_layout(sd_bus_message* msg, void* userdata, sd_bus_error*) {
+    WATTCURB_PROFILE_SCOPE("tray.menu.get_layout");
     auto* self = static_cast<TrayClient*>(userdata);
     ipc::WattCurbSharedState state{};
     self->read_state(state);
@@ -844,7 +880,10 @@ int TrayClient::dbusmenu_method_get_layout(sd_bus_message* msg, void* userdata, 
     sd_bus_message_close_container(reply); // children av
     sd_bus_message_close_container(reply); // root r
 
-    r = sd_bus_send(self->bus_, reply, nullptr);
+    {
+        WATTCURB_PROFILE_SCOPE("tray.menu.dbus_send");
+        r = sd_bus_send(self->bus_, reply, nullptr);
+    }
     sd_bus_message_unref(reply);
     return r;
 }

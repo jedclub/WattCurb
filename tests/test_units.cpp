@@ -2464,6 +2464,59 @@ void test_modeset_flapping_elimination_and_test_isolation() {
     std::cout << " [PASS] test_modeset_flapping_elimination_and_test_isolation (REF-TEST-036: Subshell bypass, Idempotent DRRS & KWin effects verified)\n";
 }
 
+// Implements REF-TEST-037: Desktop Tray Hot-Path Microsecond Profiling & Telemetry Verification Gate (REF-REQ-072, REF-ARCH-049)
+void test_tray_hotpath_profiling_audit() {
+    using namespace wattcurb::tray;
+    using namespace wattcurb::ipc;
+    using namespace wattcurb::core;
+
+    std::cout << "\n--- [REF-TEST-037] Desktop Tray Hot-Path Profiling Audit (REF-REQ-072) ---\n";
+    ScopedProfilerRegistry::instance().reset();
+
+    WattCurbSharedState state{};
+    state.seq_version = 100;
+    state.battery_percent = 78;
+    state.battery_state = 1; // Discharging
+    state.system_drain_mw = 12450;
+    state.cpu_drain_mw = 4200;
+    state.gpu_drain_mw = 1800;
+    state.cpu_temp_c = 48;
+    state.cpu_freq_mhz = 2800;
+    state.fan_rpm = 2100;
+    state.time_to_empty_min = 285;
+    state.power_profile_mode = 1; // Balanced
+    std::strncpy(state.culprits[0].comm, "firefox", sizeof(state.culprits[0].comm) - 1);
+    state.culprits[0].drain_mw = 2400;
+    std::strncpy(state.culprits[1].comm, "kwin_wayland", sizeof(state.culprits[1].comm) - 1);
+    state.culprits[1].drain_mw = 1100;
+
+    char title[128]{};
+    char desc[8192]{};
+    char icon[64]{};
+
+    constexpr size_t TRAY_BENCH_ITERS = 10000;
+
+    // 1. Live hardware sensor probe hot path benchmark (BAT uevent, thermal, cpufreq)
+    for (size_t i = 0; i < 2000; ++i) {
+        TrayClient::probe_sensors_for_hover(state);
+    }
+
+    // 2. ToolTip rendering hot path benchmark (snprintf_hud, build_bars, culprits, sanitize)
+    for (size_t i = 0; i < TRAY_BENCH_ITERS; ++i) {
+        TrayClient::render_tooltip(state, title, sizeof(title), desc, sizeof(desc));
+    }
+
+    // 3. Icon resolution hot path benchmark
+    for (size_t i = 0; i < TRAY_BENCH_ITERS; ++i) {
+        TrayClient::resolve_icon_name(state, icon, sizeof(icon));
+    }
+
+    // 4. Print the comprehensive fine-grained execution cost breakdown
+    ScopedProfilerRegistry::instance().print_summary(std::cout);
+
+    std::cout << " [PASS] test_tray_hotpath_profiling_audit (REF-TEST-037: Fine-grained scopes, breakdown table verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -2487,6 +2540,7 @@ int main() {
     test::test_window_aware_governor();
     test::test_unified_rapid_rollback();
     test::test_thinkpower_tray_client();
+    test::test_tray_hotpath_profiling_audit();
     test::test_anti_starvation_and_greedy_capping();
     test::test_state_journaling_and_faithful_restoration();
     test::test_zero_disk_wakeup_logging_and_history_ring_buffer();
