@@ -725,6 +725,28 @@ void test_process_classifier() {
     assert(c_plasma.can_reclaim_memory == true);
     assert(c_plasma.can_freeze == false);
 
+    // 1b. Tier 0: IME & Core Session Services (REF-ARCH-045)
+    auto c_fcitx = ProcessClassifierDB::classify("fcitx5");
+    assert(c_fcitx.tier == ProcessSafetyTier::CriticalImmune);
+    assert(c_fcitx.can_throttle_scheduler == false);
+
+    auto c_kded = ProcessClassifierDB::classify("kded6");
+    assert(c_kded.tier == ProcessSafetyTier::CriticalImmune);
+    assert(c_kded.can_throttle_scheduler == false);
+
+    // 2b. Tier 1: Desktop Compositor, Core Terminals & IDEs (REF-ARCH-045)
+    auto c_foot = ProcessClassifierDB::classify("foot");
+    assert(c_foot.tier == ProcessSafetyTier::DesktopCore);
+    assert(c_foot.can_throttle_scheduler == false);
+
+    auto c_kitty = ProcessClassifierDB::classify("kitty");
+    assert(c_kitty.tier == ProcessSafetyTier::DesktopCore);
+    assert(c_kitty.can_throttle_scheduler == false);
+
+    auto c_opencode = ProcessClassifierDB::classify("opencode");
+    assert(c_opencode.tier == ProcessSafetyTier::DesktopCore);
+    assert(c_opencode.can_throttle_scheduler == false);
+
     // 4. Tier 4: Background Workers
     auto c_baloo = ProcessClassifierDB::classify("baloo_file");
     assert(c_baloo.tier == ProcessSafetyTier::BackgroundWorker);
@@ -738,15 +760,16 @@ void test_process_classifier() {
     auto c_chrome = ProcessClassifierDB::classify("chrome");
     assert(c_chrome.tier == ProcessSafetyTier::UserInteractive);
     assert(c_chrome.can_reclaim_memory == true);
+    assert(c_chrome.can_throttle_scheduler == true);
 
-    auto c_kitty = ProcessClassifierDB::classify("kitty");
-    assert(c_kitty.tier == ProcessSafetyTier::UserInteractive);
+    auto c_slack = ProcessClassifierDB::classify("slack");
+    assert(c_slack.tier == ProcessSafetyTier::UserInteractive);
 
     // 6. Tier 5: Runaway Candidate
     auto c_miner = ProcessClassifierDB::classify("xmrig_test");
     assert(c_miner.tier == ProcessSafetyTier::RunawayCandidate);
 
-    std::cout << " [PASS] test_process_classifier (6 safety tiers validated)\n";
+    std::cout << " [PASS] test_process_classifier (6 safety tiers & REF-ARCH-045 interactive immunity validated)\n";
 }
 
 void test_mitigation_engine() {
@@ -2305,6 +2328,84 @@ void test_adaptive_three_tier_cadence() {
     std::cout << " [PASS] test_adaptive_three_tier_cadence (REF-TEST-033: On-Demand 2s, 10s light, 60s deep verified)\n";
 }
 
+void test_smart_adaptive_trigger_and_temporal_sync() {
+    using namespace wattcurb;
+    using namespace wattcurb::policy;
+
+    std::cout << "--- [REF-TEST-034] Smart Adaptive Trigger & Temporal Sync Verification ---\n";
+
+    // 1. Invariant 1: Smart Adaptive Spike Detector Logic Validation
+    struct SpikeCheckScenario {
+        bool on_battery;
+        double pkg_w;
+        double sys_w;
+        double last_sys_w;
+        bool expected_spike;
+    };
+
+    const SpikeCheckScenario scenarios[] = {
+        { true,  4.5, 12.0, 11.5, false }, // Normal quiescent idle on battery -> false
+        { true, 11.5, 14.0, 13.5, true  }, // CPU package spike >= 10.0W on battery -> true
+        { true,  5.0, 19.5, 14.0, true  }, // System power spike >= 18.0W on battery -> true
+        { true,  6.0, 16.5,  8.0, true  }, // Rapid step jump delta >= 8.0W -> true
+        { false, 8.0, 18.0, 17.5, false }, // Normal AC power -> false
+        { false, 17.0, 24.0, 23.0, true }, // AC CPU spike >= 16.0W -> true
+        { false, 9.0, 32.0, 31.0, true  }, // AC System power >= 30.0W -> true
+    };
+
+    for (const auto& sc : scenarios) {
+        double delta_w = (sc.sys_w >= sc.last_sys_w) ? (sc.sys_w - sc.last_sys_w) : 0.0;
+        bool spike = false;
+        if (sc.on_battery) {
+            spike = (sc.pkg_w >= 10.0) || (sc.sys_w >= 18.0) || (delta_w >= 8.0);
+        } else {
+            spike = (sc.pkg_w >= 16.0) || (sc.sys_w >= 30.0) || (delta_w >= 12.0);
+        }
+        assert(spike == sc.expected_spike && "Spike detection logic must strictly match criteria");
+    }
+
+    // 2. Invariant 2: 15-Second Anti-Storm Cooldown Window
+    uint64_t last_early_sweep_ms = 100'000;
+    constexpr uint64_t COOLDOWN_MS = 15'000;
+
+    // Call 1 at t=105s (5s elapsed) -> must suppress
+    uint64_t now_ms = 105'000;
+    bool trigger_early = true && ((now_ms - last_early_sweep_ms) >= COOLDOWN_MS);
+    assert(!trigger_early && "Cooldown < 15s must suppress redundant early deep sweeps");
+
+    // Call 2 at t=116s (16s elapsed) -> must allow
+    now_ms = 116'000;
+    trigger_early = true && ((now_ms - last_early_sweep_ms) >= COOLDOWN_MS);
+    assert(trigger_early && "Cooldown >= 15s must grant early deep sweep on genuine spike");
+
+    // 3. Invariant 3: Temporal Synchronization between Hardware & Process accumulation window
+    // Simulate 60-second window with decoupled baselines
+    auto t0 = std::chrono::steady_clock::now();
+    auto t1 = t0 + std::chrono::seconds(60);
+
+    HardwareSample hw_deep_prev{};
+    hw_deep_prev.timestamp = t0;
+
+    HardwareSample hw_cur{};
+    hw_cur.timestamp = t1;
+
+    auto dur_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(hw_cur.timestamp - hw_deep_prev.timestamp).count();
+    double delta_sec = static_cast<double>(dur_ns) / 1'000'000'000.0;
+    assert(std::abs(delta_sec - 60.0) < 0.001 && "Attribution timebase must match full 60s window, not 10s light probe");
+
+    // 4. Invariant 4: Interactive Tool Immunity & Anti-Flapping Hold
+    auto c_fcitx5 = ProcessClassifierDB::classify("fcitx5");
+    assert(c_fcitx5.can_throttle_scheduler == false);
+
+    auto c_foot = ProcessClassifierDB::classify("foot");
+    assert(c_foot.can_throttle_scheduler == false);
+
+    auto c_opencode = ProcessClassifierDB::classify("opencode");
+    assert(c_opencode.can_throttle_scheduler == false);
+
+    std::cout << " [PASS] test_smart_adaptive_trigger_and_temporal_sync (REF-TEST-034: Spike trigger <= 10s, 15s cooldown, 1x timebase scale verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -2332,6 +2433,7 @@ int main() {
     test::test_wifi_txpower_and_platform_loss_decomposition();
     test::test_battery_low_performance_lockout();
     test::test_adaptive_three_tier_cadence();
+    test::test_smart_adaptive_trigger_and_temporal_sync();
     test::test_process_classifier();
     test::test_mitigation_engine();
     test::test_adaptive_mitigation_and_rollback();

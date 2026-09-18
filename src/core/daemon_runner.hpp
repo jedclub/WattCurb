@@ -48,6 +48,8 @@ private:
     ProcessPool proc_pool_;
     AnalysisReportData cached_report_;
     HardwareSample hw_prev_{};
+    HardwareSample hw_light_prev_{}; // REF-REQ-069: Decoupled Light Probe baseline
+    HardwareSample hw_deep_prev_{};  // REF-REQ-069: Decoupled Deep Sweep baseline (pair-sync with proc_pool_)
     bool has_baseline_{false};
 
     ipc::WattCurbSharedState local_shared_state_{};
@@ -64,11 +66,16 @@ private:
     int timer_fd_{-1};
     int signal_fd_{-1};
 
-    // REF-REQ-068: Adaptive 3-Tier Cadence
+    // REF-REQ-068 & REF-REQ-069: Adaptive 3-Tier Cadence & Smart Trigger
     uint64_t bg_tick_count_{0};
     uint64_t interactive_lease_deadline_ms_{0};
     bool is_interactive_active_{false};
     double current_timer_interval_{10.0};
+
+    // REF-REQ-069 & REF-ARCH-046: Smart Adaptive Power-Spike State
+    double last_light_system_watts_{0.0};
+    uint64_t last_early_sweep_time_ms_{0};
+    static constexpr uint64_t EARLY_SWEEP_COOLDOWN_MS = 15'000;
 
     bool arm_timer(double interval_sec) noexcept;
     bool setup_timer();
@@ -76,7 +83,7 @@ private:
     bool setup_shm();
     bool setup_history_shm();
     void process_observation_cycle();
-    void process_light_probe_cycle();
+    bool process_light_probe_cycle();
     void process_deep_observation_cycle();
     void handle_ipc_datagram(int fd);
     void cleanup_descriptors() noexcept;

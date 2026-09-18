@@ -76,8 +76,8 @@ public:
     static bool actuate_memory_reclaim(int32_t pid, uint64_t bytes) noexcept;
     static bool actuate_cgroup_freeze(int32_t pid, bool freeze) noexcept;
     static bool actuate_ccx_affinity(int32_t pid, int32_t target_core) noexcept;
-    static bool actuate_anti_starvation_cap(int32_t pid, PowerProfileMode mode = PowerProfileMode::Balanced) noexcept;
-    static bool actuate_anti_starvation_restore(int32_t pid, const cpu_set_t* target_affinity = nullptr, int orig_policy = 0, int orig_nice = 0) noexcept;
+    static bool actuate_anti_starvation_cap(int32_t pid, PowerProfileMode mode = PowerProfileMode::Balanced, const char* comm = "runaway-task") noexcept;
+    static bool actuate_anti_starvation_restore(int32_t pid, const cpu_set_t* target_affinity = nullptr, int orig_policy = 0, int orig_nice = 0, const char* comm = "runaway-task") noexcept;
 
 private:
     std::array<FeatureMetrics, static_cast<size_t>(FeatureId::Count)> m_metrics{};
@@ -85,6 +85,7 @@ private:
     static constexpr size_t MAX_TRACKED_MITIGATIONS = 128;
     struct TrackedMitigation {
         int32_t pid{0};
+        char comm[16]{0};
         FeatureId applied_feature{FeatureId::SchedIdleThrottle};
         uint64_t timestamp_sec{0};
         int original_nice{0};

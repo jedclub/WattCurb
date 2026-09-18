@@ -181,7 +181,7 @@ bool FeatureManager::actuate_ccx_affinity(int32_t pid, int32_t target_core) noex
     return (::sched_setaffinity(pid, sizeof(cpu_set_t), &cpuset) == 0);
 }
 
-bool FeatureManager::actuate_anti_starvation_cap(int32_t pid, PowerProfileMode mode) noexcept {
+bool FeatureManager::actuate_anti_starvation_cap(int32_t pid, PowerProfileMode mode, const char* comm) noexcept {
     cpu_set_t allowed_set = MitigationEngine::get_headroom_allowed_cpuset(mode);
     bool aff = MitigationEngine::apply_core_affinity_cap(pid, &allowed_set);
     int nice_val = 10;
@@ -198,15 +198,15 @@ bool FeatureManager::actuate_anti_starvation_cap(int32_t pid, PowerProfileMode m
     char det[128];
     std::snprintf(det, sizeof(det), "Nice=%d, Headroom Mask applied, cgroup quota=%s",
                   nice_val, (mode == PowerProfileMode::UltraEndurance ? "400ms/100ms" : "none"));
-    core::EventLogger::log_mitigation(pid, "runaway-task", "AntiStarvationCap", det);
+    core::EventLogger::log_mitigation(pid, (comm && *comm) ? comm : "runaway-task", "AntiStarvationCap", det);
     return (aff || batch);
 }
 
-bool FeatureManager::actuate_anti_starvation_restore(int32_t pid, const cpu_set_t* target_affinity, int orig_policy, int orig_nice) noexcept {
+bool FeatureManager::actuate_anti_starvation_restore(int32_t pid, const cpu_set_t* target_affinity, int orig_policy, int orig_nice, const char* comm) noexcept {
     bool aff = MitigationEngine::restore_core_affinity(pid, target_affinity);
     bool norm = MitigationEngine::restore_sched_normal(pid, orig_policy, orig_nice);
     MitigationEngine::restore_cgroup_cpu_quota(pid);
-    core::EventLogger::log_rollback(pid, "runaway-task", "Restored baseline CFS nice/affinity/cgroup quota");
+    core::EventLogger::log_rollback(pid, (comm && *comm) ? comm : "runaway-task", "Restored baseline CFS nice/affinity/cgroup quota");
     return (aff || norm);
 }
 
@@ -470,7 +470,7 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
                     CPU_ZERO(&orig_aff);
                     ::sched_getaffinity(proc.pid, sizeof(cpu_set_t), &orig_aff);
 
-                    if (actuate_anti_starvation_cap(proc.pid, eff_profile)) {
+                    if (actuate_anti_starvation_cap(proc.pid, eff_profile, proc.comm.c_str())) {
                         auto& m = m_metrics[static_cast<size_t>(FeatureId::AntiStarvationHeadroom)];
                         ++m.actions_taken;
                         double savings = proc.cpu_watts * 0.15; // Energy reduction from mitigating SMT cross-thread thrashing
@@ -479,15 +479,16 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
                             m.targeted_pids[m.targeted_pid_count++] = proc.pid;
                         }
                         if (m_tracked.size() < MAX_TRACKED_MITIGATIONS) {
-                            m_tracked.push_back(TrackedMitigation{
-                                .pid = proc.pid,
-                                .applied_feature = FeatureId::AntiStarvationHeadroom,
-                                .timestamp_sec = 0,
-                                .original_nice = orig_nice,
-                                .original_sched_policy = (orig_sched >= 0) ? orig_sched : SCHED_OTHER,
-                                .original_timerslack_ns = proc.timerslack_ns,
-                                .original_affinity = orig_aff
-                            });
+                            TrackedMitigation tm{};
+                            tm.pid = proc.pid;
+                            std::strncpy(tm.comm, proc.comm.c_str(), sizeof(tm.comm) - 1);
+                            tm.applied_feature = FeatureId::AntiStarvationHeadroom;
+                            tm.timestamp_sec = static_cast<uint64_t>(::time(nullptr));
+                            tm.original_nice = orig_nice;
+                            tm.original_sched_policy = (orig_sched >= 0) ? orig_sched : SCHED_OTHER;
+                            tm.original_timerslack_ns = proc.timerslack_ns;
+                            tm.original_affinity = orig_aff;
+                            m_tracked.push_back(tm);
                         }
                         ++status.throttled_count;
                         status.estimated_savings_watts += savings;
@@ -503,19 +504,26 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
     else if (eff_profile == PowerProfileMode::PowerSaver) deescalate_w = 0.25;
     else if (eff_profile == PowerProfileMode::Performance) deescalate_w = 0.80;
 
+    uint64_t now_sec = static_cast<uint64_t>(::time(nullptr));
+
     for (size_t i = 0; i < m_tracked.size(); ) {
         if (m_tracked[i].applied_feature == FeatureId::AntiStarvationHeadroom) {
             bool still_greedy = false;
-            for (const auto& proc : report.top_processes) {
-                if (proc.pid == m_tracked[i].pid) {
-                    if (proc.cpu_watts > deescalate_w || proc.wdi_score > 3.5 || (proc.num_threads >= 4 && proc.cpu_watts > 0.15)) {
-                        still_greedy = true;
+            // REF-ARCH-045: 15-second minimum cooldown hold window to prevent zero-hysteresis flapping
+            if (now_sec >= m_tracked[i].timestamp_sec && (now_sec - m_tracked[i].timestamp_sec < 15)) {
+                still_greedy = true;
+            } else {
+                for (const auto& proc : report.top_processes) {
+                    if (proc.pid == m_tracked[i].pid) {
+                        if (proc.cpu_watts > deescalate_w || proc.wdi_score > 3.5 || (proc.num_threads >= 4 && proc.cpu_watts > 0.15)) {
+                            still_greedy = true;
+                        }
+                        break;
                     }
-                    break;
                 }
             }
             if (!still_greedy) {
-                actuate_anti_starvation_restore(m_tracked[i].pid, &m_tracked[i].original_affinity, m_tracked[i].original_sched_policy, m_tracked[i].original_nice);
+                actuate_anti_starvation_restore(m_tracked[i].pid, &m_tracked[i].original_affinity, m_tracked[i].original_sched_policy, m_tracked[i].original_nice, m_tracked[i].comm);
                 m_tracked[i] = m_tracked.back();
                 m_tracked.pop_back();
                 continue;

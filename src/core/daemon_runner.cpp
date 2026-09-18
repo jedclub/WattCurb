@@ -234,12 +234,13 @@ static uint64_t get_monotonic_ms() noexcept {
     return static_cast<uint64_t>(ts.tv_sec) * 1000ULL + static_cast<uint64_t>(ts.tv_nsec) / 1'000'000ULL;
 }
 
-void DaemonRunner::process_light_probe_cycle() {
+bool DaemonRunner::process_light_probe_cycle() {
     WATTCURB_PROFILE_SCOPE("daemon.light_probe_cycle");
 
     // Tier 2: Ultra-Lightweight Hardware Probe (< 0.05ms, ZERO /proc traversal)
     auto hw_cur = hw_probe_.capture_sample();
-    cached_report_.hardware = engine_.compute_hardware_power(hw_prev_, hw_cur, 10.0);
+    // REF-REQ-069: Decoupled Light Probe baseline (eliminates timebase desync)
+    cached_report_.hardware = engine_.compute_hardware_power(hw_light_prev_, hw_cur, 10.0);
 
     // REF-REQ-067: Active Lockout and Demotion of Performance Mode
     bool on_battery = cached_report_.hardware.is_battery_discharging;
@@ -302,7 +303,28 @@ void DaemonRunner::process_light_probe_cycle() {
     }
     last_logged_battery_pct_ = cur_pct;
 
-    hw_prev_ = std::move(hw_cur);
+    // REF-REQ-069 & REF-ARCH-046: Smart Adaptive Power-Spike Detection
+    double pkg_w = cached_report_.hardware.cpu_package_watts;
+    double sys_w = cached_report_.hardware.total_system_watts;
+    double delta_w = (sys_w >= last_light_system_watts_) ? (sys_w - last_light_system_watts_) : 0.0;
+    last_light_system_watts_ = sys_w;
+
+    uint64_t now_ms = get_monotonic_ms();
+    bool spike = false;
+    if (on_battery) {
+        spike = (pkg_w >= 10.0) || (sys_w >= 18.0) || (delta_w >= 8.0);
+    } else {
+        spike = (pkg_w >= 16.0) || (sys_w >= 30.0) || (delta_w >= 12.0);
+    }
+
+    bool should_trigger_early = spike && ((now_ms - last_early_sweep_time_ms_) >= EARLY_SWEEP_COOLDOWN_MS);
+    if (should_trigger_early) {
+        last_early_sweep_time_ms_ = now_ms;
+    }
+
+    hw_prev_ = hw_cur;
+    hw_light_prev_ = std::move(hw_cur);
+    return should_trigger_early;
 }
 
 void DaemonRunner::process_deep_observation_cycle() {
@@ -310,6 +332,8 @@ void DaemonRunner::process_deep_observation_cycle() {
 
     if (!has_baseline_) {
         hw_prev_ = hw_probe_.capture_sample();
+        hw_light_prev_ = hw_prev_;
+        hw_deep_prev_ = hw_prev_;
         proc_analyzer_.capture_snapshot(proc_pool_.current());
         has_baseline_ = true;
         return;
@@ -326,10 +350,11 @@ void DaemonRunner::process_deep_observation_cycle() {
     }
 
     // 2. Compute Full-Domain Physical Attribution
+    // REF-REQ-069: Pair-synchronized attribution using hw_deep_prev_ (eliminates 6x tick distortion)
     {
         WATTCURB_PROFILE_SCOPE("daemon.compute_attribution");
         cached_report_ = engine_.compute_attribution(
-            hw_prev_,
+            hw_deep_prev_,
             hw_cur,
             prev_snapshot.span(),
             cur_snapshot.span(),
@@ -426,7 +451,9 @@ void DaemonRunner::process_deep_observation_cycle() {
         }
     }
 
-    hw_prev_ = std::move(hw_cur);
+    hw_prev_ = hw_cur;
+    hw_light_prev_ = hw_cur;
+    hw_deep_prev_ = std::move(hw_cur);
     proc_pool_.swap(); // 0ns pointer swap
 }
 
@@ -451,7 +478,14 @@ void DaemonRunner::process_observation_cycle() {
             process_deep_observation_cycle();
         } else {
             // Mode 2: 10-Second Ultra-Lightweight Hardware Probe (1초간 극저비용 수집, 0 proc traversal)
-            process_light_probe_cycle();
+            bool spike_detected = process_light_probe_cycle();
+            if (spike_detected) {
+                // REF-REQ-069 & REF-ARCH-046: Smart Adaptive Early Deep Sweep
+                EventLogger::log_alert("ADAPTIVE", "Power spike detected in light probe -> Executing early deep sweep");
+                process_deep_observation_cycle();
+                // Realign subsequent 60s windows from this point
+                bg_tick_count_ = 0;
+            }
         }
     }
 }
@@ -466,6 +500,8 @@ int DaemonRunner::run() {
 
     // Initial baseline capture immediately upon startup
     hw_prev_ = hw_probe_.capture_sample();
+    hw_light_prev_ = hw_prev_;
+    hw_deep_prev_ = hw_prev_;
     proc_analyzer_.capture_snapshot(proc_pool_.current());
     has_baseline_ = true;
 

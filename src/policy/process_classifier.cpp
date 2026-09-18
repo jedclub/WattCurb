@@ -8,6 +8,7 @@ ProcessClassification ProcessClassifierDB::classify(std::string_view comm) noexc
     // 1. Tier 0: Critical Kernel, Audio & Init Services (CRITICAL_IMMUNE)
     // REF-REQ-049: Absolute Realtime Immunity for PipeWire, PulseAudio, and Audio Stack
     // REF-REQ-051: Daemon Self-Immunity (WattCurb components must never throttle themselves)
+    // REF-ARCH-045: IME (fcitx5, ibus) and Desktop Core Daemons (kded6) Absolute Immunity
     if (comm == "systemd" || comm == "init" || comm == "kthreadd" ||
         comm.starts_with("kworker") || comm.starts_with("pipewire") || comm.starts_with("wireplumber") ||
         comm == "pulseaudio" || comm.starts_with("jackd") || comm == "jackdbus" ||
@@ -17,6 +18,8 @@ ProcessClassification ProcessClassifierDB::classify(std::string_view comm) noexc
         comm == "systemd-resolve" || comm == "systemd-logind" || comm == "NetworkManager" ||
         comm == "wpa_supplicant" || comm == "iwd" || comm == "bluetoothd" ||
         comm == "upowerd" || comm == "acpid" || comm == "auditd" ||
+        comm == "fcitx5" || comm == "fcitx" || comm == "ibus-daemon" || comm == "ibus" ||
+        comm == "kded6" || comm == "kded5" || comm == "ksmserver" ||
         comm.starts_with("wattcurb")) {
         return ProcessClassification{
             .tier = ProcessSafetyTier::CriticalImmune,
@@ -28,14 +31,19 @@ ProcessClassification ProcessClassifierDB::classify(std::string_view comm) noexc
         };
     }
 
-    // 2. Tier 1: Desktop Compositor & Core (DESKTOP_CORE)
+    // 2. Tier 1: Desktop Compositor, Core Terminals & Development Tools (DESKTOP_CORE)
+    // REF-ARCH-045: Interactive Terminals, IDEs, and Developer Tools are immune from scheduler throttling
     if (comm == "kwin_wayland" || comm == "kwin_x11" || comm == "kwin" ||
         comm == "mutter" || comm == "sway" || comm == "hyprland" ||
-        comm == "Xorg" || comm == "Xwayland" || comm == "weston") {
+        comm == "Xorg" || comm == "Xwayland" || comm == "weston" ||
+        comm == "foot" || comm == "kitty" || comm == "alacritty" ||
+        comm == "konsole" || comm == "wezterm" || comm == "gnome-terminal" ||
+        comm == "opencode" || comm == "agy" || comm == "code" ||
+        comm == "cursor" || comm == "zed" || comm == "nvim" || comm == "emacs") {
         return ProcessClassification{
             .tier = ProcessSafetyTier::DesktopCore,
             .default_action = MitigationAction::None,
-            .category = "Display Compositor",
+            .category = "Desktop Core / Terminal",
             .can_throttle_scheduler = false,
             .can_reclaim_memory = false,
             .can_freeze = false
@@ -75,10 +83,7 @@ ProcessClassification ProcessClassifierDB::classify(std::string_view comm) noexc
     // 5. Tier 3: Heavy User Interactive Applications (USER_INTERACTIVE)
     if (comm == "chrome" || comm == "firefox" || comm == "zen-browser" ||
         comm == "brave" || comm == "edge" || comm == "chromium" ||
-        comm == "kitty" || comm == "alacritty" || comm == "konsole" ||
-        comm == "gnome-terminal" || comm == "foot" || comm == "wezterm" ||
-        comm == "code" || comm == "cursor" || comm == "zed" ||
-        comm == "clion" || comm == "pycharm" || comm == "nvim" || comm == "emacs" ||
+        comm == "claude" || comm == "clion" || comm == "pycharm" ||
         comm == "slack" || comm == "discord" || comm == "telegram-deskto" ||
         comm == "teams" || comm == "spotify" || comm == "steam" || comm == "obs") {
         return ProcessClassification{
