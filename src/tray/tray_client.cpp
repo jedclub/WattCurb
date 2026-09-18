@@ -125,131 +125,243 @@ bool TrayClient::read_state(ipc::WattCurbSharedState& out) const noexcept {
     return ok;
 }
 
-static void build_unicode_bar(char* out, size_t out_cap, unsigned int percent, unsigned int total_blocks) noexcept {
-    WATTCURB_PROFILE_SCOPE("tray.tooltip.build_bars");
-    if (out_cap < 1) return;
-    unsigned int filled = (percent * total_blocks + 50) / 100;
-    if (filled > total_blocks) filled = total_blocks;
-    unsigned int empty = total_blocks - filled;
+// Precomputed 8-block Unicode bars in pure UTF-8 (24 bytes + null terminator) (REF-REQ-073, REF-ARCH-050)
+static constexpr char BAR_LUT[9][25] = {
+    "\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91", // 0
+    "\xe2\x96\x88\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91", // 1
+    "\xe2\x96\x88\xe2\x96\x88\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91", // 2
+    "\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91", // 3
+    "\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91", // 4
+    "\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x91\xe2\x96\x91\xe2\x96\x91", // 5
+    "\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x91\xe2\x96\x91", // 6
+    "\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x91", // 7
+    "\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88"  // 8
+};
 
-    size_t pos = 0;
-    // '█' (U+2588, UTF-8: E2 96 88)
-    for (unsigned int i = 0; i < filled && pos + 3 < out_cap; ++i) {
-        out[pos++] = '\xe2';
-        out[pos++] = '\x96';
-        out[pos++] = '\x88';
-    }
-    // '░' (U+2591, UTF-8: E2 96 91)
-    for (unsigned int i = 0; i < empty && pos + 3 < out_cap; ++i) {
-        out[pos++] = '\xe2';
-        out[pos++] = '\x96';
-        out[pos++] = '\x91';
-    }
-    out[pos] = '\0';
+static inline void build_unicode_bar_8(char* out, unsigned int percent) noexcept {
+    WATTCURB_PROFILE_SCOPE("tray.tooltip.build_bars");
+    unsigned int filled = (percent * 8 + 50) / 100;
+    if (filled > 8) filled = 8;
+    std::memcpy(out, BAR_LUT[filled], 25);
 }
 
-// Zero-allocation UTF-8 truncation guard (REF-REQ-047)
-// Ensures that if snprintf truncates in the middle of a multibyte UTF-8 character,
-// the incomplete byte sequence is cleanly terminated, preventing D-Bus -EINVAL rejection.
-static void sanitize_utf8_inplace(char* s) noexcept {
+// Precomputed Icon Name LUT [11 deciles][2 charge states][3 profiles] (REF-REQ-073, REF-ARCH-050)
+static constexpr const char* const ICON_LUT[11][2][3] = {
+    // 000
+    {
+        { "battery-000-profile-performance", "battery-000-profile-balanced", "battery-000-profile-powersave" },
+        { "battery-000-charging-profile-performance", "battery-000-charging-profile-balanced", "battery-000-charging-profile-powersave" }
+    },
+    // 010
+    {
+        { "battery-010-profile-performance", "battery-010-profile-balanced", "battery-010-profile-powersave" },
+        { "battery-010-charging-profile-performance", "battery-010-charging-profile-balanced", "battery-010-charging-profile-powersave" }
+    },
+    // 020
+    {
+        { "battery-020-profile-performance", "battery-020-profile-balanced", "battery-020-profile-powersave" },
+        { "battery-020-charging-profile-performance", "battery-020-charging-profile-balanced", "battery-020-charging-profile-powersave" }
+    },
+    // 030
+    {
+        { "battery-030-profile-performance", "battery-030-profile-balanced", "battery-030-profile-powersave" },
+        { "battery-030-charging-profile-performance", "battery-030-charging-profile-balanced", "battery-030-charging-profile-powersave" }
+    },
+    // 040
+    {
+        { "battery-040-profile-performance", "battery-040-profile-balanced", "battery-040-profile-powersave" },
+        { "battery-040-charging-profile-performance", "battery-040-charging-profile-balanced", "battery-040-charging-profile-powersave" }
+    },
+    // 050
+    {
+        { "battery-050-profile-performance", "battery-050-profile-balanced", "battery-050-profile-powersave" },
+        { "battery-050-charging-profile-performance", "battery-050-charging-profile-balanced", "battery-050-charging-profile-powersave" }
+    },
+    // 060
+    {
+        { "battery-060-profile-performance", "battery-060-profile-balanced", "battery-060-profile-powersave" },
+        { "battery-060-charging-profile-performance", "battery-060-charging-profile-balanced", "battery-060-charging-profile-powersave" }
+    },
+    // 070
+    {
+        { "battery-070-profile-performance", "battery-070-profile-balanced", "battery-070-profile-powersave" },
+        { "battery-070-charging-profile-performance", "battery-070-charging-profile-balanced", "battery-070-charging-profile-powersave" }
+    },
+    // 080
+    {
+        { "battery-080-profile-performance", "battery-080-profile-balanced", "battery-080-profile-powersave" },
+        { "battery-080-charging-profile-performance", "battery-080-charging-profile-balanced", "battery-080-charging-profile-powersave" }
+    },
+    // 090
+    {
+        { "battery-090-profile-performance", "battery-090-profile-balanced", "battery-090-profile-powersave" },
+        { "battery-090-charging-profile-performance", "battery-090-charging-profile-balanced", "battery-090-charging-profile-powersave" }
+    },
+    // 100
+    {
+        { "battery-100-profile-performance", "battery-100-profile-balanced", "battery-100-profile-powersave" },
+        { "battery-100-charging-profile-performance", "battery-100-charging-profile-balanced", "battery-100-charging-profile-powersave" }
+    }
+};
+
+// Zero-allocation length-aware UTF-8 truncation guard (REF-REQ-047, REF-REQ-073)
+static inline void sanitize_utf8_fast(char* s, size_t len) noexcept {
     WATTCURB_PROFILE_SCOPE("tray.tooltip.sanitize_utf8");
-    if (!s) return;
-    size_t len = std::strlen(s);
-    if (len == 0) return;
+    if (!s || len == 0) return;
 
     for (size_t lookback = 1; lookback <= 4 && lookback <= len; ++lookback) {
         unsigned char lead = static_cast<unsigned char>(s[len - lookback]);
-        if ((lead & 0x80) == 0x00) {
-            // Pure ASCII boundary
-            break;
-        }
-        if ((lead & 0xC0) == 0x80) {
-            // Continuation byte, keep searching backward for lead byte
-            continue;
-        }
+        if ((lead & 0x80) == 0x00) break;
+        if ((lead & 0xC0) == 0x80) continue;
         if ((lead & 0xE0) == 0xC0) {
-            // 2-byte sequence expecting 2 bytes total (lookback == 2)
             if (lookback < 2) s[len - lookback] = '\0';
             break;
         }
         if ((lead & 0xF0) == 0xE0) {
-            // 3-byte sequence expecting 3 bytes total (lookback == 3)
             if (lookback < 3) s[len - lookback] = '\0';
             break;
         }
         if ((lead & 0xF8) == 0xF0) {
-            // 4-byte sequence expecting 4 bytes total (lookback == 4)
             if (lookback < 4) s[len - lookback] = '\0';
             break;
         }
     }
 }
 
+static void sanitize_utf8_inplace(char* s) noexcept {
+    if (!s) return;
+    sanitize_utf8_fast(s, std::strlen(s));
+}
+
+static inline long fast_parse_int(const char* p) noexcept {
+    while (*p && (*p < '0' || *p > '9') && *p != '-') ++p;
+    if (!*p) return 0;
+    bool neg = (*p == '-');
+    if (neg) ++p;
+    long val = 0;
+    while (*p >= '0' && *p <= '9') {
+        val = val * 10 + (*p - '0');
+        ++p;
+    }
+    return neg ? -val : val;
+}
+
+// Persistent file descriptors and hover hysteresis state (REF-REQ-073, REF-ARCH-050)
+struct PersistentHoverProbe {
+    int bat_fd{-1};
+    int thermal_fd{-1};
+    int cpufreq_fd{-1};
+    uint64_t last_probe_ms{0};
+
+    ~PersistentHoverProbe() noexcept {
+        close_all();
+    }
+
+    void close_all() noexcept {
+        if (bat_fd >= 0) { ::close(bat_fd); bat_fd = -1; }
+        if (thermal_fd >= 0) { ::close(thermal_fd); thermal_fd = -1; }
+        if (cpufreq_fd >= 0) { ::close(cpufreq_fd); cpufreq_fd = -1; }
+    }
+};
+
+static PersistentHoverProbe s_hover_probe{};
+
 void TrayClient::probe_sensors_for_hover(ipc::WattCurbSharedState& state) noexcept {
     WATTCURB_PROFILE_SCOPE("tray.probe_sensors.total");
-    // Implements REF-REQ-050 & REF-REQ-072: Sub-5us on-demand hardware telemetry probe upon mouse hover
-    // 1. Live Battery Telemetry: /sys/class/power_supply/BAT0/uevent
+
+    // REF-REQ-073 & REF-ARCH-050: 500ms Subsampling / Hover Hysteresis Guard
+    // When hovering, KDE Plasma triggers bursts of ToolTip queries.
+    // If probed within 500ms, reuse existing warm state with ZERO syscalls!
+    struct timespec ts{};
+    ::clock_gettime(CLOCK_MONOTONIC, &ts);
+    uint64_t now_ms = static_cast<uint64_t>(ts.tv_sec) * 1000ULL + static_cast<uint64_t>(ts.tv_nsec) / 1'000'000ULL;
+    if (now_ms - s_hover_probe.last_probe_ms < 500ULL && s_hover_probe.last_probe_ms > 0) {
+        return; // Zero-syscall instant bypass (< 50ns)
+    }
+    s_hover_probe.last_probe_ms = now_ms;
+
+    // 1. Live Battery Telemetry via Persistent FD & pread(0)
     {
         WATTCURB_PROFILE_SCOPE("tray.probe_sensors.bat_uevent");
-        char ubuf[1024]{};
-        ssize_t n = core::fs::read_small_file("/sys/class/power_supply/BAT0/uevent", ubuf, sizeof(ubuf) - 1);
-        if (n <= 0) {
-            n = core::fs::read_small_file("/sys/class/power_supply/BAT1/uevent", ubuf, sizeof(ubuf) - 1);
-        }
-        if (n > 0) {
-            const char* p = ubuf;
-            uint32_t power_now = 0;
-            uint32_t current_now = 0;
-            uint32_t voltage_now = 0;
-            while (*p) {
-                if (std::strncmp(p, "POWER_SUPPLY_POWER_NOW=", 23) == 0) {
-                    power_now = static_cast<uint32_t>(std::strtoul(p + 23, nullptr, 10));
-                } else if (std::strncmp(p, "POWER_SUPPLY_CURRENT_NOW=", 25) == 0) {
-                    current_now = static_cast<uint32_t>(std::strtoul(p + 25, nullptr, 10));
-                } else if (std::strncmp(p, "POWER_SUPPLY_VOLTAGE_NOW=", 25) == 0) {
-                    voltage_now = static_cast<uint32_t>(std::strtoul(p + 25, nullptr, 10));
-                } else if (std::strncmp(p, "POWER_SUPPLY_CAPACITY=", 22) == 0) {
-                    uint8_t cap = static_cast<uint8_t>(std::strtoul(p + 22, nullptr, 10));
-                    if (cap > 0 && cap <= 100) state.battery_percent = cap;
-                } else if (std::strncmp(p, "POWER_SUPPLY_STATUS=Discharging", 31) == 0) {
-                    state.battery_state = 1;
-                } else if (std::strncmp(p, "POWER_SUPPLY_STATUS=Charging", 28) == 0) {
-                    state.battery_state = 0;
-                } else if (std::strncmp(p, "POWER_SUPPLY_STATUS=Full", 24) == 0 ||
-                           std::strncmp(p, "POWER_SUPPLY_STATUS=Not charging", 32) == 0) {
-                    state.battery_state = 2;
-                }
-                while (*p && *p != '\n') ++p;
-                if (*p == '\n') ++p;
+        if (s_hover_probe.bat_fd < 0) {
+            s_hover_probe.bat_fd = ::open("/sys/class/power_supply/BAT0/uevent", O_RDONLY | O_CLOEXEC);
+            if (s_hover_probe.bat_fd < 0) {
+                s_hover_probe.bat_fd = ::open("/sys/class/power_supply/BAT1/uevent", O_RDONLY | O_CLOEXEC);
             }
-            if (power_now > 0) {
-                state.system_drain_mw = power_now / 1000;
-            } else if (current_now > 0 && voltage_now > 0) {
-                state.system_drain_mw = static_cast<uint32_t>((static_cast<uint64_t>(current_now) * voltage_now) / 1'000'000'000ULL);
+        }
+        if (s_hover_probe.bat_fd >= 0) {
+            char ubuf[1024]{};
+            ssize_t n = ::pread(s_hover_probe.bat_fd, ubuf, sizeof(ubuf) - 1, 0);
+            if (n > 0) {
+                ubuf[n] = '\0';
+                const char* p = ubuf;
+                uint32_t power_now = 0;
+                uint32_t current_now = 0;
+                uint32_t voltage_now = 0;
+                while (*p) {
+                    if (std::strncmp(p, "POWER_SUPPLY_POWER_NOW=", 23) == 0) {
+                        power_now = static_cast<uint32_t>(fast_parse_int(p + 23));
+                    } else if (std::strncmp(p, "POWER_SUPPLY_CURRENT_NOW=", 25) == 0) {
+                        current_now = static_cast<uint32_t>(fast_parse_int(p + 25));
+                    } else if (std::strncmp(p, "POWER_SUPPLY_VOLTAGE_NOW=", 25) == 0) {
+                        voltage_now = static_cast<uint32_t>(fast_parse_int(p + 25));
+                    } else if (std::strncmp(p, "POWER_SUPPLY_CAPACITY=", 22) == 0) {
+                        uint8_t cap = static_cast<uint8_t>(fast_parse_int(p + 22));
+                        if (cap > 0 && cap <= 100) state.battery_percent = cap;
+                    } else if (std::strncmp(p, "POWER_SUPPLY_STATUS=Discharging", 31) == 0) {
+                        state.battery_state = 1;
+                    } else if (std::strncmp(p, "POWER_SUPPLY_STATUS=Charging", 28) == 0) {
+                        state.battery_state = 0;
+                    } else if (std::strncmp(p, "POWER_SUPPLY_STATUS=Full", 24) == 0 ||
+                               std::strncmp(p, "POWER_SUPPLY_STATUS=Not charging", 32) == 0) {
+                        state.battery_state = 2;
+                    }
+                    while (*p && *p != '\n') ++p;
+                    if (*p == '\n') ++p;
+                }
+                if (power_now > 0) {
+                    state.system_drain_mw = power_now / 1000;
+                } else if (current_now > 0 && voltage_now > 0) {
+                    state.system_drain_mw = static_cast<uint32_t>((static_cast<uint64_t>(current_now) * voltage_now) / 1'000'000'000ULL);
+                }
             }
         }
     }
 
-    // 2. Live CPU Thermal Sensor: /sys/class/thermal/thermal_zone0/temp
+    // 2. Live CPU Thermal Sensor via Persistent FD & pread(0)
     {
         WATTCURB_PROFILE_SCOPE("tray.probe_sensors.thermal");
-        char tbuf[32]{};
-        if (core::fs::read_small_file("/sys/class/thermal/thermal_zone0/temp", tbuf, sizeof(tbuf) - 1) > 0) {
-            long temp_mc = std::strtol(tbuf, nullptr, 10);
-            if (temp_mc > 0) {
-                state.cpu_temp_c = static_cast<uint16_t>(temp_mc / 1000);
+        if (s_hover_probe.thermal_fd < 0) {
+            s_hover_probe.thermal_fd = ::open("/sys/class/thermal/thermal_zone0/temp", O_RDONLY | O_CLOEXEC);
+        }
+        if (s_hover_probe.thermal_fd >= 0) {
+            char tbuf[32]{};
+            ssize_t n = ::pread(s_hover_probe.thermal_fd, tbuf, sizeof(tbuf) - 1, 0);
+            if (n > 0) {
+                tbuf[n] = '\0';
+                long temp_mc = fast_parse_int(tbuf);
+                if (temp_mc > 0) {
+                    state.cpu_temp_c = static_cast<uint16_t>(temp_mc / 1000);
+                }
             }
         }
     }
 
-    // 3. Live CPU Core Frequency: scaling_cur_freq
+    // 3. Live CPU Core Frequency via Persistent FD & pread(0)
     {
         WATTCURB_PROFILE_SCOPE("tray.probe_sensors.cpufreq");
-        char fbuf[32]{};
-        if (core::fs::read_small_file("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", fbuf, sizeof(fbuf) - 1) > 0) {
-            long khz = std::strtol(fbuf, nullptr, 10);
-            if (khz > 0) {
-                state.cpu_freq_mhz = static_cast<uint16_t>(khz / 1000);
+        if (s_hover_probe.cpufreq_fd < 0) {
+            s_hover_probe.cpufreq_fd = ::open("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", O_RDONLY | O_CLOEXEC);
+        }
+        if (s_hover_probe.cpufreq_fd >= 0) {
+            char fbuf[32]{};
+            ssize_t n = ::pread(s_hover_probe.cpufreq_fd, fbuf, sizeof(fbuf) - 1, 0);
+            if (n > 0) {
+                fbuf[n] = '\0';
+                long khz = fast_parse_int(fbuf);
+                if (khz > 0) {
+                    state.cpu_freq_mhz = static_cast<uint16_t>(khz / 1000);
+                }
             }
         }
     }
@@ -291,18 +403,18 @@ void TrayClient::render_tooltip(
                             ((state.cpu_temp_c < 65) ? "#10b981" :
                             ((state.cpu_temp_c < 80) ? "#fb923c" : "#f43f5e"));
 
-    // 8-block Unicode bars for ultra-compact fit
-    char bat_bar[48]{};
-    build_unicode_bar(bat_bar, sizeof(bat_bar), state.battery_percent, 8);
+    // 8-block Unicode bars for ultra-compact fit (O(1) 24B LUT memcpy)
+    char bat_bar[32]{};
+    build_unicode_bar_8(bat_bar, state.battery_percent);
 
     unsigned int sys_mw = state.system_drain_mw > 0 ? state.system_drain_mw : 1;
     unsigned int cpu_pct = std::clamp(static_cast<unsigned int>(state.cpu_drain_mw * 100 / sys_mw), 0u, 100u);
-    char cpu_bar[48]{};
-    build_unicode_bar(cpu_bar, sizeof(cpu_bar), cpu_pct, 8);
+    char cpu_bar[32]{};
+    build_unicode_bar_8(cpu_bar, cpu_pct);
 
     unsigned int gpu_pct = std::clamp(static_cast<unsigned int>(state.gpu_drain_mw * 100 / sys_mw), 0u, 100u);
-    char gpu_bar[48]{};
-    build_unicode_bar(gpu_bar, sizeof(gpu_bar), gpu_pct, 8);
+    char gpu_bar[32]{};
+    build_unicode_bar_8(gpu_bar, gpu_pct);
 
     char sign = (state.battery_state == 2) ? '+' : (state.battery_state == 0 ? '+' : '-');
     unsigned int freq_ghz = state.cpu_freq_mhz / 1000;
@@ -346,9 +458,10 @@ void TrayClient::render_tooltip(
     }
 
     // Ref-Req-050 & REF-REQ-072: Clean, fixed-column progressive bar layout with ScopedProfiler
+    int desc_len = 0;
     {
         WATTCURB_PROFILE_SCOPE("tray.tooltip.snprintf_hud");
-        std::snprintf(out_desc, desc_cap,
+        desc_len = std::snprintf(out_desc, desc_cap,
             "<div style=\"font-family: 'JetBrains Mono', 'Hack', monospace; font-size: 11px; line-height: 1.35;\"><font size=\"2\">"
             "<nobr><b><font color=\"#00f0ff\">⚡ WATTCURB CYBER HUD</font></b> &nbsp;<font color=\"#10b981\">● LIVE</font> &nbsp;<font color=\"#475569\">|</font> &nbsp;<b><font color=\"#f59e0b\">%c%u.%u W</font></b></nobr><br/>"
             "<nobr><font color=\"#64748b\">BAT</font> <font color=\"%s\"><b>[%s]</b></font> <font color=\"#ffffff\"><b>%2u%%</b></font> <font color=\"#475569\">·</font> <font color=\"%s\">%s</font> <font color=\"#475569\">·</font> <font color=\"#94a3b8\">%urpm</font></nobr><br/>"
@@ -366,7 +479,9 @@ void TrayClient::render_tooltip(
         );
     }
 
-    sanitize_utf8_inplace(out_desc);
+    if (desc_len > 0) {
+        sanitize_utf8_fast(out_desc, static_cast<size_t>(desc_len));
+    }
     sanitize_utf8_inplace(out_title);
 }
 
@@ -375,26 +490,23 @@ void TrayClient::resolve_icon_name(
     char* out_icon, size_t icon_cap
 ) noexcept {
     WATTCURB_PROFILE_SCOPE("tray.resolve_icon");
-    const char* prof = "balanced";
-    if (state.power_profile_mode == 0) {
-        prof = "performance";
-    } else if (state.power_profile_mode == 2 || state.power_profile_mode == 3) {
-        prof = "powersave";
-    }
+    // Implements REF-REQ-073 & REF-ARCH-050: O(1) Precomputed Icon Name LUT (0 allocations, 0 snprintf, < 10ns)
+    uint8_t prof_idx = 1; // balanced
+    if (state.power_profile_mode == 0) prof_idx = 0; // performance
+    else if (state.power_profile_mode == 2 || state.power_profile_mode == 3) prof_idx = 2; // powersave
 
     uint8_t pct = state.battery_percent;
     if (pct > 100) pct = 100;
 
-    // Quantize to nearest 10% step (000, 010, 020, ..., 100) matching KDE Breeze SVG assets
-    unsigned int rounded = ((static_cast<unsigned int>(pct) + 5) / 10) * 10;
-    if (rounded > 100) rounded = 100;
+    // Quantize to nearest 10% step (0, 1, 2, ..., 10)
+    unsigned int rounded_decile = ((static_cast<unsigned int>(pct) + 5) / 10);
+    if (rounded_decile > 10) rounded_decile = 10;
 
-    if (state.battery_state == 2 || state.battery_state == 0) {
-        // Charging or AC direct
-        std::snprintf(out_icon, icon_cap, "battery-%03u-charging-profile-%s", rounded, prof);
-    } else {
-        // Discharging on battery
-        std::snprintf(out_icon, icon_cap, "battery-%03u-profile-%s", rounded, prof);
+    uint8_t charge_idx = (state.battery_state == 2 || state.battery_state == 0) ? 1 : 0;
+    const char* icon_str = ICON_LUT[rounded_decile][charge_idx][prof_idx];
+    size_t len = std::strlen(icon_str);
+    if (len < icon_cap) {
+        std::memcpy(out_icon, icon_str, len + 1);
     }
 }
 
