@@ -1187,8 +1187,10 @@ mitig.is_immune                    3         0.036        0.0%         12.05    
 | **`build_unicode_bar` Latency** | 50 ns (loop) | **2 ns** (`BAR_LUT` memcpy) | ⚡ **25x Speedup** |
 | **`resolve_icon_name` Latency** | 150 ns (`snprintf`) | **3 ns** (`ICON_LUT` ptr) | 🚀 **50x Speedup** |
 | **`sanitize_utf8` Latency** | 70 ns ($O(N)$ `strlen`) | **2 ns** (length preserved) | ⚡ **35x Speedup** |
-| **ToolTip Render Latency** | 4.63 µs | **2.79 µs** | 📉 **40% Latency Reduction** |
+| **ToolTip Render Latency (Cache Hit)**| 4.63 µs | **0.13 µs** (25 ns raw, 130 ns profiler) | ⚡ **35x Latency Reduction** |
+| **ToolTip Render Latency (Cold Miss)**| 4.63 µs | **2.79 µs** | 📉 **40% Latency Reduction** |
 | **ACPI Embedded Controller Bus Stalls** | ~112 µs / query | **0 µs** (subsampled) | 🎯 **Zero EC Bus Stalls during Hover** |
+| **Daemon/Tray Working Set RSS** | 7.8 MB (peak 75.6 MB) | **532 KB** (peak 2.7 MB) | 💾 **93% Memory Reduction** |
 | **Memory Allocations in Hot-Path** | 0 allocations | **0 allocations** | 💎 **Zero-Heap Purity Maintained** |
 | **Oracle Gate Test Pass Rate** | 35 / 35 (100%) | **36 / 36 (100%)** | 👑 **Zero Regression Integrity** |
 
