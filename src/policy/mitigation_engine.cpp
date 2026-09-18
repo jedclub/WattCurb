@@ -217,9 +217,6 @@ void MitigationEngine::restore_hardware_baseline() noexcept {
     set_smt_control(s_hardware_baseline.smt_control);
     set_bluetooth_blocked(s_hardware_baseline.bluetooth_blocked);
     restore_display_backlight();
-    if (s_hardware_baseline.drrs_applied) {
-        set_display_refresh_rate(60);
-    }
     if (s_hardware_baseline.kwin_blur_unloaded) {
         set_kwin_effects_suspended(false);
     }
@@ -443,7 +440,6 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_smt_control(s_hardware_baseline.smt_control);
         set_bluetooth_blocked(s_hardware_baseline.bluetooth_blocked);
         restore_display_backlight();
-        if (s_hardware_baseline.drrs_applied) set_display_refresh_rate(60);
         if (s_hardware_baseline.kwin_blur_unloaded) set_kwin_effects_suspended(false);
         if (s_hardware_baseline.baloo_suspended) set_baloo_suspended(false);
         restore_wifi_txpower();
@@ -465,7 +461,6 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_smt_control(s_hardware_baseline.smt_control);
         set_bluetooth_blocked(s_hardware_baseline.bluetooth_blocked);
         restore_display_backlight();
-        if (s_hardware_baseline.drrs_applied) set_display_refresh_rate(60);
         if (s_hardware_baseline.kwin_blur_unloaded) set_kwin_effects_suspended(false);
         if (s_hardware_baseline.baloo_suspended) set_baloo_suspended(false);
         restore_wifi_txpower();
@@ -485,7 +480,6 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_smt_control(s_hardware_baseline.smt_control);
         set_bluetooth_blocked(s_hardware_baseline.bluetooth_blocked);
         restore_display_backlight();
-        if (s_hardware_baseline.drrs_applied) set_display_refresh_rate(60);
         if (s_hardware_baseline.kwin_blur_unloaded) set_kwin_effects_suspended(false);
         if (s_hardware_baseline.baloo_suspended) set_baloo_suspended(false);
         restore_wifi_txpower();
@@ -506,7 +500,7 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_smt_control("off");
         set_bluetooth_blocked(false); // REF-REQ-065: Bluetooth Always-On Invariant
         cap_display_backlight(35.0);
-        set_display_refresh_rate(48);
+        // Refresh rate modification completely removed to eliminate display modeset flicker (REF-REQ-066)
         set_kwin_effects_suspended(true);
         set_baloo_suspended(true);
         set_wifi_txpower_limit(1200); // REF-REQ-064: Cap Wi-Fi Tx to 12.00 dBm (16mW RF)
@@ -1233,14 +1227,9 @@ static bool execute_user_desktop_cmd(const char* cmd_body) noexcept {
     return (ret == 0);
 }
 
-bool MitigationEngine::set_display_refresh_rate(uint32_t hz) noexcept {
-    if (hz <= 50) {
-        s_hardware_baseline.drrs_applied = true;
-        return execute_user_desktop_cmd("kscreen-doctor output.1.mode.2");
-    } else {
-        s_hardware_baseline.drrs_applied = false;
-        return execute_user_desktop_cmd("kscreen-doctor output.1.mode.1");
-    }
+bool MitigationEngine::set_display_refresh_rate(uint32_t /*hz*/) noexcept {
+    // Disabled: display modeset via kscreen-doctor causes intrusive screen blackout and flickering (REF-REQ-066)
+    return false;
 }
 
 bool MitigationEngine::set_kwin_effects_suspended(bool suspend) noexcept {
