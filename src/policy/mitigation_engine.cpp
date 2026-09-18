@@ -502,9 +502,9 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_panel_power_savings(2);
         set_cpu_epp_policy("power");
         set_gpu_max_clock(640); // 40% GPU clock cap (640MHz of 1600MHz)
-        // REF-REQ-063, REF-REQ-064: Ultra-low power hardware & desktop extensions
+        // REF-REQ-063, REF-REQ-064, REF-REQ-065: Ultra-low power hardware & desktop extensions
         set_smt_control("off");
-        set_bluetooth_blocked(true);
+        set_bluetooth_blocked(false); // REF-REQ-065: Bluetooth Always-On Invariant
         cap_display_backlight(35.0);
         set_display_refresh_rate(48);
         set_kwin_effects_suspended(true);
@@ -1120,6 +1120,8 @@ bool MitigationEngine::set_smt_control(const char* state) noexcept {
     return (w > 0);
 }
 
+static bool execute_user_desktop_cmd(const char* cmd_body) noexcept;
+
 bool MitigationEngine::set_bluetooth_blocked(bool block) noexcept {
     const char* val = block ? "1\n" : "0\n";
     bool any = false;
@@ -1139,6 +1141,10 @@ bool MitigationEngine::set_bluetooth_blocked(bool block) noexcept {
                 }
             }
         }
+    }
+    if (!block) {
+        // Guarantee adapter power on when unblocked (REF-REQ-065)
+        execute_user_desktop_cmd("bluetoothctl power on 2>/dev/null &");
     }
     return any;
 }
