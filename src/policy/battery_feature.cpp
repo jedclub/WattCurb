@@ -233,6 +233,11 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
     PowerProfileMode eff_profile = PowerProfileMode::Balanced;
     if (m_profile_override.has_value()) {
         eff_profile = *m_profile_override;
+        // REF-REQ-067: Battery <= 20% Performance Mode Lockout Invariant
+        if (eff_profile == PowerProfileMode::Performance && on_battery && battery_pct <= 20.0) {
+            eff_profile = PowerProfileMode::Balanced;
+            m_profile_override = PowerProfileMode::Balanced;
+        }
     } else if (on_battery) {
         if (battery_pct < 20.0) {
             eff_profile = PowerProfileMode::UltraEndurance;

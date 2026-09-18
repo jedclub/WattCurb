@@ -2242,6 +2242,36 @@ void test_wifi_txpower_and_platform_loss_decomposition() {
     std::cout << " [PASS] test_wifi_txpower_and_platform_loss_decomposition (REF-TEST-029 verified)\n";
 }
 
+void test_battery_low_performance_lockout() {
+    using namespace wattcurb::policy;
+    using wattcurb::PowerProfileMode;
+    FeatureManager fm;
+
+    // Test 1: On battery discharging at 19% (<=20%) with Performance override requested
+    fm.set_override_profile(PowerProfileMode::Performance);
+    wattcurb::AnalysisReportData report{};
+    auto status1 = fm.evaluate_and_actuate(report, true, 19.0);
+    assert(status1.current_profile == PowerProfileMode::Balanced && "Performance mode must be demoted to Balanced when discharging on battery <= 20%");
+    assert(fm.override_profile().has_value() && *fm.override_profile() == PowerProfileMode::Balanced && "Internal override must reflect demotion to Balanced");
+
+    // Test 2: Exactly 20.0% boundary condition
+    fm.set_override_profile(PowerProfileMode::Performance);
+    auto status2 = fm.evaluate_and_actuate(report, true, 20.0);
+    assert(status2.current_profile == PowerProfileMode::Balanced && "20.0% boundary must also enforce lockout");
+
+    // Test 3: On battery at 21.0% (>20%) with Performance override
+    fm.set_override_profile(PowerProfileMode::Performance);
+    auto status3 = fm.evaluate_and_actuate(report, true, 21.0);
+    assert(status3.current_profile == PowerProfileMode::Performance && "Performance mode must be permitted when battery > 20%");
+
+    // Test 4: Connected to AC power (on_battery == false) even when battery is critically low (10%)
+    fm.set_override_profile(PowerProfileMode::Performance);
+    auto status4 = fm.evaluate_and_actuate(report, false, 10.0);
+    assert(status4.current_profile == PowerProfileMode::Performance && "Performance mode must be permitted on external AC power regardless of battery level");
+
+    std::cout << " [PASS] test_battery_low_performance_lockout (REF-TEST-032: <=20% demotion & AC bypass verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -2267,6 +2297,7 @@ int main() {
     test::test_circular_power_share_visualization();
     test::test_ultra_endurance_extensions();
     test::test_wifi_txpower_and_platform_loss_decomposition();
+    test::test_battery_low_performance_lockout();
     test::test_process_classifier();
     test::test_mitigation_engine();
     test::test_adaptive_mitigation_and_rollback();

@@ -374,6 +374,12 @@ void DashboardBackend::sendDaemonCommand(const char* cmd) noexcept {
 
 void DashboardBackend::setProfile(int mode) {
     if (mode < 0 || mode > 3) return;
+
+    // REF-REQ-067: Battery <= 20% Performance Mode Lockout Invariant
+    if (mode == 0 && batteryState() == 1 && batteryPercent() <= 20) {
+        return;
+    }
+
     local_override_mode_ = mode;
 
     char cmd[32];

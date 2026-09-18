@@ -258,6 +258,24 @@ void DaemonRunner::process_observation_cycle() {
         WATTCURB_PROFILE_SCOPE("daemon.evaluate_and_actuate");
         bool on_battery = cached_report_.hardware.is_battery_discharging;
         double batt_pct = static_cast<double>(cached_report_.hardware.battery_capacity_percent);
+
+        // REF-REQ-067: Active Lockout and Demotion of Performance Mode
+        if (on_battery && batt_pct <= 20.0) {
+            if (feature_manager_.override_profile() == PowerProfileMode::Performance ||
+                cached_report_.mitigation_status.current_profile == PowerProfileMode::Performance) {
+                feature_manager_.set_override_profile(PowerProfileMode::Balanced);
+                policy::MitigationEngine::apply_power_profile(PowerProfileMode::Balanced);
+                EventLogger::log_alert("BATTERY", "Performance mode automatically demoted to Balanced: Battery capacity <= 20% (REF-REQ-067)");
+
+                int mode_fd = ::open("/home/jedclub/.cache/power_profile_mode", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
+                if (mode_fd >= 0) {
+                    ::fchmod(mode_fd, 0666);
+                    (void)::write(mode_fd, "balanced\n", 9);
+                    ::close(mode_fd);
+                }
+            }
+        }
+
         feature_manager_.evaluate_and_actuate(cached_report_, on_battery, batt_pct);
     }
 
@@ -511,6 +529,18 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
         int mode_val = req[8] - '0';
         if (mode_val >= 0 && mode_val <= 3) {
             auto new_mode = static_cast<PowerProfileMode>(mode_val);
+
+            // REF-REQ-067: Battery <= 20% Performance Mode Lockout Invariant
+            bool is_discharging = cached_report_.hardware.is_battery_discharging;
+            uint32_t batt_pct = cached_report_.hardware.battery_capacity_percent;
+            if (new_mode == PowerProfileMode::Performance && is_discharging && batt_pct <= 20) {
+                const char reject[] = "ERROR: Performance mode is prohibited when battery <= 20% (REF-REQ-067)\n";
+                ::sendto(fd, reject, sizeof(reject) - 1, 0,
+                         reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+                EventLogger::log_alert("BATTERY", "Performance mode switch rejected: Battery capacity <= 20% (REF-REQ-067)");
+                return;
+            }
+
             feature_manager_.set_override_profile(new_mode);
             local_shared_state_.power_profile_mode = static_cast<uint8_t>(new_mode);
             cached_report_.mitigation_status.current_profile = new_mode;

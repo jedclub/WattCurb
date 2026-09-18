@@ -1264,13 +1264,21 @@ ApplicationWindow {
 
                 Text { text: "PROFILES:"; color: root.textDim; font.bold: true; font.pixelSize: 11 }
 
-                // Performance Mode
+                // Performance Mode (REF-REQ-067: Locked out when battery <= 20%)
                 Button {
+                    id: btnPerf
                     text: "⚡ Performance (4.1G)"
                     highlighted: backend.powerProfileMode === 0
+                    enabled: !(backend.batteryState === 1 && backend.batteryPercent <= 20)
+                    opacity: enabled ? 1.0 : 0.4
                     font.pixelSize: 11
                     font.bold: true
-                    onClicked: backend.setProfile(0)
+                    onClicked: {
+                        if (backend.batteryState === 1 && backend.batteryPercent <= 20) return;
+                        backend.setProfile(0)
+                    }
+                    ToolTip.visible: hovered && (backend.batteryState === 1 && backend.batteryPercent <= 20)
+                    ToolTip.text: "배터리 20% 이하에서는 배터리 보호를 위해 고성능 모드를 사용할 수 없습니다 (REF-REQ-067)"
                 }
 
                 // Balanced Mode

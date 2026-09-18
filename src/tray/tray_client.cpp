@@ -413,6 +413,11 @@ void TrayClient::cycle_power_profile() noexcept {
     read_state(state);
 
     auto next_mode = static_cast<uint8_t>((state.power_profile_mode + 1) % 4);
+    // REF-REQ-067: Skip Performance mode when discharging on battery <= 20%
+    if (next_mode == 0 && state.battery_state == 1 && state.battery_percent <= 20) {
+        next_mode = 1; // Skip Performance, advance directly to Balanced
+    }
+
     char cmd[16];
     std::snprintf(cmd, sizeof(cmd), "PROFILE %u\n", next_mode);
     send_daemon_command(cmd);
@@ -897,6 +902,14 @@ int TrayClient::dbusmenu_method_event(sd_bus_message* msg, void* userdata, sd_bu
         }
 
         if (selected_mode >= 0) {
+            // REF-REQ-067: Lockout Performance mode when battery <= 20%
+            ipc::WattCurbSharedState st{};
+            self->read_state(st);
+            if (selected_mode == 0 && st.battery_state == 1 && st.battery_percent <= 20) {
+                selected_mode = 1;
+                hw_mode = "balanced";
+            }
+
             self->local_override_mode_ = selected_mode;
             char cmd[16];
             std::snprintf(cmd, sizeof(cmd), "PROFILE %d\n", selected_mode);
