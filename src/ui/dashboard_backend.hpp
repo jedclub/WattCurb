@@ -168,6 +168,10 @@ public:
     Q_INVOKABLE void openSystemMonitor();
     Q_INVOKABLE void refreshNow();
 
+    // Test & Benchmark helpers (REF-REQ-074, REF-TEST-039)
+    void runPollIteration() noexcept;
+    bool ingestTelemetryJson(const std::string& json_str) noexcept;
+
 signals:
     void telemetryChanged();
     void profileChanged();
@@ -240,6 +244,15 @@ private:
     QVariantList process_list_{};
 
     // Power Share Decomposition (REF-REQ-060, REF-ARCH-036)
+    struct ProcessShareSummary {
+        int pid{0};
+        QString comm;
+        double total_watts{0.0};
+    };
+    std::vector<ProcessShareSummary> cached_proc_summaries_{};
+    double cached_proc_sum_{0.0};
+    uint64_t prev_seq_version_{0};
+
     QVariantList device_power_shares_{};
     QVariantList process_power_shares_{};
     double total_device_w_{0.0};

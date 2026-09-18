@@ -1,5 +1,6 @@
 #include "ui/dashboard_backend.hpp"
 #include "core/singleton_lock.hpp"
+#include "core/scoped_profiler.hpp"
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -73,96 +74,140 @@ void DashboardBackend::unmapSharedMemory() noexcept {
     }
 }
 
+void DashboardBackend::runPollIteration() noexcept {
+    onPollTimer();
+}
+
 void DashboardBackend::onPollTimer() {
+    WATTCURB_PROFILE_SCOPE("dashboard.poll.total");
+
     if (!shm_state_) {
         mapSharedMemory();
     }
 
+    bool state_changed = false;
+    uint64_t cur_seq = 0;
     if (shm_state_) {
+        WATTCURB_PROFILE_SCOPE("dashboard.shm.read");
         ipc::WattCurbSharedState cur{};
         if (shm_state_->read_atomic(cur)) {
-            latest_state_ = cur;
-            if (local_override_mode_ >= 0) {
-                latest_state_.power_profile_mode = static_cast<uint8_t>(local_override_mode_);
+            cur_seq = cur.seq_version;
+            if (cur_seq != prev_seq_version_ || latest_state_.system_drain_mw != cur.system_drain_mw) {
+                state_changed = true;
+                latest_state_ = cur;
+                if (local_override_mode_ >= 0) {
+                    latest_state_.power_profile_mode = static_cast<uint8_t>(local_override_mode_);
+                }
             }
         }
     }
 
-    if (!queryDaemonTelemetry()) {
+    // REF-REQ-074 & REF-ARCH-051: Seqlock Delta-Gated IPC Querying
+    // Only query FULL_TELEMETRY over Unix domain socket when daemon state actually changes or on initial start
+    bool telemetry_queried = false;
+    if (state_changed || prev_seq_version_ == 0) {
+        telemetry_queried = queryDaemonTelemetry();
+        prev_seq_version_ = cur_seq;
+    }
+    if (!telemetry_queried && process_list_.isEmpty()) {
         updateFallbackTelemetry();
     }
 
     last_update_time_ = QDateTime::currentDateTime().toString("hh:mm:ss");
 
     // Update live history sliding windows (35 samples)
-    double cur_sys_w = systemDrainWatts();
-    double cur_cpu_w = cpuDrainWatts();
-    double cur_gpu_w = gpuDrainWatts();
+    {
+        WATTCURB_PROFILE_SCOPE("dashboard.history.update");
+        double cur_sys_w = systemDrainWatts();
+        double cur_cpu_w = cpuDrainWatts();
+        double cur_gpu_w = gpuDrainWatts();
 
-    if (cur_sys_w > peak_system_w_) {
-        peak_system_w_ = cur_sys_w;
+        if (cur_sys_w > peak_system_w_) {
+            peak_system_w_ = cur_sys_w;
+        }
+
+        system_history_.append(cur_sys_w);
+        cpu_history_.append(cur_cpu_w);
+        gpu_history_.append(cur_gpu_w);
+
+        while (system_history_.size() > 35) system_history_.removeFirst();
+        while (cpu_history_.size() > 35) cpu_history_.removeFirst();
+        while (gpu_history_.size() > 35) gpu_history_.removeFirst();
     }
 
-    system_history_.append(cur_sys_w);
-    cpu_history_.append(cur_cpu_w);
-    gpu_history_.append(cur_gpu_w);
+    // Power shares decomposition
+    {
+        WATTCURB_PROFILE_SCOPE("dashboard.power_shares.total");
+        update_power_shares();
+    }
 
-    while (system_history_.size() > 35) system_history_.removeFirst();
-    while (cpu_history_.size() > 35) cpu_history_.removeFirst();
-    while (gpu_history_.size() > 35) gpu_history_.removeFirst();
-
-    update_power_shares();
-
-    emit telemetryChanged();
-    emit processListChanged();
-    emit historyChanged();
-    emit powerSharesChanged();
+    // Delta-guarded signal emission (avoid triggering heavy QML re-renders if nothing changed)
+    {
+        WATTCURB_PROFILE_SCOPE("dashboard.qml.signal_emit");
+        if (state_changed || prev_seq_version_ == 0) {
+            emit telemetryChanged();
+            emit processListChanged();
+        }
+        emit historyChanged();
+        emit powerSharesChanged();
+    }
 }
 
 bool DashboardBackend::queryDaemonTelemetry() noexcept {
+    WATTCURB_PROFILE_SCOPE("dashboard.daemon.query_ipc");
     std::string resp;
     if (!core::SingletonLock::query_daemon("FULL_TELEMETRY\n", resp, "wattcurb.lock", 300)) {
         return false;
     }
+    return ingestTelemetryJson(resp);
+}
 
-    QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(resp));
-    if (!doc.isObject()) return false;
+bool DashboardBackend::ingestTelemetryJson(const std::string& resp) noexcept {
+    QJsonDocument doc;
+    {
+        WATTCURB_PROFILE_SCOPE("dashboard.json.parse");
+        doc = QJsonDocument::fromJson(QByteArray::fromStdString(resp));
+        if (!doc.isObject()) return false;
+    }
 
     QJsonObject obj = doc.object();
-    battery_voltage_v_ = obj.value("battery_voltage_v").toDouble(11.49);
-    battery_current_a_ = obj.value("battery_current_a").toDouble(0.85);
-    battery_cycles_ = obj.value("battery_cycles").toInt(99);
-    battery_mfg_ = obj.value("battery_mfg").toString("SMP");
-    battery_model_ = obj.value("battery_model").toString("LNV-5B10W");
-    battery_tech_ = obj.value("battery_tech").toString("Li-poly");
-    battery_design_wh_ = obj.value("battery_design_wh").toDouble(45.28);
-    battery_full_wh_ = obj.value("battery_full_wh").toDouble(42.65);
-    battery_now_wh_ = obj.value("battery_now_wh").toDouble(31.91);
+    {
+        WATTCURB_PROFILE_SCOPE("dashboard.json.extract_fields");
+        battery_voltage_v_ = obj.value("battery_voltage_v").toDouble(11.49);
+        battery_current_a_ = obj.value("battery_current_a").toDouble(0.85);
+        battery_cycles_ = obj.value("battery_cycles").toInt(99);
+        battery_mfg_ = obj.value("battery_mfg").toString("SMP");
+        battery_model_ = obj.value("battery_model").toString("LNV-5B10W");
+        battery_tech_ = obj.value("battery_tech").toString("Li-poly");
+        battery_design_wh_ = obj.value("battery_design_wh").toDouble(45.28);
+        battery_full_wh_ = obj.value("battery_full_wh").toDouble(42.65);
+        battery_now_wh_ = obj.value("battery_now_wh").toDouble(31.91);
 
-    cpu_core_w_ = obj.value("cpu_core_w").toDouble(2.45);
-    cpu_uncore_w_ = obj.value("cpu_uncore_w").toDouble(0.82);
-    cpu_dram_w_ = obj.value("cpu_dram_w").toDouble(0.95);
-    cpu_freq_mhz_ = static_cast<int>(obj.value("cpu_freq_mhz").toDouble(2400.0));
-    cpu_governor_ = obj.value("cpu_governor").toString("powersave");
-    cstate_c0_ = obj.value("cstate_c0").toDouble(3.0);
-    cstate_c1_ = obj.value("cstate_c1").toDouble(14.0);
-    cstate_c2_ = obj.value("cstate_c2").toDouble(20.0);
-    cstate_c3_ = obj.value("cstate_c3").toDouble(63.0);
+        cpu_core_w_ = obj.value("cpu_core_w").toDouble(2.45);
+        cpu_uncore_w_ = obj.value("cpu_uncore_w").toDouble(0.82);
+        cpu_dram_w_ = obj.value("cpu_dram_w").toDouble(0.95);
+        cpu_freq_mhz_ = static_cast<int>(obj.value("cpu_freq_mhz").toDouble(2400.0));
+        cpu_governor_ = obj.value("cpu_governor").toString("powersave");
+        cstate_c0_ = obj.value("cstate_c0").toDouble(3.0);
+        cstate_c1_ = obj.value("cstate_c1").toDouble(14.0);
+        cstate_c2_ = obj.value("cstate_c2").toDouble(20.0);
+        cstate_c3_ = obj.value("cstate_c3").toDouble(63.0);
 
-    pmu_ipc_ = obj.value("pmu_ipc").toDouble(1.45);
-    pmu_instructions_ = obj.value("pmu_instructions").toInteger(45000000);
-    pmu_cycles_ = obj.value("pmu_cycles").toInteger(31000000);
-    pmu_llc_misses_ = obj.value("pmu_llc_misses").toInteger(1200);
-    pmu_branch_misses_ = obj.value("pmu_branch_misses").toInteger(4500);
-    pmu_ewr_ = obj.value("pmu_ewr").toDouble(8.5);
+        pmu_ipc_ = obj.value("pmu_ipc").toDouble(1.45);
+        pmu_instructions_ = obj.value("pmu_instructions").toInteger(45000000);
+        pmu_cycles_ = obj.value("pmu_cycles").toInteger(31000000);
+        pmu_llc_misses_ = obj.value("pmu_llc_misses").toInteger(1200);
+        pmu_branch_misses_ = obj.value("pmu_branch_misses").toInteger(4500);
+        pmu_ewr_ = obj.value("pmu_ewr").toDouble(8.5);
 
-    gpu_load_pct_ = obj.value("gpu_load").toInt(0);
-    display_drain_w_ = obj.value("display_w").toDouble(1.8);
-    display_brightness_pct_ = static_cast<int>(obj.value("display_brightness").toDouble(50.0));
-    nvme_drain_w_ = obj.value("nvme_w").toDouble(0.8);
-    disk_read_mb_s_ = obj.value("disk_read_mb_s").toDouble(0.0);
-    disk_write_mb_s_ = obj.value("disk_write_mb_s").toDouble(0.1);
-    aspm_policy_ = obj.value("aspm_policy").toString("powersave");
+        gpu_load_pct_ = obj.value("gpu_load").toInt(0);
+        display_drain_w_ = obj.value("display_w").toDouble(1.8);
+        display_brightness_pct_ = static_cast<int>(obj.value("display_brightness").toDouble(50.0));
+        nvme_drain_w_ = obj.value("nvme_w").toDouble(0.8);
+        disk_read_mb_s_ = obj.value("disk_read_mb_s").toDouble(0.0);
+        disk_write_mb_s_ = obj.value("disk_write_mb_s").toDouble(0.1);
+        aspm_policy_ = obj.value("aspm_policy").toString("powersave");
+    }
 
     double total_sys_w = obj.value("system_watts").toDouble(systemDrainWatts());
 
@@ -170,50 +215,63 @@ bool DashboardBackend::queryDaemonTelemetry() noexcept {
     QVariantList new_list;
     new_list.reserve(std::min<qsizetype>(proc_arr.size(), 25));
 
-    for (const auto& item_val : proc_arr) {
-        if (new_list.size() >= 25) break; // Top 25 processes are sufficient for visible matrix
-        QJsonObject p = item_val.toObject();
-        QVariantMap map;
-        map["pid"] = p.value("pid").toInt();
-        map["comm"] = p.value("comm").toString();
-        map["uid"] = p.value("uid").toInt();
-        double w = p.value("total_w").toDouble();
-        map["totalWatts"] = w;
-        map["cpuWatts"] = p.value("cpu_w").toDouble();
-        map["gpuWatts"] = p.value("gpu_w").toDouble();
-        map["dramWatts"] = p.value("dram_w").toDouble();
-        map["ioWakeWatts"] = p.value("io_wake_w").toDouble();
-        map["ioWatts"] = p.value("io_w").toDouble();
-        map["wakeTaxWatts"] = p.value("wake_tax_w").toDouble();
-        map["fanWatts"] = p.value("fan_w").toDouble();
-        map["wifiWatts"] = p.value("wifi_w").toDouble();
-        map["wdiScore"] = p.value("wdi_score").toDouble();
-        map["pssMb"] = p.value("pss_mb").toInt();
-        map["tier"] = p.value("tier").toInt();
-        map["cpuCore"] = p.value("cpu_core").toInt();
-        map["threads"] = p.value("threads").toInt(1);
-        map["crossCcx"] = p.value("cross_ccx").toInt(0);
-        map["nice"] = p.value("nice").toInt(0);
-        map["priority"] = p.value("priority").toInt(0);
-        map["wakeupsSec"] = p.value("wakeups_sec").toInteger(0);
-        map["timerslackNs"] = p.value("timerslack_ns").toInteger(50000);
-        map["vramMb"] = p.value("vram_mb").toDouble(0.0);
-        map["ioMbSec"] = p.value("io_mb_s").toDouble(0.0);
-        map["minfltSec"] = p.value("minflt_s").toInteger(0);
-        map["majfltSec"] = p.value("majflt_s").toInteger(0);
-        map["openSockets"] = p.value("open_sockets").toInt(0);
-        map["action"] = p.value("action").toInt(0);
-        map["domain"] = p.value("domain").toString();
-        map["mechanism"] = p.value("mechanism").toString();
-        
-        double pct = (total_sys_w > 0.0) ? std::min(100.0, (w / total_sys_w) * 100.0) : 0.0;
-        map["ratioPercent"] = pct;
+    cached_proc_summaries_.clear();
+    cached_proc_summaries_.reserve(25);
+    cached_proc_sum_ = 0.0;
 
-        new_list.append(map);
-    }
+    {
+        WATTCURB_PROFILE_SCOPE("dashboard.json.processes");
+        for (const auto& item_val : proc_arr) {
+            if (new_list.size() >= 25) break; // Top 25 processes are sufficient for visible matrix
+            QJsonObject p = item_val.toObject();
+            QVariantMap map;
+            int pid = p.value("pid").toInt();
+            QString comm = p.value("comm").toString();
+            map[QStringLiteral("pid")] = pid;
+            map[QStringLiteral("comm")] = comm;
+            map[QStringLiteral("uid")] = p.value("uid").toInt();
+            double w = p.value("total_w").toDouble();
+            map[QStringLiteral("totalWatts")] = w;
+            map[QStringLiteral("cpuWatts")] = p.value("cpu_w").toDouble();
+            map[QStringLiteral("gpuWatts")] = p.value("gpu_w").toDouble();
+            map[QStringLiteral("dramWatts")] = p.value("dram_w").toDouble();
+            map[QStringLiteral("ioWakeWatts")] = p.value("io_wake_w").toDouble();
+            map[QStringLiteral("ioWatts")] = p.value("io_w").toDouble();
+            map[QStringLiteral("wakeTaxWatts")] = p.value("wake_tax_w").toDouble();
+            map[QStringLiteral("fanWatts")] = p.value("fan_w").toDouble();
+            map[QStringLiteral("wifiWatts")] = p.value("wifi_w").toDouble();
+            map[QStringLiteral("wdiScore")] = p.value("wdi_score").toDouble();
+            map[QStringLiteral("pssMb")] = p.value("pss_mb").toInt();
+            map[QStringLiteral("tier")] = p.value("tier").toInt();
+            map[QStringLiteral("cpuCore")] = p.value("cpu_core").toInt();
+            map[QStringLiteral("threads")] = p.value("threads").toInt(1);
+            map[QStringLiteral("crossCcx")] = p.value("cross_ccx").toInt(0);
+            map[QStringLiteral("nice")] = p.value("nice").toInt(0);
+            map[QStringLiteral("priority")] = p.value("priority").toInt(0);
+            map[QStringLiteral("wakeupsSec")] = p.value("wakeups_sec").toInteger(0);
+            map[QStringLiteral("timerslackNs")] = p.value("timerslack_ns").toInteger(50000);
+            map[QStringLiteral("vramMb")] = p.value("vram_mb").toDouble(0.0);
+            map[QStringLiteral("ioMbSec")] = p.value("io_mb_s").toDouble(0.0);
+            map[QStringLiteral("minfltSec")] = p.value("minflt_s").toInteger(0);
+            map[QStringLiteral("majfltSec")] = p.value("majflt_s").toInteger(0);
+            map[QStringLiteral("openSockets")] = p.value("open_sockets").toInt(0);
+            map[QStringLiteral("action")] = p.value("action").toInt(0);
+            map[QStringLiteral("domain")] = p.value("domain").toString();
+            map[QStringLiteral("mechanism")] = p.value("mechanism").toString();
+            
+            double pct = (total_sys_w > 0.0) ? std::min(100.0, (w / total_sys_w) * 100.0) : 0.0;
+            map[QStringLiteral("ratioPercent")] = pct;
 
-    if (!new_list.isEmpty()) {
-        process_list_ = std::move(new_list);
+            new_list.append(map);
+
+            // Populate zero-copy process summary for power shares
+            cached_proc_summaries_.push_back(ProcessShareSummary{pid, comm, w});
+            cached_proc_sum_ += w;
+        }
+
+        if (!new_list.isEmpty()) {
+            process_list_ = std::move(new_list);
+        }
     }
 
     return true;
@@ -417,143 +475,141 @@ void DashboardBackend::refreshNow() {
 
 void DashboardBackend::update_power_shares() {
     // 1. Compute Hardware Device Shares (REF-REQ-060, REF-ARCH-036)
-    double sys_w = systemDrainWatts();
-    double cpu_w = cpuDrainWatts();
-    double gpu_w = gpuDrainWatts();
-    double disp_w = displayDrainWatts();
-    double nvme_w = nvmeDrainWatts();
-    double fan_w = fanRpm() > 0 ? (fanRpm() / 4000.0) * 0.9 : 0.0;
+    {
+        WATTCURB_PROFILE_SCOPE("dashboard.power_shares.device");
+        double sys_w = systemDrainWatts();
+        double cpu_w = cpuDrainWatts();
+        double gpu_w = gpuDrainWatts();
+        double disp_w = displayDrainWatts();
+        double nvme_w = nvmeDrainWatts();
+        double fan_w = fanRpm() > 0 ? (fanRpm() / 4000.0) * 0.9 : 0.0;
 
-    double known_w = cpu_w + gpu_w + disp_w + nvme_w + fan_w;
-    double plat_w = (sys_w > known_w) ? (sys_w - known_w) : 0.0;
-    double total_dev_w = std::max(known_w + plat_w, 0.1);
-    total_device_w_ = total_dev_w;
+        double known_w = cpu_w + gpu_w + disp_w + nvme_w + fan_w;
+        double plat_w = (sys_w > known_w) ? (sys_w - known_w) : 0.0;
+        double total_dev_w = std::max(known_w + plat_w, 0.1);
+        total_device_w_ = total_dev_w;
 
-    QVariantList dev_list;
-    auto add_dev = [&](const QString& name, double w, const QString& col) {
-        if (w < 0.001) return;
-        QVariantMap m;
-        m["name"] = name;
-        m["watts"] = w;
-        m["pct"] = std::min(100.0, (w / total_dev_w) * 100.0);
-        m["color"] = col;
-        dev_list.append(m);
-    };
-
-    add_dev(QStringLiteral("CPU Subsystem"), cpu_w, QStringLiteral("#00d2ff")); // Cyan
-    add_dev(QStringLiteral("GPU Silicon"), gpu_w, QStringLiteral("#a855f7"));   // Purple
-    add_dev(QStringLiteral("Display & Light"), disp_w, QStringLiteral("#f59e0b")); // Orange
-    add_dev(QStringLiteral("NVMe Storage"), nvme_w, QStringLiteral("#10b981")); // Emerald
-    if (fan_w > 0.05) {
-        add_dev(QStringLiteral("Cooling Fan"), fan_w, QStringLiteral("#3b82f6"));   // Blue
-    }
-    if (plat_w > 0.05) {
-        // Physical Constituent Decomposition of Platform & Loss (REF-REQ-064)
-        // 1. VRM Conversion Loss (9% of system power due to DC-DC buck converter efficiency ~91%)
-        double est_vrm = sys_w * 0.09;
-        // 2. DRAM Memory (16GB LPDDR5 tREFI periodic cell refresh + command/data bus)
-        double est_dram = 0.70 + std::min(0.25, (cpu_w * 0.05));
-        // 3. Wireless (Wi-Fi 6 + Bluetooth baseband & RF front-end standby/beacon)
-        double est_wifi = 0.35;
-        // 4. Motherboard & IO (EC controller, I2C bus, audio codec, PCIe bridge)
-        double est_mb = 0.15;
-
-        double est_sum = est_vrm + est_dram + est_wifi + est_mb;
-        double scale = (est_sum > 0.01) ? (plat_w / est_sum) : 1.0;
-
-        double vrm_w = est_vrm * scale;
-        double dram_w = est_dram * scale;
-        double wifi_w = est_wifi * scale;
-        double mb_w = plat_w - (vrm_w + dram_w + wifi_w);
-        if (mb_w < 0.01) {
-            mb_w = 0.01;
-            double rem = std::max(0.01, plat_w - mb_w);
-            double sub_sum = est_vrm + est_dram + est_wifi;
-            vrm_w = rem * (est_vrm / sub_sum);
-            dram_w = rem * (est_dram / sub_sum);
-            wifi_w = rem - vrm_w - dram_w;
-        }
-
-        add_dev(QStringLiteral("DRAM Memory"), dram_w, QStringLiteral("#38bdf8"));     // Light blue
-        add_dev(QStringLiteral("VRM Power Loss"), vrm_w, QStringLiteral("#f43f5e"));   // Rose red
-        add_dev(QStringLiteral("Wireless (Wi-Fi)"), wifi_w, QStringLiteral("#818cf8")); // Indigo
-        add_dev(QStringLiteral("Motherboard & IO"), mb_w, QStringLiteral("#94a3b8"));  // Slate
-    }
-    device_power_shares_ = dev_list;
-
-    // 2. Compute Process Power Shares (REF-REQ-060, REF-ARCH-036, REF-REQ-064)
-    QVariantList proc_list;
-    double proc_sum = 0.0;
-
-    if (!process_list_.isEmpty()) {
-        for (const auto& item : process_list_) {
-            proc_sum += item.toMap().value(QStringLiteral("totalWatts")).toDouble();
-        }
-    } else {
-        if (latest_state_.culprits[0].pid > 0) {
-            proc_sum += (latest_state_.culprits[0].drain_mw / 1000.0);
-        }
-        if (latest_state_.culprits[1].pid > 0) {
-            proc_sum += (latest_state_.culprits[1].drain_mw / 1000.0);
-        }
-    }
-
-    double total_proc_w = std::max(proc_sum, 0.1);
-    total_process_w_ = total_proc_w;
-
-    const QString proc_colors[] = {
-        QStringLiteral("#ef4444"), // Red (Top 1)
-        QStringLiteral("#f59e0b"), // Amber (Top 2)
-        QStringLiteral("#00d2ff"), // Cyan (Top 3)
-        QStringLiteral("#a855f7"), // Purple (Top 4)
-        QStringLiteral("#10b981"), // Emerald (Top 5)
-        QStringLiteral("#ec4899"), // Pink (Top 6)
-        QStringLiteral("#3b82f6")  // Blue (Top 7)
-    };
-
-    double top_sum = 0.0;
-    if (!process_list_.isEmpty()) {
-        int count = std::min<int>(7, static_cast<int>(process_list_.size()));
-        for (int i = 0; i < count; ++i) {
-            QVariantMap p = process_list_[i].toMap();
-            double w = p.value(QStringLiteral("totalWatts")).toDouble();
-            if (w < 0.001) continue;
-            top_sum += w;
+        QVariantList dev_list;
+        auto add_dev = [&](const QString& name, double w, const QString& col) {
+            if (w < 0.001) return;
             QVariantMap m;
-            m["name"] = p.value(QStringLiteral("comm")).toString();
-            m["pid"] = p.value(QStringLiteral("pid")).toInt();
-            m["watts"] = w;
-            m["pct"] = std::min(100.0, (w / total_proc_w) * 100.0);
-            m["color"] = proc_colors[i];
-            proc_list.append(m);
+            m[QStringLiteral("name")] = name;
+            m[QStringLiteral("watts")] = w;
+            m[QStringLiteral("pct")] = std::min(100.0, (w / total_dev_w) * 100.0);
+            m[QStringLiteral("color")] = col;
+            dev_list.append(m);
+        };
+
+        add_dev(QStringLiteral("CPU Subsystem"), cpu_w, QStringLiteral("#00d2ff")); // Cyan
+        add_dev(QStringLiteral("GPU Silicon"), gpu_w, QStringLiteral("#a855f7"));   // Purple
+        add_dev(QStringLiteral("Display & Light"), disp_w, QStringLiteral("#f59e0b")); // Orange
+        add_dev(QStringLiteral("NVMe Storage"), nvme_w, QStringLiteral("#10b981")); // Emerald
+        if (fan_w > 0.05) {
+            add_dev(QStringLiteral("Cooling Fan"), fan_w, QStringLiteral("#3b82f6"));   // Blue
         }
-    } else {
-        for (int i = 0; i < 2; ++i) {
-            if (latest_state_.culprits[i].pid > 0) {
-                double w = latest_state_.culprits[i].drain_mw / 1000.0;
-                top_sum += w;
-                QVariantMap m;
-                m["name"] = QString::fromUtf8(latest_state_.culprits[i].comm);
-                m["pid"] = latest_state_.culprits[i].pid;
-                m["watts"] = w;
-                m["pct"] = std::min(100.0, (w / total_proc_w) * 100.0);
-                m["color"] = proc_colors[i];
-                proc_list.append(m);
+        if (plat_w > 0.05) {
+            // Physical Constituent Decomposition of Platform & Loss (REF-REQ-064)
+            double est_vrm = sys_w * 0.09;
+            double est_dram = 0.70 + std::min(0.25, (cpu_w * 0.05));
+            double est_wifi = 0.35;
+            double est_mb = 0.15;
+
+            double est_sum = est_vrm + est_dram + est_wifi + est_mb;
+            double scale = (est_sum > 0.01) ? (plat_w / est_sum) : 1.0;
+
+            double vrm_w = est_vrm * scale;
+            double dram_w = est_dram * scale;
+            double wifi_w = est_wifi * scale;
+            double mb_w = plat_w - (vrm_w + dram_w + wifi_w);
+            if (mb_w < 0.01) {
+                mb_w = 0.01;
+                double rem = std::max(0.01, plat_w - mb_w);
+                double sub_sum = est_vrm + est_dram + est_wifi;
+                vrm_w = rem * (est_vrm / sub_sum);
+                dram_w = rem * (est_dram / sub_sum);
+                wifi_w = rem - vrm_w - dram_w;
+            }
+
+            add_dev(QStringLiteral("DRAM Memory"), dram_w, QStringLiteral("#38bdf8"));     // Light blue
+            add_dev(QStringLiteral("VRM Power Loss"), vrm_w, QStringLiteral("#f43f5e"));   // Rose red
+            add_dev(QStringLiteral("Wireless (Wi-Fi)"), wifi_w, QStringLiteral("#818cf8")); // Indigo
+            add_dev(QStringLiteral("Motherboard & IO"), mb_w, QStringLiteral("#94a3b8"));  // Slate
+        }
+        device_power_shares_ = dev_list;
+    }
+
+    // 2. Compute Process Power Shares - ZERO-COPY from cached_proc_summaries_ (REF-REQ-074, REF-ARCH-051)
+    {
+        WATTCURB_PROFILE_SCOPE("dashboard.power_shares.process");
+        QVariantList proc_list;
+        double proc_sum = cached_proc_sum_;
+
+        if (cached_proc_summaries_.empty() && (latest_state_.culprits[0].pid > 0 || latest_state_.culprits[1].pid > 0)) {
+            if (latest_state_.culprits[0].pid > 0) {
+                proc_sum += (latest_state_.culprits[0].drain_mw / 1000.0);
+            }
+            if (latest_state_.culprits[1].pid > 0) {
+                proc_sum += (latest_state_.culprits[1].drain_mw / 1000.0);
             }
         }
-    }
 
-    double other_w = std::max(0.0, proc_sum - top_sum);
-    if (other_w > 0.01) {
-        QVariantMap m;
-        m["name"] = QStringLiteral("기타 150+ 프로세스 (Other)");
-        m["pid"] = 0;
-        m["watts"] = other_w;
-        m["pct"] = std::min(100.0, (other_w / total_proc_w) * 100.0);
-        m["color"] = QStringLiteral("#64748b"); // Slate gray
-        proc_list.append(m);
+        double total_proc_w = std::max(proc_sum, 0.1);
+        total_process_w_ = total_proc_w;
+
+        const QString proc_colors[] = {
+            QStringLiteral("#ef4444"), // Red (Top 1)
+            QStringLiteral("#f59e0b"), // Amber (Top 2)
+            QStringLiteral("#00d2ff"), // Cyan (Top 3)
+            QStringLiteral("#a855f7"), // Purple (Top 4)
+            QStringLiteral("#10b981"), // Emerald (Top 5)
+            QStringLiteral("#ec4899"), // Pink (Top 6)
+            QStringLiteral("#3b82f6")  // Blue (Top 7)
+        };
+
+        double top_sum = 0.0;
+        if (!cached_proc_summaries_.empty()) {
+            size_t count = std::min<size_t>(7, cached_proc_summaries_.size());
+            for (size_t i = 0; i < count; ++i) {
+                const auto& p = cached_proc_summaries_[i];
+                double w = p.total_watts;
+                if (w < 0.001) continue;
+                top_sum += w;
+                QVariantMap m;
+                m[QStringLiteral("name")] = p.comm;
+                m[QStringLiteral("pid")] = p.pid;
+                m[QStringLiteral("watts")] = w;
+                m[QStringLiteral("pct")] = std::min(100.0, (w / total_proc_w) * 100.0);
+                m[QStringLiteral("color")] = proc_colors[i];
+                proc_list.append(m);
+            }
+        } else {
+            for (int i = 0; i < 2; ++i) {
+                if (latest_state_.culprits[i].pid > 0) {
+                    double w = latest_state_.culprits[i].drain_mw / 1000.0;
+                    top_sum += w;
+                    QVariantMap m;
+                    m[QStringLiteral("name")] = QString::fromUtf8(latest_state_.culprits[i].comm);
+                    m[QStringLiteral("pid")] = latest_state_.culprits[i].pid;
+                    m[QStringLiteral("watts")] = w;
+                    m[QStringLiteral("pct")] = std::min(100.0, (w / total_proc_w) * 100.0);
+                    m[QStringLiteral("color")] = proc_colors[i];
+                    proc_list.append(m);
+                }
+            }
+        }
+
+        double other_w = std::max(0.0, proc_sum - top_sum);
+        if (other_w > 0.01) {
+            QVariantMap m;
+            m[QStringLiteral("name")] = QStringLiteral("기타 150+ 프로세스 (Other)");
+            m[QStringLiteral("pid")] = 0;
+            m[QStringLiteral("watts")] = other_w;
+            m[QStringLiteral("pct")] = std::min(100.0, (other_w / total_proc_w) * 100.0);
+            m[QStringLiteral("color")] = QStringLiteral("#64748b"); // Slate gray
+            proc_list.append(m);
+        }
+        process_power_shares_ = proc_list;
     }
-    process_power_shares_ = proc_list;
 }
 
 } // namespace wattcurb::ui

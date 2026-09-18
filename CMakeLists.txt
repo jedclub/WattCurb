@@ -139,6 +139,12 @@ add_executable(wattcurb_tests
 )
 target_include_directories(wattcurb_tests PRIVATE src ${SYSTEMD_INCLUDE_DIRS})
 target_link_libraries(wattcurb_tests PRIVATE wattcurb_lib ${SYSTEMD_LIBRARIES})
+if(Qt6_FOUND)
+    target_sources(wattcurb_tests PRIVATE src/ui/dashboard_backend.cpp src/ui/dashboard_backend.hpp)
+    target_link_libraries(wattcurb_tests PRIVATE Qt6::Core Qt6::Gui)
+    target_compile_definitions(wattcurb_tests PRIVATE WATTCURB_HAS_QT6=1)
+    target_compile_options(wattcurb_tests PRIVATE -frtti -fexceptions)
+endif()
 add_test(NAME OracleGate COMMAND wattcurb_tests)
 
 # Custom Target: Generate Verbose Assembly for Hot Paths
