@@ -28,9 +28,9 @@ struct alignas(32) HistoryPoint {
 static_assert(sizeof(HistoryPoint) == 32, "HistoryPoint must be exactly 32 bytes");
 static_assert(std::is_trivially_copyable_v<HistoryPoint>, "HistoryPoint must be TriviallyCopyable");
 
-// Implements REF-REQ-059 & REF-ARCH-035: Lockless In-Memory Ring Buffer (~19.3 KB)
+// Implements REF-REQ-059, REF-REQ-070 & REF-ARCH-047: 7-Day Lockless In-Memory Ring Buffer (~1.85 MiB)
 struct alignas(64) HistoryRingBufferShm {
-    static constexpr size_t CAPACITY = 600; // 30 minutes at 3s intervals
+    static constexpr size_t CAPACITY = 60480; // 7 days (168 hours) at 10s intervals (604,800 / 10 = 60,480)
 
     uint64_t seq_version{0};     // Seqlock: Odd = writing, Even = stable
     uint32_t capacity{CAPACITY};
@@ -38,7 +38,7 @@ struct alignas(64) HistoryRingBufferShm {
     uint32_t count{0};           // Current valid entries count [0 .. CAPACITY]
     uint8_t  reserved[44]{0};    // Pad header to exactly 64 bytes
 
-    HistoryPoint entries[CAPACITY]; // 600 * 32 = 19,200 bytes
+    HistoryPoint entries[CAPACITY]; // 60,480 * 32 = 1,935,360 bytes
 
     void append(const HistoryPoint& pt) noexcept {
         uint64_t ver = __atomic_load_n(&seq_version, __ATOMIC_RELAXED);
@@ -80,6 +80,6 @@ struct alignas(64) HistoryRingBufferShm {
     }
 };
 
-static_assert(sizeof(HistoryRingBufferShm) == 64 + 600 * 32, "HistoryRingBufferShm layout must be 19264 bytes");
+static_assert(sizeof(HistoryRingBufferShm) == 64 + 60480 * 32, "HistoryRingBufferShm layout must be exactly 1935424 bytes (~1.85 MiB)");
 
 } // namespace wattcurb::ipc

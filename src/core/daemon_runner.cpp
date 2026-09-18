@@ -56,8 +56,16 @@ bool DaemonRunner::setup_history_shm() {
     if (shm_history_ != nullptr) return true;
 
     shm_history_fd_ = ::open(ipc::HISTORY_SHM_PATH, O_RDWR | O_CLOEXEC);
+    if (shm_history_fd_ >= 0) {
+        struct stat st{};
+        if (::fstat(shm_history_fd_, &st) == 0 && static_cast<size_t>(st.st_size) != sizeof(ipc::HistoryRingBufferShm)) {
+            ::close(shm_history_fd_);
+            ::unlink(ipc::HISTORY_SHM_PATH);
+            shm_history_fd_ = -1;
+        }
+    }
+
     if (shm_history_fd_ < 0) {
-        ::unlink(ipc::HISTORY_SHM_PATH);
         shm_history_fd_ = ::open(ipc::HISTORY_SHM_PATH, O_RDWR | O_CREAT | O_CLOEXEC, 0666);
     }
     if (shm_history_fd_ < 0) {

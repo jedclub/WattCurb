@@ -137,17 +137,18 @@ int query_daemon_history() {
     }
 
     auto* shm = static_cast<const wattcurb::ipc::HistoryRingBufferShm*>(ptr);
-    static wattcurb::ipc::HistoryPoint entries[wattcurb::ipc::HistoryRingBufferShm::CAPACITY];
+    static std::vector<wattcurb::ipc::HistoryPoint> entries(wattcurb::ipc::HistoryRingBufferShm::CAPACITY);
     uint32_t count = 0;
 
-    if (!shm->read_snapshot(entries, wattcurb::ipc::HistoryRingBufferShm::CAPACITY, count) || count == 0) {
+    if (!shm->read_snapshot(entries.data(), wattcurb::ipc::HistoryRingBufferShm::CAPACITY, count) || count == 0) {
         std::cout << "[*] No history entries recorded yet. Waiting for observation cycles...\n";
         ::munmap(ptr, sizeof(wattcurb::ipc::HistoryRingBufferShm));
         ::close(fd);
         return 0;
     }
 
-    std::cout << "\033[1m[WattCurb In-Memory Telemetry History (Last " << std::max(1u, count * 3 / 60) << " min, REF-REQ-059)]\033[0m\n"
+    std::cout << "\033[1m[WattCurb In-Memory Telemetry History (Last " << std::max(1u, count * 10 / 60) << " min / "
+              << std::fixed << std::setprecision(1) << (static_cast<double>(count * 10) / 3600.0) << " hours, REF-REQ-070)]\033[0m\n"
               << std::left << std::setw(10) << "TIME"
               << std::right << std::setw(12) << "SYSTEM(W)"
               << std::setw(10) << "CPU(W)"

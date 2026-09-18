@@ -2076,14 +2076,16 @@ void test_zero_disk_wakeup_logging_and_history_ring_buffer() {
     std::cout << " [ORACLE GATE] EventLogger Stack Formatting (50k iters): " << format_us << " us/op\n";
     assert(format_us < 2.0 && "Oracle Gate Failed: EventLogger formatting latency exceeds 2.0 us/op threshold!");
 
-    // 2. Validate HistoryRingBuffer Layout & Wraparound
-    ipc::HistoryRingBufferShm ring{};
-    assert(ring.capacity == 600);
-    assert(ring.count == 0);
-    assert(ring.head_index == 0);
+    // 2. Validate HistoryRingBuffer Layout & Wraparound (REF-REQ-070, REF-ARCH-047, REF-TEST-035)
+    auto ring = std::make_unique<ipc::HistoryRingBufferShm>();
+    assert(ring->capacity == ipc::HistoryRingBufferShm::CAPACITY);
+    assert(ring->capacity == 60480);
+    assert(ring->count == 0);
+    assert(ring->head_index == 0);
 
-    // Append 1000 items (exceeding capacity 600)
-    for (uint64_t i = 1; i <= 1000; ++i) {
+    // Append CAPACITY + 400 items (60,880 items to verify wrap-around)
+    const uint64_t total_insert = ipc::HistoryRingBufferShm::CAPACITY + 400;
+    for (uint64_t i = 1; i <= total_insert; ++i) {
         ipc::HistoryPoint pt{};
         pt.timestamp_sec = i;
         pt.total_system_mw = static_cast<uint32_t>(i * 10);
@@ -2092,20 +2094,20 @@ void test_zero_disk_wakeup_logging_and_history_ring_buffer() {
         pt.cpu_temp_c = 45;
         pt.battery_percent = 80;
         pt.power_profile_mode = 1;
-        ring.append(pt);
+        ring->append(pt);
     }
 
-    assert(ring.count == 600);
-    assert(ring.head_index == 400); // 1000 % 600 = 400
+    assert(ring->count == ipc::HistoryRingBufferShm::CAPACITY);
+    assert(ring->head_index == 400); // 60,880 % 60,480 = 400
 
     // Read snapshot and verify chronological order (oldest to newest)
-    ipc::HistoryPoint snapshot[600];
+    std::vector<ipc::HistoryPoint> snapshot(ipc::HistoryRingBufferShm::CAPACITY);
     uint32_t count = 0;
-    bool ok = ring.read_snapshot(snapshot, 600, count);
+    bool ok = ring->read_snapshot(snapshot.data(), static_cast<uint32_t>(snapshot.size()), count);
     assert(ok);
-    assert(count == 600);
-    assert(snapshot[0].timestamp_sec == 401 && "Oldest element after 1000 insertions must be 401!");
-    assert(snapshot[599].timestamp_sec == 1000 && "Newest element after 1000 insertions must be 1000!");
+    assert(count == ipc::HistoryRingBufferShm::CAPACITY);
+    assert(snapshot[0].timestamp_sec == 401 && "Oldest element after wraparound must be 401!");
+    assert(snapshot[ipc::HistoryRingBufferShm::CAPACITY - 1].timestamp_sec == total_insert && "Newest element must match last insertion!");
 
     // Oracle Gate Benchmark: Append latency (< 50 ns/op)
     constexpr int APPEND_ITERS = 100000;
@@ -2113,14 +2115,14 @@ void test_zero_disk_wakeup_logging_and_history_ring_buffer() {
     for (int i = 0; i < APPEND_ITERS; ++i) {
         ipc::HistoryPoint pt{};
         pt.timestamp_sec = static_cast<uint64_t>(i);
-        ring.append(pt);
+        ring->append(pt);
     }
     auto t3 = std::chrono::steady_clock::now();
     double append_ns = std::chrono::duration<double, std::nano>(t3 - t2).count() / APPEND_ITERS;
     std::cout << " [ORACLE GATE] HistoryRingBuffer Append Latency (100k iters): " << append_ns << " ns/op\n";
     assert(append_ns < 50.0 && "Oracle Gate Failed: HistoryRingBuffer append latency exceeds 50 ns/op threshold!");
 
-    std::cout << " [PASS] test_zero_disk_wakeup_logging_and_history_ring_buffer (REF-TEST-024: Zero-alloc journal, < 50ns append, 600-sample wrap verified)\n";
+    std::cout << " [PASS] test_zero_disk_wakeup_logging_and_history_ring_buffer (REF-TEST-024 & REF-TEST-035: 7-Day 60,480-sample wrap, < 50ns append verified)\n";
 }
 
 void test_circular_power_share_visualization() {
