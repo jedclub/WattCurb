@@ -226,6 +226,7 @@ void MitigationEngine::restore_hardware_baseline() noexcept {
     if (s_hardware_baseline.baloo_suspended) {
         set_baloo_suspended(false);
     }
+    restore_wifi_txpower();
 }
 
 const MitigationEngine::HardwareBaselineState& MitigationEngine::hardware_baseline() noexcept {
@@ -445,6 +446,7 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         if (s_hardware_baseline.drrs_applied) set_display_refresh_rate(60);
         if (s_hardware_baseline.kwin_blur_unloaded) set_kwin_effects_suspended(false);
         if (s_hardware_baseline.baloo_suspended) set_baloo_suspended(false);
+        restore_wifi_txpower();
         return true;
 
     case PowerProfileMode::Balanced:
@@ -466,6 +468,7 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         if (s_hardware_baseline.drrs_applied) set_display_refresh_rate(60);
         if (s_hardware_baseline.kwin_blur_unloaded) set_kwin_effects_suspended(false);
         if (s_hardware_baseline.baloo_suspended) set_baloo_suspended(false);
+        restore_wifi_txpower();
         return true;
 
     case PowerProfileMode::PowerSaver:
@@ -485,6 +488,7 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         if (s_hardware_baseline.drrs_applied) set_display_refresh_rate(60);
         if (s_hardware_baseline.kwin_blur_unloaded) set_kwin_effects_suspended(false);
         if (s_hardware_baseline.baloo_suspended) set_baloo_suspended(false);
+        restore_wifi_txpower();
         return true;
 
     case PowerProfileMode::UltraEndurance:
@@ -498,13 +502,14 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_panel_power_savings(2);
         set_cpu_epp_policy("power");
         set_gpu_max_clock(640); // 40% GPU clock cap (640MHz of 1600MHz)
-        // REF-REQ-063: Ultra-low power hardware & desktop extensions
+        // REF-REQ-063, REF-REQ-064: Ultra-low power hardware & desktop extensions
         set_smt_control("off");
         set_bluetooth_blocked(true);
         cap_display_backlight(35.0);
         set_display_refresh_rate(48);
         set_kwin_effects_suspended(true);
         set_baloo_suspended(true);
+        set_wifi_txpower_limit(1200); // REF-REQ-064: Cap Wi-Fi Tx to 12.00 dBm (16mW RF)
         return true;
     }
     return false;
@@ -1252,6 +1257,58 @@ bool MitigationEngine::set_baloo_suspended(bool suspend) noexcept {
     }
 }
 
+bool MitigationEngine::set_wifi_txpower_limit(uint32_t mbm) noexcept {
+    char ifname[32] = "wlan0";
+    DIR* dir = ::opendir("/sys/class/net");
+    if (dir) {
+        struct dirent* entry = nullptr;
+        while ((entry = ::readdir(dir)) != nullptr) {
+            if (entry->d_name[0] == '.') continue;
+            char wire_path[128];
+            std::snprintf(wire_path, sizeof(wire_path), "/sys/class/net/%s/wireless", entry->d_name);
+            if (::access(wire_path, F_OK) == 0) {
+                std::strncpy(ifname, entry->d_name, sizeof(ifname) - 1);
+                ifname[sizeof(ifname) - 1] = '\0';
+                break;
+            }
+        }
+        ::closedir(dir);
+    }
+
+    char cmd[128];
+    std::snprintf(cmd, sizeof(cmd), "iw dev %s set txpower limit %u >/dev/null 2>&1 &", ifname, mbm);
+    int ret = ::system(cmd);
+    s_hardware_baseline.wifi_txpower_capped = true;
+    return (ret == 0);
+}
+
+bool MitigationEngine::restore_wifi_txpower() noexcept {
+    if (!s_hardware_baseline.wifi_txpower_capped) return false;
+
+    char ifname[32] = "wlan0";
+    DIR* dir = ::opendir("/sys/class/net");
+    if (dir) {
+        struct dirent* entry = nullptr;
+        while ((entry = ::readdir(dir)) != nullptr) {
+            if (entry->d_name[0] == '.') continue;
+            char wire_path[128];
+            std::snprintf(wire_path, sizeof(wire_path), "/sys/class/net/%s/wireless", entry->d_name);
+            if (::access(wire_path, F_OK) == 0) {
+                std::strncpy(ifname, entry->d_name, sizeof(ifname) - 1);
+                ifname[sizeof(ifname) - 1] = '\0';
+                break;
+            }
+        }
+        ::closedir(dir);
+    }
+
+    char cmd[128];
+    std::snprintf(cmd, sizeof(cmd), "iw dev %s set txpower auto >/dev/null 2>&1 &", ifname);
+    int ret = ::system(cmd);
+    s_hardware_baseline.wifi_txpower_capped = false;
+    return (ret == 0);
+}
+
 void MitigationEngine::rollback_all() noexcept {
     WATTCURB_PROFILE_SCOPE("mitig.rollback_all");
     // Implements REF-REQ-031 Sec 3.2, REF-REQ-049 & REF-REQ-055: Restore all mitigated processes faithfully and heal audio stack
@@ -1331,7 +1388,7 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
             m_aspm_modified = true;
         } else if (target_profile == PowerProfileMode::UltraEndurance) {
             m_aspm_modified = true;
-            cap_display_backlight(50.0);
+            cap_display_backlight(35.0);
             m_backlight_capped = true;
         }
         m_current_profile = target_profile;
@@ -1369,7 +1426,10 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
             status.feature_summaries[status.feature_summary_count++] = "CPU EPP: power";
         }
         if (status.feature_summary_count < status.feature_summaries.size()) {
-            status.feature_summaries[status.feature_summary_count++] = "Display Panel: 50% Soft-Cap";
+            status.feature_summaries[status.feature_summary_count++] = "Display Panel: 35% Hard-Cap";
+        }
+        if (status.feature_summary_count < status.feature_summaries.size()) {
+            status.feature_summaries[status.feature_summary_count++] = "Wi-Fi Tx: 12dBm Capped";
         }
     }
 

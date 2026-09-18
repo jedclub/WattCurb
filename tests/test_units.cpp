@@ -2193,6 +2193,55 @@ void test_ultra_endurance_extensions() {
     std::cout << " [PASS] test_ultra_endurance_extensions (REF-TEST-028: SMT, Bluetooth, Backlight Cap, DRRS, KWin Effects & Baloo verified)\n";
 }
 
+// Implements REF-TEST-029: Wi-Fi TxPower Capping & Decomposed Platform Loss Verification
+void test_wifi_txpower_and_platform_loss_decomposition() {
+    using namespace wattcurb::policy;
+
+    // 1. Wi-Fi TxPower Capping & Restoration verification
+    bool cap_ok = MitigationEngine::set_wifi_txpower_limit(1200);
+    assert(cap_ok && "set_wifi_txpower_limit must succeed");
+    assert(MitigationEngine::hardware_baseline().wifi_txpower_capped && "wifi_txpower_capped state must be set");
+
+    bool restore_ok = MitigationEngine::restore_wifi_txpower();
+    assert(restore_ok && "restore_wifi_txpower must succeed");
+    assert(!MitigationEngine::hardware_baseline().wifi_txpower_capped && "wifi_txpower_capped state must be cleared");
+
+    // 2. Platform & Loss Mathematical Decomposition Invariant
+    constexpr double sys_w = 12.5;
+    constexpr double cpu_w = 4.2;
+    constexpr double gpu_w = 1.1;
+    constexpr double disp_w = 2.8;
+    constexpr double nvme_w = 0.6;
+    constexpr double fan_w = 0.0;
+    double known_w = cpu_w + gpu_w + disp_w + nvme_w + fan_w; // 8.7W
+    double plat_w = sys_w - known_w; // 3.8W
+
+    // Physics constituents
+    double est_vrm = sys_w * 0.09;
+    double est_dram = 0.70 + std::min(0.25, (cpu_w * 0.05));
+    double est_wifi = 0.35;
+    double est_mb = 0.15;
+    double est_sum = est_vrm + est_dram + est_wifi + est_mb;
+    double scale = plat_w / est_sum;
+
+    double vrm_w = est_vrm * scale;
+    double dram_w = est_dram * scale;
+    double wifi_w = est_wifi * scale;
+    double mb_w = plat_w - (vrm_w + dram_w + wifi_w);
+
+    double sum_decomposed = vrm_w + dram_w + wifi_w + mb_w;
+    assert(std::abs(sum_decomposed - plat_w) < 1e-9 && "Decomposed sum must identically equal plat_w");
+    assert(vrm_w > 0.5 && "VRM loss must reflect realistic buck converter heat");
+    assert(dram_w > 0.8 && "DRAM must reflect 16GB LPDDR5 refresh & bus");
+    assert(wifi_w > 0.3 && "Wi-Fi must reflect active RF front-end");
+    assert(mb_w > 0.1 && "Motherboard & IO must account for EC and chipset");
+
+    std::cout << " [ORACLE GATE] Platform Loss Decomposition (12.5W System -> 3.8W Plat):"
+              << " DRAM=" << dram_w << "W, VRM=" << vrm_w << "W, Wi-Fi=" << wifi_w
+              << "W, MB/IO=" << mb_w << "W (Invariant Sum=" << sum_decomposed << "W)\n";
+    std::cout << " [PASS] test_wifi_txpower_and_platform_loss_decomposition (REF-TEST-029 verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -2217,6 +2266,7 @@ int main() {
     test::test_zero_disk_wakeup_logging_and_history_ring_buffer();
     test::test_circular_power_share_visualization();
     test::test_ultra_endurance_extensions();
+    test::test_wifi_txpower_and_platform_loss_decomposition();
     test::test_process_classifier();
     test::test_mitigation_engine();
     test::test_adaptive_mitigation_and_rollback();

@@ -70,6 +70,7 @@ public:
         bool kwin_blur_unloaded{false};
         bool drrs_applied{false};
         bool baloo_suspended{false};
+        bool wifi_txpower_capped{false};
     };
 
     static void capture_hardware_baseline() noexcept;
@@ -93,6 +94,8 @@ public:
     static bool set_display_refresh_rate(uint32_t hz) noexcept;
     static bool set_kwin_effects_suspended(bool suspend) noexcept;
     static bool set_baloo_suspended(bool suspend) noexcept;
+    static bool set_wifi_txpower_limit(uint32_t mbm) noexcept;
+    static bool restore_wifi_txpower() noexcept;
     static bool apply_power_profile(PowerProfileMode mode) noexcept;
 
     // Process Immunity & Audio Protection (REF-REQ-049, REF-REQ-054)
