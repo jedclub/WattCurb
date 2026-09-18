@@ -28,7 +28,7 @@ After=multi-user.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/wattcurb --daemon --period 3.0
+ExecStart=/usr/local/bin/wattcurb --daemon --period 10.0
 Restart=on-failure
 RestartSec=3
 KillMode=mixed

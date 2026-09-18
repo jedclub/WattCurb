@@ -64,11 +64,20 @@ private:
     int timer_fd_{-1};
     int signal_fd_{-1};
 
+    // REF-REQ-068: Adaptive 3-Tier Cadence
+    uint64_t bg_tick_count_{0};
+    uint64_t interactive_lease_deadline_ms_{0};
+    bool is_interactive_active_{false};
+    double current_timer_interval_{10.0};
+
+    bool arm_timer(double interval_sec) noexcept;
     bool setup_timer();
     bool setup_signals();
     bool setup_shm();
     bool setup_history_shm();
     void process_observation_cycle();
+    void process_light_probe_cycle();
+    void process_deep_observation_cycle();
     void handle_ipc_datagram(int fd);
     void cleanup_descriptors() noexcept;
 };

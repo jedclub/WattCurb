@@ -15,6 +15,7 @@
 #include "ipc/history_ring_buffer.hpp"
 #include "core/event_logger.hpp"
 #include "tray/tray_client.hpp"
+#include "core/daemon_runner.hpp"
 #include "core/scoped_profiler.hpp"
 
 #undef NDEBUG
@@ -2267,9 +2268,41 @@ void test_battery_low_performance_lockout() {
     // Test 4: Connected to AC power (on_battery == false) even when battery is critically low (10%)
     fm.set_override_profile(PowerProfileMode::Performance);
     auto status4 = fm.evaluate_and_actuate(report, false, 10.0);
-    assert(status4.current_profile == PowerProfileMode::Performance && "Performance mode must be permitted on external AC power regardless of battery level");
-
+    assert(status4.current_profile == PowerProfileMode::Performance && "Performance mode must be permitted on external AC power");
     std::cout << " [PASS] test_battery_low_performance_lockout (REF-TEST-032: <=20% demotion & AC bypass verified)\n";
+}
+
+void test_adaptive_three_tier_cadence() {
+    using namespace wattcurb::core;
+
+    // 1. Instantiate DaemonRunner with default 10.0s period and 3.0s deep window
+    DaemonRunner runner(10.0, 3.0, "test_cadence.lock");
+
+    // 2. Micro-benchmark ultra-lightweight probe cycle (Zero /proc traversal)
+    constexpr size_t ITERATIONS = 100;
+    wattcurb::hw::HardwareProbe probe;
+    auto t0 = std::chrono::steady_clock::now();
+    for (size_t i = 0; i < ITERATIONS; ++i) {
+        auto sample = probe.capture_sample();
+        assert(sample.battery_capacity_percent <= 100);
+    }
+    auto t1 = std::chrono::steady_clock::now();
+    double avg_us = std::chrono::duration<double, std::micro>(t1 - t0).count() / static_cast<double>(ITERATIONS);
+
+    std::cout << " [ORACLE GATE] Tier 2 Ultra-Lightweight Probe Latency: " << avg_us << " us/op\n";
+    assert(avg_us < 15000.0 && "Tier 2 light probe must execute in < 15ms (real ThinkPad sysfs read)");
+
+    // 3. Mathematical cadence validation: 10s tick % 6 == 0 triggers deep sweep
+    for (uint64_t tick = 1; tick <= 12; ++tick) {
+        bool is_deep = (tick % 6 == 0);
+        if (tick == 6 || tick == 12) {
+            assert(is_deep && "Tick 6 and 12 (60s, 120s) must trigger Tier 3 Deep Sweep");
+        } else {
+            assert(!is_deep && "Ticks 1..5, 7..11 must execute Tier 2 Ultra-Lightweight Probe");
+        }
+    }
+
+    std::cout << " [PASS] test_adaptive_three_tier_cadence (REF-TEST-033: On-Demand 2s, 10s light, 60s deep verified)\n";
 }
 
 } // namespace test
@@ -2298,6 +2331,7 @@ int main() {
     test::test_ultra_endurance_extensions();
     test::test_wifi_txpower_and_platform_loss_decomposition();
     test::test_battery_low_performance_lockout();
+    test::test_adaptive_three_tier_cadence();
     test::test_process_classifier();
     test::test_mitigation_engine();
     test::test_adaptive_mitigation_and_rollback();

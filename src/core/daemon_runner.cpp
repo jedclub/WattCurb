@@ -23,8 +23,8 @@
 namespace wattcurb::core {
 
 DaemonRunner::DaemonRunner(double period_sec, double window_sec, std::string_view lock_name)
-    : period_sec_(period_sec > 0.0 ? period_sec : 3.0),
-      window_sec_(window_sec > 0.0 ? window_sec : 1.0),
+    : period_sec_(period_sec > 0.0 ? period_sec : 10.0),
+      window_sec_(window_sec > 0.0 ? window_sec : 3.0),
       lock_name_(lock_name),
       lock_(lock_name) {}
 
@@ -79,6 +79,21 @@ bool DaemonRunner::setup_history_shm() {
     return true;
 }
 
+bool DaemonRunner::arm_timer(double interval_sec) noexcept {
+    if (timer_fd_ < 0) return false;
+    current_timer_interval_ = interval_sec;
+
+    struct itimerspec its{};
+    time_t sec = static_cast<time_t>(interval_sec);
+    long nsec = static_cast<long>((interval_sec - static_cast<double>(sec)) * 1'000'000'000.0);
+
+    its.it_value.tv_sec = sec > 0 ? sec : 10;
+    its.it_value.tv_nsec = nsec;
+    its.it_interval = its.it_value;
+
+    return (::timerfd_settime(timer_fd_, 0, &its, nullptr) == 0);
+}
+
 bool DaemonRunner::setup_timer() {
     timer_fd_ = ::timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK | TFD_CLOEXEC);
     if (timer_fd_ < 0) return false;
@@ -86,15 +101,7 @@ bool DaemonRunner::setup_timer() {
     // Set prctl timer slack to coalesce wakeups with other system activity (Zero-Wakeup)
     ::prctl(PR_SET_TIMERSLACK, 500'000'000UL); // 500ms slack
 
-    time_t sec = static_cast<time_t>(period_sec_);
-    long nsec = static_cast<long>((period_sec_ - static_cast<double>(sec)) * 1'000'000'000.0);
-
-    struct itimerspec spec{};
-    spec.it_value.tv_sec = sec > 0 ? sec : 60;
-    spec.it_value.tv_nsec = nsec;
-    spec.it_interval = spec.it_value;
-
-    return (::timerfd_settime(timer_fd_, 0, &spec, nullptr) == 0);
+    return arm_timer(period_sec_);
 }
 
 bool DaemonRunner::setup_signals() {
@@ -221,8 +228,85 @@ bool DaemonRunner::initialize() {
     return true;
 }
 
-void DaemonRunner::process_observation_cycle() {
-    WATTCURB_PROFILE_SCOPE("daemon.observation_cycle");
+static uint64_t get_monotonic_ms() noexcept {
+    struct timespec ts{};
+    ::clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<uint64_t>(ts.tv_sec) * 1000ULL + static_cast<uint64_t>(ts.tv_nsec) / 1'000'000ULL;
+}
+
+void DaemonRunner::process_light_probe_cycle() {
+    WATTCURB_PROFILE_SCOPE("daemon.light_probe_cycle");
+
+    // Tier 2: Ultra-Lightweight Hardware Probe (< 0.05ms, ZERO /proc traversal)
+    auto hw_cur = hw_probe_.capture_sample();
+    cached_report_.hardware = engine_.compute_hardware_power(hw_prev_, hw_cur, 10.0);
+
+    // REF-REQ-067: Active Lockout and Demotion of Performance Mode
+    bool on_battery = cached_report_.hardware.is_battery_discharging;
+    double batt_pct = static_cast<double>(cached_report_.hardware.battery_capacity_percent);
+    if (on_battery && batt_pct <= 20.0) {
+        if (feature_manager_.override_profile() == PowerProfileMode::Performance ||
+            cached_report_.mitigation_status.current_profile == PowerProfileMode::Performance) {
+            feature_manager_.set_override_profile(PowerProfileMode::Balanced);
+            policy::MitigationEngine::apply_power_profile(PowerProfileMode::Balanced);
+            EventLogger::log_alert("BATTERY", "Performance mode automatically demoted to Balanced: Battery capacity <= 20% (REF-REQ-067)");
+
+            int mode_fd = ::open("/home/jedclub/.cache/power_profile_mode", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
+            if (mode_fd >= 0) {
+                ::fchmod(mode_fd, 0666);
+                (void)::write(mode_fd, "balanced\n", 9);
+                ::close(mode_fd);
+            }
+        }
+    }
+
+    // Seqlock State Export
+    if (shm_state_ == nullptr) setup_shm();
+    local_shared_state_.update_from_report(cached_report_);
+    if (shm_state_ != nullptr) {
+        shm_state_->update_from_report(cached_report_);
+    }
+
+    // Append to In-Memory History Ring-Buffer
+    if (shm_history_ == nullptr) setup_history_shm();
+    if (shm_history_ != nullptr) {
+        ipc::HistoryPoint pt{};
+        pt.timestamp_sec = static_cast<uint64_t>(::time(nullptr));
+        pt.total_system_mw = static_cast<uint32_t>(cached_report_.hardware.total_system_watts * 1000.0);
+        pt.cpu_package_mw = static_cast<uint16_t>(cached_report_.hardware.cpu_package_watts * 1000.0);
+        pt.gpu_mw = static_cast<uint16_t>(cached_report_.hardware.gpu_watts * 1000.0);
+        pt.cpu_temp_c = static_cast<uint16_t>(cached_report_.hardware.cpu_temp_c);
+        pt.cpu_freq_mhz = static_cast<uint16_t>(cached_report_.hardware.cpu_freq_avg_mhz);
+        pt.battery_percent = static_cast<uint8_t>(cached_report_.hardware.battery_capacity_percent);
+        pt.battery_state = cached_report_.hardware.is_ac_passthrough ? 2 : (cached_report_.hardware.is_battery_discharging ? 1 : 0);
+        pt.power_profile_mode = static_cast<uint8_t>(cached_report_.mitigation_status.current_profile);
+        pt.cstate_c3_percent = static_cast<uint8_t>(cached_report_.hardware.cstate_c3_deep_percent);
+        pt.active_mitigations = static_cast<uint8_t>(cached_report_.mitigation_status.feature_summary_count);
+
+        shm_history_->append(pt);
+    }
+
+    // Event-Driven AC & Battery Critical Alerts
+    bool cur_discharging = cached_report_.hardware.is_battery_discharging;
+    if (cur_discharging != last_logged_battery_state_) {
+        last_logged_battery_state_ = cur_discharging;
+        if (cur_discharging) EventLogger::log_alert("AC", "AC Disconnected: Operating on Battery Power");
+        else EventLogger::log_alert("AC", "AC Connected: External Power Active");
+    }
+
+    uint8_t cur_pct = static_cast<uint8_t>(cached_report_.hardware.battery_capacity_percent);
+    if (cur_pct <= 20 && last_logged_battery_pct_ > 20) {
+        EventLogger::log_alert("BATTERY", "Battery capacity dropped below 20% threshold");
+    } else if (cur_pct <= 10 && last_logged_battery_pct_ > 10) {
+        EventLogger::log_alert("BATTERY", "Battery capacity critical: below 10% threshold");
+    }
+    last_logged_battery_pct_ = cur_pct;
+
+    hw_prev_ = std::move(hw_cur);
+}
+
+void DaemonRunner::process_deep_observation_cycle() {
+    WATTCURB_PROFILE_SCOPE("daemon.deep_observation_cycle");
 
     if (!has_baseline_) {
         hw_prev_ = hw_probe_.capture_sample();
@@ -346,6 +430,32 @@ void DaemonRunner::process_observation_cycle() {
     proc_pool_.swap(); // 0ns pointer swap
 }
 
+void DaemonRunner::process_observation_cycle() {
+    uint64_t now_ms = get_monotonic_ms();
+
+    // Check if interactive lease expired
+    if (is_interactive_active_ && now_ms >= interactive_lease_deadline_ms_) {
+        is_interactive_active_ = false;
+        bg_tick_count_ = 0;
+        arm_timer(10.0); // Re-arm timerfd back to 10.0s background cadence
+    }
+
+    if (is_interactive_active_) {
+        // Mode 1: Interactive High-Cadence (2.0s on-demand streaming)
+        process_deep_observation_cycle();
+    } else {
+        // Mode 2 & 3: Background Dual-Rate Cadence
+        bg_tick_count_++;
+        if (bg_tick_count_ % 6 == 0) {
+            // Mode 3: 60-Second Deep Attribution Sweep (1분에 3초간 정밀 수집)
+            process_deep_observation_cycle();
+        } else {
+            // Mode 2: 10-Second Ultra-Lightweight Hardware Probe (1초간 극저비용 수집, 0 proc traversal)
+            process_light_probe_cycle();
+        }
+    }
+}
+
 int DaemonRunner::run() {
     if (epoll_fd_ < 0 && !initialize()) {
         return 1;
@@ -423,6 +533,14 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
         ::sendto(fd, resp_str.data(), resp_str.size(), 0,
                  reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
     } else if (req.find("FULL_TELEMETRY") != std::string_view::npos) {
+        // REF-REQ-068: Active GUI dashboard query automatically engages Interactive 2.0s Cadence
+        uint64_t now_ms = get_monotonic_ms();
+        interactive_lease_deadline_ms_ = now_ms + 4500; // 4.5s lease window
+        if (!is_interactive_active_) {
+            is_interactive_active_ = true;
+            arm_timer(2.0); // Switch timerfd dynamically to 2.0s
+        }
+
         // High-density btop-style telemetry JSON payload (REF-REQ-037)
         std::stringstream ss;
         const auto& hw = cached_report_.hardware;
@@ -508,7 +626,7 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
             ss << "      \"priority\": " << p.priority << ",\n";
             ss << "      \"wakeups_sec\": " << p.wakeups_per_sec << ",\n";
             ss << "      \"timerslack_ns\": " << p.timerslack_ns << ",\n";
-            ss << "      \"vram_mb\": " << (p.vram_kib / 1024.0) << ",\n";
+            ss << "      \"vram_mb\": " << (static_cast<double>(p.vram_kib) / 1024.0) << ",\n";
             ss << "      \"io_mb_s\": " << p.disk_io_mb_per_sec << ",\n";
             ss << "      \"minflt_s\": " << p.minflt_per_sec << ",\n";
             ss << "      \"majflt_s\": " << p.majflt_per_sec << ",\n";
@@ -575,8 +693,26 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
         const char ack[] = "OK\n";
         ::sendto(fd, ack, sizeof(ack) - 1, 0,
                  reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+    } else if (req.find("INTERACTIVE") != std::string_view::npos ||
+               req.find("HEARTBEAT") != std::string_view::npos) {
+        uint64_t now_ms = get_monotonic_ms();
+        interactive_lease_deadline_ms_ = now_ms + 4500; // 4.5s lease window
+        if (!is_interactive_active_) {
+            is_interactive_active_ = true;
+            arm_timer(2.0); // Switch timerfd immediately to 2.0s
+            process_deep_observation_cycle();
+        }
+        const char ack[] = "OK\n";
+        ::sendto(fd, ack, sizeof(ack) - 1, 0,
+                 reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
     } else if (req.find("RESCAN") != std::string_view::npos) {
-        process_observation_cycle();
+        uint64_t now_ms = get_monotonic_ms();
+        interactive_lease_deadline_ms_ = now_ms + 4500;
+        if (!is_interactive_active_) {
+            is_interactive_active_ = true;
+            arm_timer(2.0);
+        }
+        process_deep_observation_cycle();
         const char ack[] = "OK\n";
         ::sendto(fd, ack, sizeof(ack) - 1, 0,
                  reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
