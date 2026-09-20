@@ -28,3 +28,6 @@ Makefile
 # System files
 .DS_Store
 Thumbs.db
+
+# Agent guidelines (local only)
+AGENTS.md
