@@ -68,7 +68,7 @@ if(WATTCURB_ENABLE_PGO_GEN)
     add_link_options(-fprofile-generate)
 elseif(WATTCURB_ENABLE_PGO_USE)
     message(STATUS "PGO: Profile feedback use enabled (-fprofile-use)")
-    add_compile_options(-fprofile-use -fprofile-correction -Wno-error=coverage-mismatch)
+    add_compile_options(-fprofile-use -fprofile-correction -Wno-error=coverage-mismatch -Wno-coverage-mismatch -Wno-missing-profile)
     add_link_options(-fprofile-use -fprofile-correction)
 endif()
 

@@ -3009,6 +3009,17 @@ void test_deep_battery_drain_report_oracle_gate() {
     std::cout << " [PASS] test_deep_battery_drain_report_oracle_gate (REF-TEST-043: Full SHM sweep, hardware decomposition, process attribution verified)\n";
 }
 
+// Implements REF-TEST-044 & REF-REQ-079: Token Minimization & Evaluation Harness Integrity
+void test_token_minimization_harness_integrity() {
+    std::cout << " [ORACLE GATE] Verifying Token-Minimization Harness (REF-REQ-079)...\n";
+    assert(::access("scripts/harness.py", X_OK) == 0 && "scripts/harness.py must exist and be executable");
+
+    int ret = std::system("python3 scripts/harness.py outline src/ipc/history_ring_buffer.hpp > /dev/null 2>&1");
+    assert(ret == 0 && "harness.py outline must succeed");
+
+    std::cout << " [PASS] test_token_minimization_harness_integrity (REF-TEST-044: Harness isolation verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -3016,6 +3027,7 @@ int main() {
     ::setenv("WATTCURB_TEST_MOCK_DESKTOP", "1", 1);
 
     std::cout << "=== WattCurb Unit Test Suite & Oracle Gate Verifier ===\n";
+    test::test_token_minimization_harness_integrity();
     test::test_deep_battery_drain_report_oracle_gate();
     test::test_modeset_flapping_elimination_and_test_isolation();
     test::test_cpu_features();
