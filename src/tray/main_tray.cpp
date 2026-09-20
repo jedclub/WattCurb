@@ -1,4 +1,5 @@
 #include "tray/tray_client.hpp"
+#include "ipc/tray_shared_state.hpp"
 #include "core/singleton_lock.hpp"
 #include "core/scoped_profiler.hpp"
 #include <csignal>
@@ -25,10 +26,50 @@ int main(int argc, char* argv[]) {
     // Standalone Ultra-Low-Overhead SNI Desktop Tray Client for WattCurb with Fine-Grained Profiler
 
     bool profile_mode = false;
+    bool benchmark_mode = false;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--profile") == 0 || std::strcmp(argv[i], "-p") == 0) {
             profile_mode = true;
+        } else if (std::strcmp(argv[i], "--benchmark") == 0 || std::strcmp(argv[i], "-B") == 0) {
+            benchmark_mode = true;
         }
+    }
+
+    // REF-REQ-075 & REF-ARCH-052: Headless benchmark mode for PGO profile generation
+    if (benchmark_mode) {
+        std::printf("[WattCurb-Tray] Running PGO benchmark training workload...\n");
+        wattcurb::ipc::WattCurbSharedState state{};
+        state.battery_percent = 78;
+        state.battery_state = 1;
+        state.system_drain_mw = 12500;
+        state.cpu_drain_mw = 4200;
+        state.gpu_drain_mw = 1800;
+        state.cpu_temp_c = 48;
+        state.cpu_freq_mhz = 2400;
+        state.fan_rpm = 2800;
+        state.power_profile_mode = 1;
+        std::strncpy(state.culprits[0].comm, "firefox", 16);
+        state.culprits[0].drain_mw = 2500;
+        std::strncpy(state.culprits[1].comm, "kwin_wayland", 16);
+        state.culprits[1].drain_mw = 1200;
+
+        char title[128]{};
+        char desc[8192]{};
+        char icon[64]{};
+
+        for (int i = 0; i < 20000; ++i) {
+            state.seq_version = static_cast<uint64_t>(i);
+            state.system_drain_mw = static_cast<uint32_t>(10000 + (i % 5000));
+            state.battery_percent = static_cast<uint8_t>(20 + (i % 80));
+            state.power_profile_mode = static_cast<uint8_t>(i % 4);
+            wattcurb::tray::TrayClient::render_tooltip(state, title, sizeof(title), desc, sizeof(desc));
+            wattcurb::tray::TrayClient::resolve_icon_name(state, icon, sizeof(icon));
+            if ((i % 4) == 0) {
+                wattcurb::tray::TrayClient::probe_sensors_for_hover(state);
+            }
+        }
+        std::printf("[WattCurb-Tray] Benchmark training complete. Profile counters flushed.\n");
+        return 0;
     }
 
     // Enforce singleton instance: prevents duplicate tray icons on concurrent autostart & systemd launches

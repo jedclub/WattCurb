@@ -41,7 +41,7 @@ cmake -B "${BUILD_PGO_GEN}" -G Ninja \
 
 TARGETS_STAGE1="wattcurb wattcurb-tray wattcurb_tests"
 # Dashboard requires Qt6
-if ninja -C "${BUILD_PGO_GEN}" -t targets all 2>/dev/null | grep -q "^wattcurb-dashboard:"; then
+if [ -f "${BUILD_PGO_GEN}/build.ninja" ] && grep -q "build wattcurb-dashboard:" "${BUILD_PGO_GEN}/build.ninja"; then
     TARGETS_STAGE1="${TARGETS_STAGE1} wattcurb-dashboard"
     HAS_DASHBOARD=1
 else
@@ -73,8 +73,17 @@ echo "  → Running daemon CLI: --briefing"
 echo "  → Running daemon CLI: --extreme-profile -w 2 -i 1"
 "${BUILD_PGO_GEN}/wattcurb" -X -w 2 -i 1 > /dev/null 2>&1 || true
 
+echo "  → Running desktop tray PGO training suite (--benchmark)..."
+"${BUILD_PGO_GEN}/wattcurb-tray" --benchmark
+
+if [ "${HAS_DASHBOARD}" -eq 1 ]; then
+    echo "  → Running matrix dashboard PGO training suite (--benchmark)..."
+    QT_QPA_PLATFORM=offscreen "${BUILD_PGO_GEN}/wattcurb-dashboard" --benchmark
+fi
+
 echo ""
-echo "  ✓ Profile data (.gcda) collected from representative workloads."
+echo "  ✓ Profile data (.gcda) collected across ALL 3 targets:"
+find "${BUILD_PGO_GEN}" -name '*.gcda' | sort | sed "s|${BUILD_PGO_GEN}/|    * |"
 echo ""
 
 # ── Stage 3: PGO Feedback-Optimized Release Compilation ──────────────
@@ -157,7 +166,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 # Run PGO-optimized test suite under perf stat
 PMU_RAW=$(perf stat -e task-clock,cycles,instructions,cache-misses,L1-dcache-load-misses,dTLB-load-misses,branches,branch-misses \
-    "${BUILD_PGO_USE}/wattcurb_tests" 2>&1) || true
+    "${BUILD_PGO_USE}/wattcurb_tests" 2>&1 || true)
 
 echo ""
 echo "  ✓ PMU telemetry collected."
@@ -165,14 +174,14 @@ echo ""
 
 # Also run a quick 6-second daemon measurement
 echo "  → Running 6-second daemon PMU audit..."
-PMU_DAEMON=$(perf stat -e task-clock:u,task-clock,cycles,instructions,L1-dcache-load-misses,dTLB-load-misses,branch-misses,page-faults \
-    "${OUTPUT_DIR}/wattcurb" --duration 6 -i 2 2>&1) || true
+PMU_DAEMON=$(perf stat -e task-clock:u,cycles,instructions,L1-dcache-load-misses,dTLB-load-misses,branch-misses,page-faults \
+    "${OUTPUT_DIR}/wattcurb" --duration 6 -i 2 2>&1 || true)
 
 echo ""
 
 # ── Generate Report ──────────────────────────────────────────────────
 DATE_STR=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-CPU_MODEL=$(lscpu | grep "Model name" | sed 's/Model name:[ \t]*//')
+CPU_MODEL=$(LC_ALL=C lscpu | grep "Model name:" | sed 's/Model name:[ \t]*//' || echo "x86_64")
 GCC_VER=$(gcc -dumpversion)
 
 cat <<EOF > "${REPORT_FILE}"
