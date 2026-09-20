@@ -41,6 +41,89 @@ ApplicationWindow {
         id: reportWindow
     }
 
+    // =========================================================================
+    // REUSABLE TACTILE CYBER BUTTON COMPONENT (REF-REQ-081, REF-ARCH-058)
+    // Physical depression (scale: 0.95), distinct hover lighting, and border glow
+    // =========================================================================
+    component TactileButton: Button {
+        id: tBtn
+        property color accentColor: root.colCyan
+        property color baseColor: "#1a222e"
+        property color hoverColor: "#263345"
+        property color pressColor: "#0e1520"
+        property color textColor: "#e2e8f0"
+        property real customRadius: 6
+
+        implicitHeight: 30
+        hoverEnabled: true
+
+        scale: !enabled ? 1.0 : (down ? 0.95 : (hovered ? 1.03 : 1.0))
+        Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+
+        contentItem: RowLayout {
+            spacing: 5
+            anchors.centerIn: parent
+            Text {
+                text: tBtn.text
+                font.pixelSize: 11
+                font.bold: true
+                color: !tBtn.enabled ? "#64748b" : (tBtn.highlighted ? "#ffffff" : (tBtn.hovered ? "#ffffff" : tBtn.textColor))
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                y: tBtn.down ? 1 : 0
+            }
+        }
+
+        background: Rectangle {
+            radius: tBtn.customRadius
+            color: !tBtn.enabled ? "#11161f" : (
+                tBtn.down ? tBtn.pressColor : (
+                    tBtn.highlighted ? Qt.rgba(tBtn.accentColor.r, tBtn.accentColor.g, tBtn.accentColor.b, 0.32) : (
+                        tBtn.hovered ? tBtn.hoverColor : tBtn.baseColor
+                    )
+                )
+            )
+            border.color: !tBtn.enabled ? "#243042" : (
+                tBtn.highlighted ? tBtn.accentColor : (
+                    tBtn.hovered ? tBtn.accentColor : "#37475d"
+                )
+            )
+            border.width: (tBtn.highlighted || tBtn.hovered) ? 1.5 : 1
+
+            // Subtle top bevel highlight for tactile 3D realism
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.topMargin: 1
+                anchors.leftMargin: 2
+                anchors.rightMargin: 2
+                height: 1
+                color: tBtn.down ? "transparent" : (tBtn.hovered ? Qt.rgba(1, 1, 1, 0.25) : Qt.rgba(1, 1, 1, 0.08))
+                radius: tBtn.customRadius
+            }
+
+            // Subtle bottom shadow line
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 1
+                anchors.leftMargin: 2
+                anchors.rightMargin: 2
+                height: 1
+                color: tBtn.down ? "transparent" : Qt.rgba(0, 0, 0, 0.4)
+                radius: tBtn.customRadius
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: tBtn.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+            acceptedButtons: Qt.NoButton
+        }
+    }
+
     Connections {
         target: backend
         function onReportWindowRequested() {
@@ -156,27 +239,14 @@ ApplicationWindow {
                     }
                 }
 
-                // Deep Battery Report Standalone Window Button (REF-REQ-078)
-                Button {
-                    height: 28
-                    Layout.preferredWidth: reportBtnLabel.implicitWidth + 24
-                    contentItem: RowLayout {
-                        spacing: 4
-                        Text { text: "🔋"; font.pixelSize: 12 }
-                        Text {
-                            id: reportBtnLabel
-                            text: "배터리 정밀 분석 리포트"
-                            color: "#ffffff"
-                            font.bold: true
-                            font.pixelSize: 11
-                        }
-                    }
-                    background: Rectangle {
-                        color: parent.down ? "#047857" : (parent.hovered ? "#059669" : "#0d9488")
-                        radius: 4
-                        border.color: root.colCyan
-                        border.width: 1
-                    }
+                // Deep Battery Report Standalone Window Button (REF-REQ-078, REF-REQ-081)
+                TactileButton {
+                    text: "🔋 배터리 정밀 분석 리포트"
+                    accentColor: root.colGreen
+                    baseColor: "#0d2e24"
+                    hoverColor: "#134234"
+                    pressColor: "#081a14"
+                    textColor: "#34d399"
                     onClicked: {
                         backend.generateBatteryReport();
                         reportWindow.show();
@@ -1337,14 +1407,14 @@ ApplicationWindow {
                 Text { text: "PROFILES:"; color: root.textDim; font.bold: true; font.pixelSize: 11 }
 
                 // Performance Mode (REF-REQ-067: Locked out when battery <= 20%)
-                Button {
+                // Performance Mode (REF-REQ-067: Locked out when battery <= 20%)
+                TactileButton {
                     id: btnPerf
                     text: "⚡ Performance (4.1G)"
                     highlighted: backend.powerProfileMode === 0
+                    accentColor: root.colCyan
                     enabled: !(backend.batteryState === 1 && backend.batteryPercent <= 20)
                     opacity: enabled ? 1.0 : 0.4
-                    font.pixelSize: 11
-                    font.bold: true
                     onClicked: {
                         if (backend.batteryState === 1 && backend.batteryPercent <= 20) return;
                         backend.setProfile(0)
@@ -1354,61 +1424,61 @@ ApplicationWindow {
                 }
 
                 // Balanced Mode
-                Button {
+                TactileButton {
                     text: "⚖️ Balanced"
                     highlighted: backend.powerProfileMode === 1
-                    font.pixelSize: 11
-                    font.bold: true
+                    accentColor: root.colGreen
                     onClicked: backend.setProfile(1)
                 }
 
                 // Smart Save Mode
-                Button {
+                TactileButton {
                     text: "🌱 Smart Save (1.7G)"
                     highlighted: backend.powerProfileMode === 2
-                    font.pixelSize: 11
-                    font.bold: true
+                    accentColor: root.colOrange
                     onClicked: backend.setProfile(2)
                 }
 
                 // Ultra Save Mode
-                Button {
+                TactileButton {
                     text: "❄️ Ultra Save (1.4G)"
                     highlighted: backend.powerProfileMode === 3
-                    font.pixelSize: 11
-                    font.bold: true
+                    accentColor: root.colPurple
                     onClicked: backend.setProfile(3)
                 }
 
                 Item { Layout.fillWidth: true }
 
                 // Trigger Rescan
-                Button {
+                TactileButton {
                     text: backend.isRescanning ? "측정 중..." : "🔄 지금 정밀 재측정"
+                    accentColor: root.colCyan
+                    baseColor: "#152438"
+                    hoverColor: "#1d324d"
                     enabled: !backend.isRescanning
-                    font.pixelSize: 11
-                    font.bold: true
                     onClicked: backend.triggerRescan()
                 }
 
                 // System Monitor
-                Button {
+                TactileButton {
                     text: "📊 시스템 모니터"
-                    font.pixelSize: 11
+                    accentColor: root.colBlue
+                    baseColor: "#1b212c"
+                    hoverColor: "#273142"
                     onClicked: backend.openSystemMonitor()
                 }
 
                 // Close Button
-                Rectangle {
-                    width: 30; height: 30; radius: 4
-                    color: "#1c222c"
-                    border.color: "#2d3748"
-                    Text { anchors.centerIn: parent; text: "✕"; color: root.textDim; font.bold: true; font.pixelSize: 12 }
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.close()
-                    }
+                TactileButton {
+                    implicitWidth: 32
+                    implicitHeight: 30
+                    text: "✕"
+                    accentColor: root.colRed
+                    baseColor: "#24181b"
+                    hoverColor: "#3d1e23"
+                    pressColor: "#170a0d"
+                    textColor: root.colRed
+                    onClicked: root.close()
                 }
             }
         }

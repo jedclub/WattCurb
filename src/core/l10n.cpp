@@ -36,6 +36,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "Ultra Save (Ultra Low - 1.4GHz Cap)",          // PROFILE_ULTRASAVE_LONG
         "Idle Stable (No Leaks)",                       // HUD_IDLE_STABLE
         "📈 Open Matrix Dashboard",                     // ACTION_OPEN_DASHBOARD
+        "🔋 Open Battery Drain Audit Report",            // ACTION_OPEN_BATTERY_REPORT
         "📊 Open KDE System Monitor",                   // ACTION_OPEN_SYSMONITOR
         "CPU Package",                                  // DEV_CPU_PKG
         "GPU Silicon",                                  // DEV_GPU_SILICON
@@ -85,6 +86,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "超极省电模式 (1.4GHz 上限)",                    // PROFILE_ULTRASAVE_LONG
         "空闲稳定 (无泄漏)",                             // HUD_IDLE_STABLE
         "📈 打开精确分析矩阵窗口",                       // ACTION_OPEN_DASHBOARD
+        "🔋 打开电池深度分析报告",                       // ACTION_OPEN_BATTERY_REPORT
         "📊 打开 KDE 系统监视器",                        // ACTION_OPEN_SYSMONITOR
         "CPU 封装",                                      // DEV_CPU_PKG
         "GPU 核心",                                      // DEV_GPU_SILICON
@@ -134,6 +136,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "अल्ट्रा सेव मोड (1.4GHz सीमा)",                 // PROFILE_ULTRASAVE_LONG
         "निष्क्रिय स्थिर (कोई रिसाव नहीं)",               // HUD_IDLE_STABLE
         "📈 मैट्रिक्स डैशबोर्ड खोलें",                  // ACTION_OPEN_DASHBOARD
+        "🔋 बैटरी ड्रेन ऑडिट रिपोर्ट खोलें",              // ACTION_OPEN_BATTERY_REPORT
         "📊 KDE सिस्टम मॉनिटर खोलें",                    // ACTION_OPEN_SYSMONITOR
         "CPU पैकेज",                                     // DEV_CPU_PKG
         "GPU सिलिकॉन",                                   // DEV_GPU_SILICON
@@ -146,43 +149,44 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "CPU पैकेज पावर",                                // CLI_CPU_DRAIN
         "GPU सिलिकॉन पावर",                              // CLI_GPU_DRAIN
         "बैटरी स्तर",                                    // CLI_BATTERY_LEVEL
-        "सिस्टम वेकअप दर",                               // CLI_WAKEUPS
+        "सिस्टम वेकअप",                                  // CLI_WAKEUPS
         "कूलिंग फैन गति",                                // CLI_COOLING_FAN
-        "सक्रिय शमन नीतियां",                            // CLI_ACTIVE_MITIGATIONS
-        "शीर्ष बिजली खपत प्रक्रिया",                     // CLI_TOP_CULPRIT
+        "सक्रिय शमन",                                    // CLI_ACTIVE_MITIGATIONS
+        "शीर्ष पावर उपभोक्ता",                           // CLI_TOP_CULPRIT
         "कुल खपत",                                       // DASH_TOTAL_DRAIN
-        "CPU एवं मेमोरी सबसिस्टम",                        // DASH_CPU_MEM_SUBSYSTEM
-        "बैटरी एवं पावर सप्लाई",                         // DASH_BATTERY_POWER_SUPPLY
-        "GPU सिलिकॉन एवं लोड",                           // DASH_GPU_SILICON_LOAD
-        "डिस्प्ले एवं बैकलाइट",                          // DASH_DISPLAY_BACKLIGHT
-        "स्टोरेज एवं NVMe SSD",                          // DASH_STORAGE_NVME
-        "हार्डवेयर पावर वितरण",                          // DASH_POWER_SHARE_HW
-        "प्रक्रिया ऊर्जा खपत",                           // DASH_POWER_SHARE_PROC
-        "पावर खपत समयरेखा",                              // DASH_TIMELINE
+        "CPU और मेमोरी सब-सिस्टम",                        // DASH_CPU_MEM_SUBSYSTEM
+        "बैटरी और पावर सप्लाई",                           // DASH_BATTERY_POWER_SUPPLY
+        "GPU सिलिकॉन और लोड",                            // DASH_GPU_SILICON_LOAD
+        "डिस्प्ले और बैकलाइट",                           // DASH_DISPLAY_BACKLIGHT
+        "स्टोरेज और NVMe SSD",                            // DASH_STORAGE_NVME
+        "हार्डवेयर पावर शेयर",                           // DASH_POWER_SHARE_HW
+        "प्रोसेस पावर खपत",                              // DASH_POWER_SHARE_PROC
+        "पावर ड्रेन टाइमलाइन",                           // DASH_TIMELINE
         "विवरण",                                         // DASH_DETAILS
     },
     // 3: ES (Spanish - Español)
     {
-        "Descargando",                                  // STATUS_DISCHARGING
-        "AC Directo (Carga completa)",                  // STATUS_AC_PASSTHROUGH
-        "Cargando con AC",                              // STATUS_AC_CHARGING
-        "AC Conectado",                                 // STATUS_AC_CONNECTED
-        "Con batería",                                  // STATUS_ON_BATTERY
-        "%u min restantes",                             // BATTERY_TIME_LEFT
-        "Calculando...",                                // BATTERY_TIME_CALCULATING
-        "Conectado a la red (Ilimitado)",               // BATTERY_TIME_UNLIMITED
-        "%1h %2m",                                      // BATTERY_TIME_HOURS_MINS
-        "%1m",                                          // BATTERY_TIME_MINS
-        "Rendimiento (4.1G Boost)",                     // PROFILE_PERFORMANCE_SHORT
-        "Equilibrado",                                  // PROFILE_BALANCED_SHORT
-        "Ahorro Inteligente (1.7G)",                    // PROFILE_SMARTSAVE_SHORT
-        "Ultra Ahorro (1.4G)",                          // PROFILE_ULTRASAVE_SHORT
+        "Descargando",                                   // STATUS_DISCHARGING
+        "Red directa (Carga completa)",                  // STATUS_AC_PASSTHROUGH
+        "Cargando en red",                               // STATUS_AC_CHARGING
+        "Conectado a la red",                            // STATUS_AC_CONNECTED
+        "Usando batería",                                // STATUS_ON_BATTERY
+        "%u min restantes",                              // BATTERY_TIME_LEFT
+        "Calculando...",                                 // BATTERY_TIME_CALCULATING
+        "Conectado (Ilimitado)",                         // BATTERY_TIME_UNLIMITED
+        "%1h %2m",                                       // BATTERY_TIME_HOURS_MINS
+        "%1m",                                           // BATTERY_TIME_MINS
+        "Rendimiento (Boost 4.1G)",                      // PROFILE_PERFORMANCE_SHORT
+        "Equilibrado",                                   // PROFILE_BALANCED_SHORT
+        "Ahorro Inteligente (1.7G)",                     // PROFILE_SMARTSAVE_SHORT
+        "Ultra Ahorro (1.4G)",                           // PROFILE_ULTRASAVE_SHORT
         "Modo Rendimiento (Boost 4.1GHz)",              // PROFILE_PERFORMANCE_LONG
         "Modo Equilibrado (Recomendado)",               // PROFILE_BALANCED_LONG
         "Modo Ahorro Inteligente (1.7GHz)",             // PROFILE_SMARTSAVE_LONG
         "Modo Ultra Ahorro (Límite 1.4GHz)",            // PROFILE_ULTRASAVE_LONG
         "Inactivo estable (Sin fugas)",                 // HUD_IDLE_STABLE
         "📈 Abrir panel de control Matrix",             // ACTION_OPEN_DASHBOARD
+        "🔋 Abrir informe de auditoría de batería",       // ACTION_OPEN_BATTERY_REPORT
         "📊 Abrir Monitor del Sistema KDE",             // ACTION_OPEN_SYSMONITOR
         "Paquete CPU",                                  // DEV_CPU_PKG
         "Silicio GPU",                                  // DEV_GPU_SILICON
@@ -206,7 +210,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "PANTALLA Y RETROILUMINACIÓN",                  // DASH_DISPLAY_BACKLIGHT
         "ALMACENAMIENTO Y SSD NVME",                    // DASH_STORAGE_NVME
         "DISTRIBUCIÓN DE ENERGÍA DE HARDWARE",          // DASH_POWER_SHARE_HW
-        "CONSUMO POR PROCESOS",                         // DASH_POWER_SHARE_PROC
+        "CONSUMO POR PROCESSOS",                        // DASH_POWER_SHARE_PROC
         "LÍNEA TEMPORAL DE ENERGÍA",                    // DASH_TIMELINE
         "Detalles",                                     // DASH_DETAILS
     },
@@ -232,6 +236,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "Mode Ultra Économie (Limite 1.4GHz)",          // PROFILE_ULTRASAVE_LONG
         "Veille stable (Aucune fuite)",                 // HUD_IDLE_STABLE
         "📈 Ouvrir le tableau de bord Matrix",          // ACTION_OPEN_DASHBOARD
+        "🔋 Ouvrir le rapport d'audit de batterie",       // ACTION_OPEN_BATTERY_REPORT
         "📊 Ouvrir le moniteur système KDE",            // ACTION_OPEN_SYSMONITOR
         "Package CPU",                                  // DEV_CPU_PKG
         "Silicium GPU",                                 // DEV_GPU_SILICON
@@ -281,6 +286,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "وضع التوفير الأقصى (حد 1.4GHz)",               // PROFILE_ULTRASAVE_LONG
         "خمول مستقر (لا استنزاف)",                      // HUD_IDLE_STABLE
         "📈 فتح لوحة معلومات Matrix",                  // ACTION_OPEN_DASHBOARD
+        "🔋 فتح تقرير فحص استنزاف البطارية",              // ACTION_OPEN_BATTERY_REPORT
         "📊 فتح مراقب نظام KDE",                        // ACTION_OPEN_SYSMONITOR
         "حزمة المعالج",                                 // DEV_CPU_PKG
         "معالج الرسوميات",                              // DEV_GPU_SILICON
@@ -330,6 +336,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "আল্ট্রা সেভ মোড (1.4GHz সর্বোচ্চ)",             // PROFILE_ULTRASAVE_LONG
         "স্থিতিশীল নিষ্ক্রিয় (কোনো অপচয় নেই)",        // HUD_IDLE_STABLE
         "📈 ম্যাট্রিক্স ড্যাশবোর্ড খুলুন",             // ACTION_OPEN_DASHBOARD
+        "🔋 ব্যাটারি ড্রেন অডিট রিপোর্ট খুলুন",           // ACTION_OPEN_BATTERY_REPORT
         "📊 KDE সিস্টেম মনিটর খুলুন",                    // ACTION_OPEN_SYSMONITOR
         "সিপিইউ প্যাকেজ",                               // DEV_CPU_PKG
         "জিপিইউ সিলিকন",                                // DEV_GPU_SILICON
@@ -379,6 +386,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "Modo Ultra Economia (Limite 1.4GHz)",          // PROFILE_ULTRASAVE_LONG
         "Ocioso estável (Sem vazamentos)",              // HUD_IDLE_STABLE
         "📈 Abrir Painel Matrix",                       // ACTION_OPEN_DASHBOARD
+        "🔋 Abrir Relatório de Auditoria de Bateria",     // ACTION_OPEN_BATTERY_REPORT
         "📊 Abrir Monitor do Sistema KDE",              // ACTION_OPEN_SYSMONITOR
         "Pacote CPU",                                   // DEV_CPU_PKG
         "Silício GPU",                                  // DEV_GPU_SILICON
@@ -428,6 +436,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "Ультра энергосбережение (Лимит 1.4GHz)",       // PROFILE_ULTRASAVE_LONG
         "Стабильный простой (Без утечек)",              // HUD_IDLE_STABLE
         "📈 Открыть матричную панель управления",       // ACTION_OPEN_DASHBOARD
+        "🔋 Открыть отчет об аудите расхода батареи",     // ACTION_OPEN_BATTERY_REPORT
         "📊 Открыть системный монитор KDE",             // ACTION_OPEN_SYSMONITOR
         "Корпус CPU",                                   // DEV_CPU_PKG
         "Кристалл GPU",                                 // DEV_GPU_SILICON
@@ -477,6 +486,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "الٹرا پاور سیور موڈ (1.4GHz حد)",              // PROFILE_ULTRASAVE_LONG
         "مستحکم بیکار (کوئی رساو نہیں)",                // HUD_IDLE_STABLE
         "📈 میٹرکس ڈیش بورڈ کھولیں",                   // ACTION_OPEN_DASHBOARD
+        "🔋 بیٹری ڈرین آڈٹ رپورٹ کھولیں",               // ACTION_OPEN_BATTERY_REPORT
         "📊 KDE سسٹم مانیٹر کھولیں",                    // ACTION_OPEN_SYSMONITOR
         "سی پی یو پیکیج",                               // DEV_CPU_PKG
         "جی پی یو سلیکون",                              // DEV_GPU_SILICON
@@ -526,6 +536,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "Mode Ultra Hemat (Batas 1.4GHz)",              // PROFILE_ULTRASAVE_LONG
         "Idle Stabil (Tanpa Kebocoran)",                // HUD_IDLE_STABLE
         "📈 Buka Dasbor Matriks",                       // ACTION_OPEN_DASHBOARD
+        "🔋 Buka Laporan Audit Pengurasan Baterai",      // ACTION_OPEN_BATTERY_REPORT
         "📊 Buka Monitor Sistem KDE",                   // ACTION_OPEN_SYSMONITOR
         "Paket CPU",                                    // DEV_CPU_PKG
         "Silikon GPU",                                  // DEV_GPU_SILICON
@@ -575,6 +586,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "Ultra-Sparmodus (1.4GHz Limit)",               // PROFILE_ULTRASAVE_LONG
         "Leerlauf stabil (Keine Lecks)",                // HUD_IDLE_STABLE
         "📈 Matrix-Dashboard öffnen",                   // ACTION_OPEN_DASHBOARD
+        "🔋 Batterie-Audit-Bericht öffnen",               // ACTION_OPEN_BATTERY_REPORT
         "📊 KDE-Systemmonitor öffnen",                  // ACTION_OPEN_SYSMONITOR
         "CPU-Paket",                                    // DEV_CPU_PKG
         "GPU-Silizium",                                 // DEV_GPU_SILICON
@@ -624,6 +636,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "Ultra Save (초절전 모드 - 1.4GHz 상한)",        // PROFILE_ULTRASAVE_LONG
         "유휴 안정 (누수 없음)",                         // HUD_IDLE_STABLE
         "📈 정밀 분석 매트릭 창 열기 (Matrix Dashboard)",// ACTION_OPEN_DASHBOARD
+        "🔋 배터리 정밀 분석 리포트 열기 (Battery Audit Report)", // ACTION_OPEN_BATTERY_REPORT
         "📊 KDE 시스템 모니터 열기 (System Monitor)",    // ACTION_OPEN_SYSMONITOR
         "CPU 패키지",                                    // DEV_CPU_PKG
         "GPU 실리콘",                                    // DEV_GPU_SILICON
@@ -812,6 +825,7 @@ std::optional<StringId> parse_string_key(std::string_view key) noexcept {
     if (key == "PROFILE_ULTRASAVE_LONG") return StringId::PROFILE_ULTRASAVE_LONG;
     if (key == "HUD_IDLE_STABLE") return StringId::HUD_IDLE_STABLE;
     if (key == "ACTION_OPEN_DASHBOARD") return StringId::ACTION_OPEN_DASHBOARD;
+    if (key == "ACTION_OPEN_BATTERY_REPORT") return StringId::ACTION_OPEN_BATTERY_REPORT;
     if (key == "ACTION_OPEN_SYSMONITOR") return StringId::ACTION_OPEN_SYSMONITOR;
     if (key == "DEV_CPU_PKG") return StringId::DEV_CPU_PKG;
     if (key == "DEV_GPU_SILICON") return StringId::DEV_GPU_SILICON;

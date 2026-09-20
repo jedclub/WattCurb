@@ -3044,6 +3044,40 @@ void test_package_autostart_and_installer_integrity() {
     std::cout << " [PASS] test_package_autostart_and_installer_integrity (REF-TEST-045: Autostart & GUI launch verified)\n";
 }
 
+// Implements REF-TEST-046 & REF-REQ-081: Tray Battery Report Action & Tactile Button Integrity
+void test_tray_report_action_and_tactile_button_integrity() {
+    std::cout << " [ORACLE GATE] Verifying Tray Battery Report Action & Tactile Buttons (REF-REQ-081)...\n";
+
+    // 1. Verify l10n enum and string key mapping
+    auto opt_id = wattcurb::core::l10n::parse_string_key("ACTION_OPEN_BATTERY_REPORT");
+    assert(opt_id.has_value() && *opt_id == wattcurb::core::l10n::StringId::ACTION_OPEN_BATTERY_REPORT);
+
+    // 2. Verify non-empty translations across all 13 supported languages
+    for (size_t i = 0; i < static_cast<size_t>(wattcurb::core::l10n::Language::COUNT); ++i) {
+        auto lang = static_cast<wattcurb::core::l10n::Language>(i);
+        const char* str = wattcurb::core::l10n::tr(wattcurb::core::l10n::StringId::ACTION_OPEN_BATTERY_REPORT, lang);
+        assert(str != nullptr && std::strlen(str) > 0 && "ACTION_OPEN_BATTERY_REPORT translation must be non-empty");
+    }
+
+    // 3. Verify tray client source contains ACTION_OPEN_BATTERY_REPORT and --report handler
+    std::ifstream tray_src("src/tray/tray_client.cpp");
+    std::string tray_str((std::istreambuf_iterator<char>(tray_src)), std::istreambuf_iterator<char>());
+    assert(tray_str.find("ACTION_OPEN_BATTERY_REPORT") != std::string::npos);
+    assert(tray_str.find("\"--report\"") != std::string::npos);
+
+    // 4. Verify QML sources contain TactileButton component and scale depression
+    std::ifstream dash_qml("src/ui/qml/DashboardWindow.qml");
+    std::string dash_str((std::istreambuf_iterator<char>(dash_qml)), std::istreambuf_iterator<char>());
+    assert(dash_str.find("component TactileButton: Button") != std::string::npos);
+    assert(dash_str.find("scale: !enabled ? 1.0 : (down ? 0.95 : (hovered ? 1.03 : 1.0))") != std::string::npos);
+
+    std::ifstream rep_qml("src/ui/qml/BatteryReportWindow.qml");
+    std::string rep_str((std::istreambuf_iterator<char>(rep_qml)), std::istreambuf_iterator<char>());
+    assert(rep_str.find("component TactileButton: Button") != std::string::npos);
+
+    std::cout << " [PASS] test_tray_report_action_and_tactile_button_integrity (REF-TEST-046: Tray action & tactile UX verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -3053,6 +3087,7 @@ int main() {
     std::cout << "=== WattCurb Unit Test Suite & Oracle Gate Verifier ===\n";
     test::test_token_minimization_harness_integrity();
     test::test_package_autostart_and_installer_integrity();
+    test::test_tray_report_action_and_tactile_button_integrity();
     test::test_deep_battery_drain_report_oracle_gate();
     test::test_modeset_flapping_elimination_and_test_isolation();
     test::test_cpu_features();

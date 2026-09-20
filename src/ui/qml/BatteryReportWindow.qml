@@ -37,6 +37,89 @@ Window {
         onTriggered: reportWin.showCopyToast = false
     }
 
+    // =========================================================================
+    // REUSABLE TACTILE CYBER BUTTON COMPONENT (REF-REQ-081, REF-ARCH-058)
+    // Physical depression (scale: 0.95), distinct hover lighting, and border glow
+    // =========================================================================
+    component TactileButton: Button {
+        id: tBtn
+        property color accentColor: reportWin.colCyan
+        property color baseColor: "#1a222e"
+        property color hoverColor: "#263345"
+        property color pressColor: "#0e1520"
+        property color textColor: "#e2e8f0"
+        property real customRadius: 6
+
+        implicitHeight: 30
+        hoverEnabled: true
+
+        scale: !enabled ? 1.0 : (down ? 0.95 : (hovered ? 1.03 : 1.0))
+        Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+
+        contentItem: RowLayout {
+            spacing: 5
+            anchors.centerIn: parent
+            Text {
+                text: tBtn.text
+                font.pixelSize: 11
+                font.bold: true
+                color: !tBtn.enabled ? "#64748b" : (tBtn.highlighted ? "#ffffff" : (tBtn.hovered ? "#ffffff" : tBtn.textColor))
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                y: tBtn.down ? 1 : 0
+            }
+        }
+
+        background: Rectangle {
+            radius: tBtn.customRadius
+            color: !tBtn.enabled ? "#11161f" : (
+                tBtn.down ? tBtn.pressColor : (
+                    tBtn.highlighted ? Qt.rgba(tBtn.accentColor.r, tBtn.accentColor.g, tBtn.accentColor.b, 0.32) : (
+                        tBtn.hovered ? tBtn.hoverColor : tBtn.baseColor
+                    )
+                )
+            )
+            border.color: !tBtn.enabled ? "#243042" : (
+                tBtn.highlighted ? tBtn.accentColor : (
+                    tBtn.hovered ? tBtn.accentColor : "#37475d"
+                )
+            )
+            border.width: (tBtn.highlighted || tBtn.hovered) ? 1.5 : 1
+
+            // Subtle top bevel highlight for tactile 3D realism
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.topMargin: 1
+                anchors.leftMargin: 2
+                anchors.rightMargin: 2
+                height: 1
+                color: tBtn.down ? "transparent" : (tBtn.hovered ? Qt.rgba(1, 1, 1, 0.25) : Qt.rgba(1, 1, 1, 0.08))
+                radius: tBtn.customRadius
+            }
+
+            // Subtle bottom shadow line
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 1
+                anchors.leftMargin: 2
+                anchors.rightMargin: 2
+                height: 1
+                color: tBtn.down ? "transparent" : Qt.rgba(0, 0, 0, 0.4)
+                radius: tBtn.customRadius
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: tBtn.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+            acceptedButtons: Qt.NoButton
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 14
@@ -100,39 +183,23 @@ Window {
                 }
 
                 // Action 1: Refresh
-                Button {
+                TactileButton {
                     text: "🔄 새로고침"
-                    contentItem: Text {
-                        text: parent.text
-                        color: reportWin.colCyan
-                        font.bold: true
-                        font.pixelSize: 11
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                    background: Rectangle {
-                        color: parent.down ? "#162b3d" : (parent.hovered ? "#132332" : "#0e1823")
-                        border.color: reportWin.colCyan
-                        radius: 4
-                    }
+                    accentColor: reportWin.colCyan
+                    baseColor: "#13212f"
+                    hoverColor: "#1c3249"
+                    textColor: reportWin.colCyan
                     onClicked: backend.generateBatteryReport()
                 }
 
                 // Action 2: Copy Markdown Report
-                Button {
+                TactileButton {
                     text: "📋 리포트 마크다운 복사"
-                    contentItem: Text {
-                        text: parent.text
-                        color: "#ffffff"
-                        font.bold: true
-                        font.pixelSize: 11
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                    background: Rectangle {
-                        color: parent.down ? "#047857" : (parent.hovered ? "#059669" : "#10b981")
-                        radius: 4
-                    }
+                    accentColor: reportWin.colGreen
+                    baseColor: "#0f3327"
+                    hoverColor: "#154d3b"
+                    pressColor: "#072017"
+                    textColor: "#34d399"
                     onClicked: {
                         backend.copyReportToClipboard();
                         reportWin.copyToastText = "✓ 마크다운 리포트가 클립보드에 복사되었습니다!";
@@ -142,21 +209,13 @@ Window {
                 }
 
                 // Action 3: Close
-                Button {
+                TactileButton {
                     text: "닫기"
-                    contentItem: Text {
-                        text: parent.text
-                        color: reportWin.textDim
-                        font.bold: true
-                        font.pixelSize: 11
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                    background: Rectangle {
-                        color: parent.down ? "#222a36" : (parent.hovered ? "#1a212b" : "#12161d")
-                        border.color: reportWin.borderPanel
-                        radius: 4
-                    }
+                    accentColor: reportWin.colRed
+                    baseColor: "#221a1d"
+                    hoverColor: "#382228"
+                    pressColor: "#140c0f"
+                    textColor: "#fca5a5"
                     onClicked: reportWin.close()
                 }
             }
@@ -633,22 +692,15 @@ Window {
 
                     Item { Layout.fillHeight: true }
 
-                    Button {
+                    TactileButton {
                         Layout.fillWidth: true
-                        height: 36
+                        implicitHeight: 36
                         text: "⚡ Ultra Battery 전환"
-                        contentItem: Text {
-                            text: parent.text
-                            color: "#ffffff"
-                            font.bold: true
-                            font.pixelSize: 11
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            color: parent.down ? "#047857" : (parent.hovered ? "#059669" : "#10b981")
-                            radius: 4
-                        }
+                        accentColor: reportWin.colGreen
+                        baseColor: "#0f3a2c"
+                        hoverColor: "#155742"
+                        pressColor: "#07241a"
+                        textColor: "#34d399"
                         onClicked: {
                             backend.setProfile(3); // Mode 3: Ultra Battery
                             reportWin.copyToastText = "✓ Ultra Battery 모드로 즉시 전환되었습니다!";

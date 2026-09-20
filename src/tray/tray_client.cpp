@@ -1060,7 +1060,8 @@ int TrayClient::dbusmenu_method_get_layout(sd_bus_message* msg, void* userdata, 
     add_item(8, core::l10n::tr(core::l10n::StringId::PROFILE_ULTRASAVE_LONG), true, nullptr, "radio", (cur_mode == 3 ? 1 : 0));
     add_item(9, nullptr, true, "separator");
     add_item(10, core::l10n::tr(core::l10n::StringId::ACTION_OPEN_DASHBOARD));
-    add_item(11, core::l10n::tr(core::l10n::StringId::ACTION_OPEN_SYSMONITOR));
+    add_item(11, core::l10n::tr(core::l10n::StringId::ACTION_OPEN_BATTERY_REPORT));
+    add_item(12, core::l10n::tr(core::l10n::StringId::ACTION_OPEN_SYSMONITOR));
 
     sd_bus_message_close_container(reply); // children av
     sd_bus_message_close_container(reply); // root r
@@ -1109,7 +1110,12 @@ int TrayClient::dbusmenu_method_event(sd_bus_message* msg, void* userdata, sd_bu
                 if (::access(dash_bin, X_OK) == 0) {
                     ::execl(dash_bin, "wattcurb-dashboard", nullptr);
                 } else {
-                    ::execlp("wattcurb-dashboard", "wattcurb-dashboard", nullptr);
+                    const char* usr_bin = "/usr/local/bin/wattcurb-dashboard";
+                    if (::access(usr_bin, X_OK) == 0) {
+                        ::execl(usr_bin, "wattcurb-dashboard", nullptr);
+                    } else {
+                        ::execlp("wattcurb-dashboard", "wattcurb-dashboard", nullptr);
+                    }
                 }
                 ::_exit(0);
             }
@@ -1119,6 +1125,24 @@ int TrayClient::dbusmenu_method_event(sd_bus_message* msg, void* userdata, sd_bu
             sd_bus_emit_signal(self->bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewToolTip", nullptr);
             sd_bus_emit_signal(self->bus_, "/MenuBar", "com.canonical.dbusmenu", "LayoutUpdated", "ui", ++self->menu_revision_, 0);
         } else if (id == 11) {
+            // Instant launch of Deep Battery Drain Audit Report Window (REF-REQ-081)
+            pid_t pid = ::fork();
+            if (pid == 0) {
+                ::setsid();
+                const char* dash_bin = "/home/jedclub/.local/bin/wattcurb-dashboard";
+                if (::access(dash_bin, X_OK) == 0) {
+                    ::execl(dash_bin, "wattcurb-dashboard", "--report", nullptr);
+                } else {
+                    const char* usr_bin = "/usr/local/bin/wattcurb-dashboard";
+                    if (::access(usr_bin, X_OK) == 0) {
+                        ::execl(usr_bin, "wattcurb-dashboard", "--report", nullptr);
+                    } else {
+                        ::execlp("wattcurb-dashboard", "wattcurb-dashboard", "--report", nullptr);
+                    }
+                }
+                ::_exit(0);
+            }
+        } else if (id == 12) {
             if (::fork() == 0) {
                 ::execlp("plasma-systemmonitor", "plasma-systemmonitor", nullptr);
                 ::_exit(0);
