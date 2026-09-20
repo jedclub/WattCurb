@@ -30,6 +30,7 @@ DaemonRunner::DaemonRunner(double period_sec, double window_sec, std::string_vie
 
 DaemonRunner::~DaemonRunner() {
     stop();
+    window_governor_.rollback_all();
     policy::MitigationEngine::restore_hardware_baseline();
     cleanup_descriptors();
 }
@@ -760,6 +761,41 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
         const char ack[] = "OK\n";
         ::sendto(fd, ack, sizeof(ack) - 1, 0,
                  reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+    } else if (req.rfind("ACTIVE_WINDOW ", 0) == 0 && bytes >= 14) {
+        // Parse "ACTIVE_WINDOW <pid> [comm]" (REF-REQ-085, REF-ARCH-062)
+        int32_t target_pid = 0;
+        char comm_buf[64]{};
+        int parsed = std::sscanf(req.data() + 14, "%d %63s", &target_pid, comm_buf);
+        if (parsed >= 1 && target_pid > 1) {
+            window_governor_.engage_active_window(target_pid, comm_buf);
+            const char ack[] = "OK\n";
+            ::sendto(fd, ack, sizeof(ack) - 1, 0,
+                     reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+            return;
+        }
+        const char err[] = "ERR: Invalid PID\n";
+        ::sendto(fd, err, sizeof(err) - 1, 0,
+                 reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+        return;
+    } else if (req.rfind("WINDOW_STATE ", 0) == 0 && bytes >= 13) {
+        // Parse "WINDOW_STATE <pid> <minimized:0|1> <active:0|1> [is_audio:0|1]" (REF-REQ-033, REF-REQ-085)
+        int32_t target_pid = 0;
+        int min_val = 0;
+        int act_val = 0;
+        int audio_val = 0;
+        int parsed = std::sscanf(req.data() + 13, "%d %d %d %d", &target_pid, &min_val, &act_val, &audio_val);
+        if (parsed >= 3 && target_pid > 1) {
+            uint64_t now_sec = static_cast<uint64_t>(std::time(nullptr));
+            window_governor_.on_window_state_changed(target_pid, min_val != 0, act_val != 0, now_sec, audio_val != 0);
+            const char ack[] = "OK\n";
+            ::sendto(fd, ack, sizeof(ack) - 1, 0,
+                     reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+            return;
+        }
+        const char err[] = "ERR: Invalid Window State\n";
+        ::sendto(fd, err, sizeof(err) - 1, 0,
+                 reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+        return;
     } else {
         // High-Efficiency Binary Telemetry: Send 128-Byte Seqlock POD directly (0 allocations, 0 parsing)
         ::sendto(fd, &local_shared_state_, sizeof(local_shared_state_), 0,
@@ -769,6 +805,7 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
 
 void DaemonRunner::stop() noexcept {
     running_ = false;
+    window_governor_.rollback_all();
 }
 
 } // namespace wattcurb::core

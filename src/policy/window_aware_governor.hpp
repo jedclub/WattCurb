@@ -3,7 +3,9 @@
 #include "core/custom_containers.hpp"
 #include "policy/process_classifier.hpp"
 #include "policy/mitigation_engine.hpp"
+#include "policy/pm_qos_controller.hpp"
 #include <cstdint>
+#include <string_view>
 
 namespace wattcurb::policy {
 
@@ -26,11 +28,24 @@ struct alignas(32) WindowStateEntry {
     uint64_t original_timerslack_ns{50000};
 };
 
+// Implements REF-REQ-085 & REF-ARCH-062:
+// Exact Pre-Guarantee Baseline State Journal for the Active Window
+struct alignas(64) ActiveWindowResourceSnapshot {
+    int32_t pid{0};
+    int original_nice{0};
+    int original_sched_policy{0};
+    cpu_set_t original_affinity{};
+    uint64_t original_timerslack_ns{50000};
+    bool has_original_state{false};
+    bool is_guarantee_active{false};
+};
+
 class WindowAwareGovernor {
 public:
     static constexpr size_t MAX_TRACKED_WINDOWS = 64;
 
     WindowAwareGovernor() noexcept = default;
+    ~WindowAwareGovernor() noexcept { rollback_all(); }
 
     // Ingests window state events from KWin Scripting / D-Bus
     void on_window_state_changed(
@@ -47,7 +62,17 @@ public:
     // Instantaneous unthrottle and scheduler restoration (< 50µs)
     bool unthrottle_immediate(int32_t pid) noexcept;
 
-    // Global rollback (e.g. on AC reconnection or daemon shutdown)
+    // Active Window Fixed Resource Guarantee & PM QoS C0 Pinning (REF-REQ-085, REF-ARCH-062)
+    bool engage_active_window(int32_t pid, const char* comm = "") noexcept;
+    void release_active_window() noexcept;
+
+    [[nodiscard]] bool is_active_window_engaged() const noexcept { return m_active_snapshot.is_guarantee_active; }
+    [[nodiscard]] int32_t active_window_pid() const noexcept { return m_active_snapshot.pid; }
+    [[nodiscard]] const ActiveWindowResourceSnapshot& active_snapshot() const noexcept { return m_active_snapshot; }
+    [[nodiscard]] const PmQosController& pm_qos() const noexcept { return m_pm_qos; }
+    PmQosController& pm_qos_mut() noexcept { return m_pm_qos; }
+
+    // Global rollback (e.g. on AC reconnection, profile switch, or daemon shutdown)
     void rollback_all() noexcept;
 
     [[nodiscard]] size_t tracked_count() const noexcept { return m_windows.size(); }
@@ -71,6 +96,8 @@ private:
     }
 
     core::FixedVector<WindowStateEntry, MAX_TRACKED_WINDOWS> m_windows{};
+    ActiveWindowResourceSnapshot m_active_snapshot{};
+    PmQosController m_pm_qos{};
 };
 
 } // namespace wattcurb::policy

@@ -8,6 +8,7 @@
 #include "policy/process_classifier.hpp"
 #include "policy/mitigation_engine.hpp"
 #include "policy/window_aware_governor.hpp"
+#include "policy/pm_qos_controller.hpp"
 #include "policy/unified_rollback_coordinator.hpp"
 #include "policy/battery_feature.hpp"
 #include "report/report_generator.hpp"
@@ -38,6 +39,7 @@
 #include <sstream>
 #include <string>
 #include <sys/syscall.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 // Implements REF-TEST-002 & Oracle Gate Verification
@@ -2123,6 +2125,141 @@ void test_adaptive_c1_c2_cluster_dispersion() {
               << avg_us_op << " us/op)\n";
 }
 
+// Implements REF-TEST-049: KDE Active Window Resource Guarantee & C0 Latency Pinning (PM QoS) Oracle Gate
+void test_active_window_resource_guarantee_and_c0_qos() {
+    using namespace wattcurb;
+    using namespace wattcurb::policy;
+
+    std::cout << "--- [REF-TEST-049] KDE Active Window Resource Guarantee & PM QoS C0 Pinning Verification ---\n";
+
+    // 1. PM QoS Controller Unit Verification via mock character device
+    const char* mock_qos_path = "/tmp/wattcurb_mock_cpu_dma_latency";
+    int mfd = ::open(mock_qos_path, O_CREAT | O_WRONLY | O_TRUNC, 0666);
+    if (mfd >= 0) ::close(mfd);
+
+    PmQosController::set_device_path_for_testing(mock_qos_path);
+
+    PmQosController qos;
+    assert(!qos.is_pinned() && "PM QoS must initialize in unpinned state");
+    assert(qos.raw_fd() == -1 && "Raw FD must be -1 when unpinned");
+
+    bool pin_ok = qos.pin_c0_latency(0);
+    assert(pin_ok && "pin_c0_latency(0) should succeed on mock device");
+    assert(qos.is_pinned() && "PM QoS should be marked pinned");
+    assert(qos.raw_fd() >= 0 && "Raw FD should be valid open descriptor");
+
+    // Verify 32-bit integer 0 was written
+    int read_fd = ::open(mock_qos_path, O_RDONLY);
+    assert(read_fd >= 0);
+    int32_t read_val = -1;
+    ssize_t rb = ::read(read_fd, &read_val, sizeof(read_val));
+    ::close(read_fd);
+    assert(rb == sizeof(read_val) && "Must have written exactly 4 bytes");
+    assert(read_val == 0 && "Written PM QoS latency constraint must be 0us");
+
+    qos.release_latency_pin();
+    assert(!qos.is_pinned() && "PM QoS must be unpinned after release");
+    assert(qos.raw_fd() == -1 && "Raw FD must be -1 after release");
+
+    // 2. Active Window Fixed Resource Guarantee & Rollback Lifecycle
+    WindowAwareGovernor gov;
+
+    // Spawn a dummy process to test active window actuation
+    pid_t child = ::fork();
+    if (child == 0) {
+        // Child process
+        ::pause();
+        ::_exit(0);
+    }
+    assert(child > 0 && "fork should succeed");
+
+    // Capture child initial affinity
+    cpu_set_t initial_child_aff{};
+    CPU_ZERO(&initial_child_aff);
+    ::sched_getaffinity(child, sizeof(initial_child_aff), &initial_child_aff);
+
+    // Engage active window guarantee
+    bool engaged = gov.engage_active_window(child, "konsole");
+    assert(engaged && "engage_active_window must succeed for valid child PID");
+    assert(gov.is_active_window_engaged() && "Active window guarantee must be active");
+    assert(gov.active_window_pid() == child && "Active window PID must match child");
+    assert(gov.active_snapshot().is_guarantee_active && "Snapshot must record active guarantee");
+    assert(gov.pm_qos().is_pinned() && "PM QoS C0 latency must be pinned while active window is engaged");
+
+    // Verify spatial core pinning to Cluster 1
+    cpu_set_t active_aff{};
+    CPU_ZERO(&active_aff);
+    ::sched_getaffinity(child, sizeof(active_aff), &active_aff);
+    cpu_set_t c1 = MitigationEngine::get_c1_cpuset();
+    int32_t total_cpus = MitigationEngine::get_total_online_cpus();
+    for (int32_t c = 0; c < total_cpus; ++c) {
+        if (CPU_ISSET(c, &active_aff)) {
+            assert(CPU_ISSET(c, &c1) && "Active window CPU cores must belong exclusively to Cluster 1");
+        }
+    }
+
+    // 3. Focus Shift / Release Guarantee
+    gov.release_active_window();
+    assert(!gov.is_active_window_engaged() && "Active window must be disengaged after release");
+    assert(!gov.pm_qos().is_pinned() && "PM QoS C0 pin must be released upon window de-escalation");
+
+    // Verify child affinity restored
+    cpu_set_t restored_aff{};
+    CPU_ZERO(&restored_aff);
+    ::sched_getaffinity(child, sizeof(restored_aff), &restored_aff);
+    for (int32_t c = 0; c < total_cpus; ++c) {
+        assert(CPU_ISSET(c, &restored_aff) == CPU_ISSET(c, &initial_child_aff) &&
+               "Core affinity must be faithfully restored to baseline");
+    }
+
+    // 4. Ingest via on_window_state_changed (active=true -> active=false)
+    uint64_t now_sec = static_cast<uint64_t>(std::time(nullptr));
+    gov.on_window_state_changed(child, false, true, now_sec, false);
+    assert(gov.is_active_window_engaged() && "on_window_state_changed(active=true) must engage active window");
+
+    gov.on_window_state_changed(child, false, false, now_sec, false);
+    assert(!gov.is_active_window_engaged() && "on_window_state_changed(active=false) must release active window");
+
+    // 5. Minimized Throttling and Rapid Rollback Integration
+    gov.on_window_state_changed(child, true, false, now_sec, false);
+    assert(gov.tracked_count() == 1 && "Minimized window must be tracked");
+    const auto* entry = gov.find_entry(child);
+    assert(entry != nullptr && entry->state == WindowSuppressionState::GracefulIdleThrottled);
+
+    // Rollback all
+    gov.rollback_all();
+    assert(gov.tracked_count() == 0 && "All tracked windows must be cleared on rollback");
+    assert(!gov.is_active_window_engaged() && "Active window must remain disengaged");
+    assert(!gov.pm_qos().is_pinned() && "PM QoS must remain clean");
+
+    // 6. Benchmarking Actuation Latency
+    constexpr int BENCH_ITERS = 1000;
+    auto t0 = std::chrono::steady_clock::now();
+    for (int i = 0; i < BENCH_ITERS; ++i) {
+        gov.engage_active_window(child, "bench");
+        gov.release_active_window();
+    }
+    auto t1 = std::chrono::steady_clock::now();
+    double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
+    double avg_us_op = total_us / (BENCH_ITERS * 2);
+
+    std::cout << " [ORACLE GATE] Active Window Guarantee Benchmark:\n"
+              << "   * Total Iterations: " << (BENCH_ITERS * 2) << "\n"
+              << "   * Total Time      : " << total_us << " us\n"
+              << "   * Average Latency : " << std::fixed << std::setprecision(4) << avg_us_op << " us/op\n";
+
+    assert(avg_us_op < 50.0 && "Active window transition must complete in < 50 us/op");
+
+    // Clean up dummy process and mock file
+    ::kill(child, SIGKILL);
+    ::waitpid(child, nullptr, 0);
+    ::unlink(mock_qos_path);
+    PmQosController::reset_device_path();
+
+    std::cout << " [PASS] test_active_window_resource_guarantee_and_c0_qos (REF-TEST-049: C0 Pinning, C1 Spatial Affinity, "
+              << avg_us_op << " us/op)\n";
+}
+
 // Implements REF-TEST-020: Dual-Domain Pre-Transition State Journaling & Faithful Restoration Verification
 void test_state_journaling_and_faithful_restoration() {
     using namespace wattcurb;
@@ -3296,6 +3433,7 @@ int main() {
     test::test_multilingual_l10n_and_auto_system_locale();
     test::test_anti_starvation_and_greedy_capping();
     test::test_adaptive_c1_c2_cluster_dispersion();
+    test::test_active_window_resource_guarantee_and_c0_qos();
     test::test_state_journaling_and_faithful_restoration();
     test::test_zero_disk_wakeup_logging_and_history_ring_buffer();
     test::test_circular_power_share_visualization();

@@ -6,6 +6,7 @@
 #include "proc/process_analyzer.hpp"
 #include "policy/attribution_engine.hpp"
 #include "policy/battery_feature.hpp"
+#include "policy/window_aware_governor.hpp"
 
 #include <atomic>
 #include <string>
@@ -33,6 +34,8 @@ public:
     [[nodiscard]] const ipc::WattCurbSharedState& shared_state() const noexcept { return local_shared_state_; }
     [[nodiscard]] policy::FeatureManager& feature_manager() noexcept { return feature_manager_; }
     [[nodiscard]] const policy::FeatureManager& feature_manager() const noexcept { return feature_manager_; }
+    [[nodiscard]] policy::WindowAwareGovernor& window_governor() noexcept { return window_governor_; }
+    [[nodiscard]] const policy::WindowAwareGovernor& window_governor() const noexcept { return window_governor_; }
 
 private:
     double period_sec_{3.0};
@@ -45,6 +48,7 @@ private:
     proc::ProcessAnalyzer proc_analyzer_;
     policy::AttributionEngine engine_;
     policy::FeatureManager feature_manager_;
+    policy::WindowAwareGovernor window_governor_{};
     ProcessPool proc_pool_;
     AnalysisReportData cached_report_;
     HardwareSample hw_prev_{};

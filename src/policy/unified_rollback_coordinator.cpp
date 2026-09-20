@@ -10,7 +10,7 @@ bool UnifiedRollbackCoordinator::execute_rapid_rollback(
     uint64_t now_ns
 ) noexcept {
     // Fast idempotent bypass: if system is already at clean baseline, return immediately with zero syscalls
-    if (s_state.is_clean_baseline && window_gov.tracked_count() == 0 && mitigation.tracked_count() == 0) {
+    if (s_state.is_clean_baseline && window_gov.tracked_count() == 0 && !window_gov.is_active_window_engaged() && mitigation.tracked_count() == 0) {
         return true;
     }
 
