@@ -1,0 +1,40 @@
+name: WattCurb CI Verification
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    name: Build & Oracle Gate Unit Test
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build pkg-config \
+            libsystemd-dev \
+            qt6-base-dev qt6-declarative-dev \
+            qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWATTCURB_BUILD_TESTS=ON \
+            -DWATTCURB_ENABLE_PGO=OFF
+
+      - name: Compile All Targets
+        run: |
+          ninja -C build
+
+      - name: Run Oracle Gate Tests
+        run: |
+          ./build/wattcurb_tests
