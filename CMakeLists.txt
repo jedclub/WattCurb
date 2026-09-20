@@ -13,11 +13,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(WATTCURB_ENABLE_LTO "Enable Link-Time Optimization" ON)
 option(WATTCURB_ENABLE_PGO_GEN "Enable PGO Profile Generation (-fprofile-generate)" OFF)
 option(WATTCURB_ENABLE_PGO_USE "Enable PGO Profile Usage (-fprofile-use)" OFF)
-option(WATTCURB_ENABLE_DEV_PROFILER "Enable Subsystem Scoped Development Profiler" ON)
+option(WATTCURB_ENABLE_DEV_PROFILER "Enable Subsystem Scoped Development Profiler (Debug/Profiling only)" OFF)
 
 if(WATTCURB_ENABLE_DEV_PROFILER)
     message(STATUS "Development Profiler: Subsystem Scoped Profiler ENABLED (-DWATTCURB_DEV_PROFILE)")
     add_compile_definitions(WATTCURB_DEV_PROFILE=1)
+else()
+    message(STATUS "Development Profiler: Subsystem Scoped Profiler DISABLED (Pure Zero-Overhead Release)")
+    add_compile_definitions(WATTCURB_DISABLE_DEV_PROFILE=1)
 endif()
 
 # Compiler optimization and warning flags
