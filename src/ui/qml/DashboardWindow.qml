@@ -127,6 +127,7 @@ ApplicationWindow {
     Connections {
         target: backend
         function onReportWindowRequested() {
+            reportWindow.visible = true;
             reportWindow.show();
             reportWindow.raise();
             reportWindow.requestActivate();
@@ -249,6 +250,7 @@ ApplicationWindow {
                     textColor: "#34d399"
                     onClicked: {
                         backend.generateBatteryReport();
+                        reportWindow.visible = true;
                         reportWindow.show();
                         reportWindow.raise();
                         reportWindow.requestActivate();
@@ -530,6 +532,7 @@ ApplicationWindow {
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: {
                                         backend.generateBatteryReport();
+                                        reportWindow.visible = true;
                                         reportWindow.show();
                                         reportWindow.raise();
                                         reportWindow.requestActivate();

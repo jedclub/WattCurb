@@ -3391,7 +3391,7 @@ void test_process_full_name_and_interactive_tooltips() {
 
     assert(qml_content.find("Layout.preferredWidth: 200") != std::string::npos);
     assert(qml_content.find("modelData.fullName || modelData.comm") != std::string::npos);
-    assert(qml_content.find("ToolTip.visible: procMa.containsMouse") != std::string::npos);
+    assert(qml_content.find("visible: procMa.containsMouse") != std::string::npos);
     assert(qml_content.find("modelData.cmdline") != std::string::npos);
 
     std::cout << " [PASS] test_process_full_name_and_interactive_tooltips (REF-TEST-047: Full name & cyber tooltips verified)\n";

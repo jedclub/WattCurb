@@ -545,76 +545,79 @@ Window {
                                         hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
 
-                                        ToolTip.visible: procMa.containsMouse
-                                        ToolTip.delay: 150
-                                        ToolTip.timeout: 10000
-                                        ToolTip.background: Rectangle {
-                                            color: "#0f172a"
-                                            border.color: reportWin.colCyan
-                                            border.width: 1.5
-                                            radius: 6
-
-                                            Rectangle {
-                                                anchors.fill: parent
-                                                anchors.margins: -1
+                                        ToolTip {
+                                            id: procToolTip
+                                            visible: procMa.containsMouse
+                                            delay: 150
+                                            timeout: 10000
+                                            background: Rectangle {
+                                                color: "#0f172a"
+                                                border.color: reportWin.colCyan
+                                                border.width: 1.5
                                                 radius: 6
-                                                color: "transparent"
-                                                border.color: "#3300d2ff"
-                                                border.width: 1
-                                                opacity: 0.5
-                                            }
-                                        }
-                                        ToolTip.contentItem: ColumnLayout {
-                                            spacing: 4
-                                            RowLayout {
-                                                spacing: 6
-                                                Rectangle { width: 4; height: 14; radius: 2; color: reportWin.colCyan }
-                                                Text {
-                                                    text: modelData.fullName || modelData.comm || ""
-                                                    color: "#ffffff"
-                                                    font.bold: true
-                                                    font.pixelSize: 12
-                                                    font.family: "Monospace"
-                                                }
-                                                Text {
-                                                    text: "(PID " + modelData.pid + ")"
-                                                    color: reportWin.colOrange
-                                                    font.pixelSize: 11
-                                                    font.family: "Monospace"
+
+                                                Rectangle {
+                                                    anchors.fill: parent
+                                                    anchors.margins: -1
+                                                    radius: 6
+                                                    color: "transparent"
+                                                    border.color: "#3300d2ff"
+                                                    border.width: 1
+                                                    opacity: 0.5
                                                 }
                                             }
-                                            Text {
-                                                visible: !!modelData.cmdline && modelData.cmdline !== (modelData.fullName || modelData.comm)
-                                                text: modelData.cmdline || ""
-                                                color: reportWin.textDim
-                                                font.pixelSize: 10
-                                                font.family: "Monospace"
-                                                wrapMode: Text.WrapAnywhere
-                                                Layout.maximumWidth: 440
-                                            }
-                                            Rectangle {
-                                                Layout.fillWidth: true
-                                                height: 1
-                                                color: reportWin.borderPanel
-                                            }
-                                            RowLayout {
-                                                spacing: 12
+                                            contentItem: ColumnLayout {
+                                                spacing: 4
+                                                RowLayout {
+                                                    spacing: 6
+                                                    Rectangle { width: 4; height: 14; radius: 2; color: reportWin.colCyan }
+                                                    Text {
+                                                        text: modelData.fullName || modelData.comm || ""
+                                                        color: "#ffffff"
+                                                        font.bold: true
+                                                        font.pixelSize: 12
+                                                        font.family: "Monospace"
+                                                    }
+                                                    Text {
+                                                        text: "(PID " + modelData.pid + ")"
+                                                        color: reportWin.colOrange
+                                                        font.pixelSize: 11
+                                                        font.family: "Monospace"
+                                                    }
+                                                }
                                                 Text {
-                                                    text: "도메인: " + (modelData.domain || "CPU")
-                                                    color: reportWin.colCyan
+                                                    visible: !!modelData.cmdline && modelData.cmdline !== (modelData.fullName || modelData.comm)
+                                                    text: modelData.cmdline || ""
+                                                    color: reportWin.textDim
                                                     font.pixelSize: 10
+                                                    font.family: "Monospace"
+                                                    wrapMode: Text.WrapAnywhere
+                                                    Layout.maximumWidth: 440
+                                                }
+                                                Rectangle {
+                                                    Layout.fillWidth: true
+                                                    height: 1
+                                                    color: reportWin.borderPanel
+                                                }
+                                                RowLayout {
+                                                    spacing: 12
+                                                    Text {
+                                                        text: "도메인: " + (modelData.domain || "CPU")
+                                                        color: reportWin.colCyan
+                                                        font.pixelSize: 10
+                                                    }
+                                                    Text {
+                                                        text: "방전량: " + (modelData.drainWh ? modelData.drainWh.toFixed(2) : "0.00") + " Wh (" + (modelData.sharePercent ? modelData.sharePercent.toFixed(1) : "0.0") + "%)"
+                                                        color: reportWin.colOrange
+                                                        font.bold: true
+                                                        font.pixelSize: 10
+                                                    }
                                                 }
                                                 Text {
-                                                    text: "방전량: " + (modelData.drainWh ? modelData.drainWh.toFixed(2) : "0.00") + " Wh (" + (modelData.sharePercent ? modelData.sharePercent.toFixed(1) : "0.0") + "%)"
-                                                    color: reportWin.colOrange
-                                                    font.bold: true
-                                                    font.pixelSize: 10
+                                                    text: "메커니즘: " + (modelData.mechanism || "Normal execution")
+                                                    color: reportWin.textMuted
+                                                    font.pixelSize: 9
                                                 }
-                                            }
-                                            Text {
-                                                text: "메커니즘: " + (modelData.mechanism || "Normal execution")
-                                                color: reportWin.textMuted
-                                                font.pixelSize: 9
                                             }
                                         }
                                     }

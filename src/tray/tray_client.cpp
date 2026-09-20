@@ -1129,6 +1129,7 @@ int TrayClient::dbusmenu_method_event(sd_bus_message* msg, void* userdata, sd_bu
             pid_t pid = ::fork();
             if (pid == 0) {
                 ::setsid();
+                ::system("pkill -f 'wattcurb-dashboard.*--report' 2>/dev/null");
                 const char* dash_bin = "/home/jedclub/.local/bin/wattcurb-dashboard";
                 if (::access(dash_bin, X_OK) == 0) {
                     ::execl(dash_bin, "wattcurb-dashboard", "--report", nullptr);
