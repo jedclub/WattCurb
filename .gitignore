@@ -1,7 +1,7 @@
 # Build and compilation outputs
 build/
 build*/
-output/
+output*/
 tmp/
 *.gcda
 *.gcno
