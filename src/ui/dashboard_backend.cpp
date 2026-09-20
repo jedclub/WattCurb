@@ -211,6 +211,8 @@ bool DashboardBackend::ingestTelemetryJson(const std::string& resp) noexcept {
     }
 
     double total_sys_w = obj.value("system_watts").toDouble(systemDrainWatts());
+    system_drain_w_fallback_ = total_sys_w;
+    gpu_drain_w_fallback_ = obj.value("gpu_w").toDouble(0.8);
 
     QJsonArray proc_arr = obj.value("processes").toArray();
     QVariantList new_list;
@@ -330,7 +332,10 @@ void DashboardBackend::updateFallbackTelemetry() noexcept {
 }
 
 double DashboardBackend::systemDrainWatts() const noexcept {
-    return latest_state_.system_drain_mw / 1000.0;
+    if (latest_state_.system_drain_mw > 0) {
+        return latest_state_.system_drain_mw / 1000.0;
+    }
+    return system_drain_w_fallback_;
 }
 
 int DashboardBackend::batteryPercent() const noexcept {
@@ -374,11 +379,18 @@ QString DashboardBackend::timeToEmptyString() const {
 }
 
 double DashboardBackend::cpuDrainWatts() const noexcept {
-    return latest_state_.cpu_drain_mw / 1000.0;
+    if (latest_state_.cpu_drain_mw > 0) {
+        return latest_state_.cpu_drain_mw / 1000.0;
+    }
+    double parsed = cpu_core_w_ + cpu_uncore_w_;
+    return parsed > 0.0 ? parsed : 3.5;
 }
 
 double DashboardBackend::gpuDrainWatts() const noexcept {
-    return latest_state_.gpu_drain_mw / 1000.0;
+    if (latest_state_.gpu_drain_mw > 0) {
+        return latest_state_.gpu_drain_mw / 1000.0;
+    }
+    return gpu_drain_w_fallback_;
 }
 
 double DashboardBackend::displayDrainWatts() const noexcept {

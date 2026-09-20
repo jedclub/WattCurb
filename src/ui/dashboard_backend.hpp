@@ -245,6 +245,8 @@ private:
     double pmu_ewr_{8.5};
 
     int gpu_load_pct_{0};
+    double gpu_drain_w_fallback_{0.8};
+    double system_drain_w_fallback_{12.5};
     double display_drain_w_{1.8};
     int display_brightness_pct_{50};
     double nvme_drain_w_{0.8};
