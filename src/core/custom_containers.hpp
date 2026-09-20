@@ -11,6 +11,7 @@
 #include <charconv>
 #include <algorithm>
 #include <ostream>
+#include <span>
 
 namespace wattcurb::core {
 

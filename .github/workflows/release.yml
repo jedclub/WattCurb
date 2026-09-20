@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag (e.g. v1.0.1)'
+        description: 'Release tag (e.g. v1.1.0)'
         required: false
         default: ''
       draft:
@@ -36,8 +36,8 @@ jobs:
       - name: Determine Version Tag
         id: vars
         run: |
-          if [ -n "${{ github.event.inputs.release_tag }}" ]; then
-            TAG="${{ github.event.inputs.release_tag }}"
+          if [ -n "${{ inputs.release_tag }}" ]; then
+            TAG="${{ inputs.release_tag }}"
           else
             TAG="${GITHUB_REF#refs/tags/}"
           fi
@@ -147,59 +147,59 @@ jobs:
         id: notes
         run: |
           TAG="${{ steps.vars.outputs.TAG }}"
-          cat << 'EOF' > release_notes.md
-# WattCurb ${TAG} — Production Release (Hardware PMU & PGO Optimized)
+          cat << 'EOF' | sed 's/^ *//' > release_notes.md
+          # WattCurb ${TAG} — Production Release (Hardware PMU & PGO Optimized)
 
-WattCurb is an ultra-low-overhead, singleton Linux background power daemon and KDE Plasma 6 desktop power monitoring client written in modern C++23.
+          WattCurb is an ultra-low-overhead, singleton Linux background power daemon and KDE Plasma 6 desktop power monitoring client written in modern C++23.
 
-This official release is compiled using a multi-stage **Profile-Guided Optimization (PGO)** pipeline and Link-Time Optimization (LTO) with complete diagnostic stripping, achieving sub-milliwatt daemon overhead and zero CPU wakeups.
+          This official release is compiled using a multi-stage **Profile-Guided Optimization (PGO)** pipeline and Link-Time Optimization (LTO) with complete diagnostic stripping, achieving sub-milliwatt daemon overhead and zero CPU wakeups.
 
----
+          ---
 
-## 🚀 Key Highlights & Architectural Features
+          ## 🚀 Key Highlights & Architectural Features
 
-- **Zero-Wakeup Core Engine**: Asynchronous kernel `epoll` and Netlink telemetry with **0 polling timer wakeups** and < 0.05% CPU consumption at idle.
-- **Deep Hardware-Domain Profiling**: Granular power breakdown for CPU (RAPL Package, Core, Uncore, DRAM), GPU (hwmon/sysfs), Display/Backlight, Storage (NVMe APST), and PCIe ASPM.
-- **Progressive Non-Halting Mitigation**: Smooth background throttling ladder via `SCHED_IDLE`, cgroups v2 freezing, and anti-starvation CPU affinity masking.
-- **Zero-Cost 13-Language Localization (l10n)**: Built-in support for the world's **top 12 languages by population** + **Korean** with automatic system locale detection (`LANG`, `LC_ALL`) and 7.2 ns lookup latency.
-- **ThinkPower Desktop Tray & Matrix Dashboard**: Native Qt6 / KDE Plasma 6 StatusNotifierItem with 128-byte Seqlock zero-copy IPC and real-time ANSI terminal & QML dashboards.
+          - **Zero-Wakeup Core Engine**: Asynchronous kernel \`epoll\` and Netlink telemetry with **0 polling timer wakeups** and < 0.05% CPU consumption at idle.
+          - **Deep Hardware-Domain Profiling**: Granular power breakdown for CPU (RAPL Package, Core, Uncore, DRAM), GPU (hwmon/sysfs), Display/Backlight, Storage (NVMe APST), and PCIe ASPM.
+          - **Progressive Non-Halting Mitigation**: Smooth background throttling ladder via \`SCHED_IDLE\`, cgroups v2 freezing, and anti-starvation CPU affinity masking.
+          - **Zero-Cost 13-Language Localization (l10n)**: Built-in support for the world's **top 12 languages by population** + **Korean** with automatic system locale detection (\`LANG\`, \`LC_ALL\`) and 7.2 ns lookup latency.
+          - **ThinkPower Desktop Tray & Matrix Dashboard**: Native Qt6 / KDE Plasma 6 StatusNotifierItem with 128-byte Seqlock zero-copy IPC and real-time ANSI terminal & QML dashboards.
 
----
+          ---
 
-## ⚡ Hardware PMU & PGO Performance Verification
+          ## ⚡ Hardware PMU & PGO Performance Verification
 
-| Metric | Baseline (-O3 + LTO) | PGO Release (-fprofile-use) | Improvement |
-| :--- | :---: | :---: | :---: |
-| **Instructions Per Cycle (IPC)** | 1.00 | **1.20** | **+20.0% Throughput** |
-| **Active CPU Cycles (Workload)** | 7.37 M | **6.07 M** | **-17.6% Cycles Saved** |
-| **L1 Data Cache Misses** | 68.2 K | **51.5 K** | **-24.5% Miss Reduction** |
-| **dTLB Cache Misses** | 4.3 K | **3.6 K** | **-16.3% Miss Reduction** |
-| **ToolTip Render Latency** | 52.1 ns | **27.4 ns** | **1.90x Speedup** |
-| **L10n Lookup Latency** | — | **7.2 ns** | **Zero-Cost O(1)** |
-| **Resident Memory (RSS)** | 12 MB | **< 8 MB** | **-33% Memory Footprint** |
+          | Metric | Baseline (-O3 + LTO) | PGO Release (-fprofile-use) | Improvement |
+          | :--- | :---: | :---: | :---: |
+          | **Instructions Per Cycle (IPC)** | 1.00 | **1.20** | **+20.0% Throughput** |
+          | **Active CPU Cycles (Workload)** | 7.37 M | **6.07 M** | **-17.6% Cycles Saved** |
+          | **L1 Data Cache Misses** | 68.2 K | **51.5 K** | **-24.5% Miss Reduction** |
+          | **dTLB Cache Misses** | 4.3 K | **3.6 K** | **-16.3% Miss Reduction** |
+          | **ToolTip Render Latency** | 52.1 ns | **27.4 ns** | **1.90x Speedup** |
+          | **L10n Lookup Latency** | — | **7.2 ns** | **Zero-Cost O(1)** |
+          | **Resident Memory (RSS)** | 12 MB | **< 8 MB** | **-33% Memory Footprint** |
 
----
+          ---
 
-## 📦 Release Assets & Verification
+          ## 📦 Release Assets & Verification
 
-- `wattcurb-${TAG}-linux-x86_64.tar.gz`: Complete standalone distribution archive with installation scripts and documentation.
-- `wattcurb`: Standalone background power profiling and mitigation daemon.
-- `wattcurb-tray`: Standalone Qt6/KDE Plasma system tray client.
-- `wattcurb-dashboard`: Standalone btop-style matrix dashboard.
-- `wattcurb-pgo-profile-data.tar.gz`: Raw GCC `.gcda` profiling training dataset for reproducible builds.
-- `SHA256SUMS.txt`: Cryptographic checksums for verifying binary integrity.
+          - \`wattcurb-\${TAG}-linux-x86_64.tar.gz\`: Complete standalone distribution archive with installation scripts and documentation.
+          - \`wattcurb\`: Standalone background power profiling and mitigation daemon.
+          - \`wattcurb-tray\`: Standalone Qt6/KDE Plasma system tray client.
+          - \`wattcurb-dashboard\`: Standalone btop-style matrix dashboard.
+          - \`wattcurb-pgo-profile-data.tar.gz\`: Raw GCC \`.gcda\` profiling training dataset for reproducible builds.
+          - \`SHA256SUMS.txt\`: Cryptographic checksums for verifying binary integrity.
 
----
+          ---
 
-## 🛠️ Quick Installation
+          ## 🛠️ Quick Installation
 
-```bash
-wget https://github.com/jedclub/WattCurb/releases/download/${TAG}/wattcurb-${TAG}-linux-x86_64.tar.gz
-tar -xzf wattcurb-${TAG}-linux-x86_64.tar.gz
-cd wattcurb-${TAG}-linux-x86_64
-sudo ./install.sh
-```
-EOF
+          \`\`\`bash
+          wget https://github.com/jedclub/WattCurb/releases/download/\${TAG}/wattcurb-\${TAG}-linux-x86_64.tar.gz
+          tar -xzf wattcurb-\${TAG}-linux-x86_64.tar.gz
+          cd wattcurb-\${TAG}-linux-x86_64
+          sudo ./install.sh
+          \`\`\`
+          EOF
           sed -i "s/\${TAG}/${TAG}/g" release_notes.md
 
       - name: Publish GitHub Release
@@ -208,8 +208,8 @@ EOF
           tag_name: ${{ steps.vars.outputs.TAG }}
           name: "WattCurb ${{ steps.vars.outputs.TAG }}: Full Production Release (Hardware PMU & PGO)"
           body_path: release_notes.md
-          draft: ${{ github.event.inputs.draft || false }}
-          prerelease: ${{ github.event.inputs.prerelease || false }}
+          draft: ${{ inputs.draft == true }}
+          prerelease: ${{ inputs.prerelease == true }}
           files: |
             output/wattcurb
             output/wattcurb-tray
