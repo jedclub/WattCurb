@@ -124,6 +124,7 @@ All documents follow the Ref-ID naming standard:
 | [`REF-RES-020`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-020-amd-zen-ccx-topology-and-c1-c2-latency-shield.md) | Multi-Cluster (C1/C2) Topology, Cross-CCX Contention & Terminal Latency Shielding | Zen dual-CCX L3 cache isolation, CFS runqueue contention, C1 terminal shield, C2 compute enclave | 2026-09-20 |
 | [`REF-RES-021`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-021-kde-active-window-c0-qos-and-resource-guarantee.md) | Linux PM QoS C0 Latency Pinning & KDE Active Window Resource Guarantee | /dev/cpu_dma_latency 0us exit latency, cpuidle C0/C1 clamp, C1 cluster affinity, nice -10 | 2026-09-21 |
 | [`REF-RES-022`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-022-vram-wifi-fan-bus-hardware-power-isolation.md) | Physical Power Isolation & Telemetry Decomposition for VRAM, Wi-Fi, Fan, and PCIe/Fabric Bus | VRAM DPM mclk/alloc, Wi-Fi RF txpower/duty, Fan RPM^3 cubic aerodynamic law, PCIe ASPM & FCLK | 2026-09-21 |
+| [`REF-RES-023`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-023-vram-gc-dpm-downclocking-and-performance-boost.md) | VRAM Garbage Collection, DPM Clock Downclocking & Maximum Performance Boost | Performance max clock unleash, 3-tier VRAM GC (KWin/Chromium/drop_caches), DPM low/manual downclock | 2026-09-21 |
 
 
 ---
