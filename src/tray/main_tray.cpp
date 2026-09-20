@@ -37,34 +37,77 @@ int main(int argc, char* argv[]) {
 
     // REF-REQ-075 & REF-ARCH-052: Headless benchmark mode for PGO profile generation
     if (benchmark_mode) {
-        std::printf("[WattCurb-Tray] Running PGO benchmark training workload...\n");
+        std::printf("[WattCurb-Tray] Running multi-faceted PGO benchmark training workload (50,000 iterations)...\n");
         wattcurb::ipc::WattCurbSharedState state{};
-        state.battery_percent = 78;
-        state.battery_state = 1;
-        state.system_drain_mw = 12500;
-        state.cpu_drain_mw = 4200;
-        state.gpu_drain_mw = 1800;
-        state.cpu_temp_c = 48;
-        state.cpu_freq_mhz = 2400;
-        state.fan_rpm = 2800;
-        state.power_profile_mode = 1;
-        std::strncpy(state.culprits[0].comm, "firefox", 16);
-        state.culprits[0].drain_mw = 2500;
-        std::strncpy(state.culprits[1].comm, "kwin_wayland", 16);
-        state.culprits[1].drain_mw = 1200;
-
         char title[128]{};
         char desc[8192]{};
         char icon[64]{};
 
-        for (int i = 0; i < 20000; ++i) {
+        const char* culprits_pool[] = {
+            "firefox", "kwin_wayland", "baloo_file", "plasmashell", "pipewire",
+            "code", "rustc", "clangd", "kitty", "systemd", "none"
+        };
+        constexpr size_t pool_size = sizeof(culprits_pool) / sizeof(culprits_pool[0]);
+
+        for (int i = 0; i < 50000; ++i) {
             state.seq_version = static_cast<uint64_t>(i);
-            state.system_drain_mw = static_cast<uint32_t>(10000 + (i % 5000));
-            state.battery_percent = static_cast<uint8_t>(20 + (i % 80));
+            // Scenario A: Discharging under varied load (0..20,000)
+            if (i < 20000) {
+                state.battery_state = 1; // Discharging
+                state.battery_percent = static_cast<uint8_t>(5 + (i % 95));
+                state.system_drain_mw = static_cast<uint32_t>(5000 + (i % 25000));
+                state.cpu_drain_mw = static_cast<uint32_t>(1500 + (i % 18000));
+                state.gpu_drain_mw = static_cast<uint32_t>((i % 5) == 0 ? 8000 : 200);
+                state.cpu_temp_c = static_cast<uint8_t>(38 + (i % 55));
+                state.fan_rpm = static_cast<uint16_t>((state.cpu_temp_c > 60) ? 3500 : 0);
+            }
+            // Scenario B: AC Charging under rapid charge (20,000..35,000)
+            else if (i < 35000) {
+                state.battery_state = 0; // AC Charging
+                state.battery_percent = static_cast<uint8_t>(30 + ((i - 20000) % 70));
+                state.system_drain_mw = static_cast<uint32_t>(20000 + (i % 45000));
+                state.cpu_drain_mw = static_cast<uint32_t>(2000 + (i % 8000));
+                state.gpu_drain_mw = 500;
+                state.cpu_temp_c = static_cast<uint8_t>(45 + (i % 25));
+                state.fan_rpm = 2500;
+            }
+            // Scenario C: AC Passthrough Full (35,000..50,000)
+            else {
+                state.battery_state = 2; // Full passthrough
+                state.battery_percent = 100;
+                state.system_drain_mw = static_cast<uint32_t>(3500 + (i % 12000));
+                state.cpu_drain_mw = static_cast<uint32_t>(1200 + (i % 5000));
+                state.gpu_drain_mw = 100;
+                state.cpu_temp_c = 40;
+                state.fan_rpm = 0;
+            }
+
+            // Cycle power profiles: Performance, Balanced, SmartSave, UltraSave
             state.power_profile_mode = static_cast<uint8_t>(i % 4);
+
+            // Dynamic culprits
+            const char* c0 = culprits_pool[static_cast<size_t>(i) % pool_size];
+            const char* c1 = culprits_pool[static_cast<size_t>(i + 3) % pool_size];
+            std::strncpy(state.culprits[0].comm, c0, 16);
+            state.culprits[0].drain_mw = static_cast<uint32_t>(500 + (i % 4000));
+            std::strncpy(state.culprits[1].comm, c1, 16);
+            state.culprits[1].drain_mw = static_cast<uint32_t>(200 + (i % 2000));
+
+            // 1. ToolTip rendering
             wattcurb::tray::TrayClient::render_tooltip(state, title, sizeof(title), desc, sizeof(desc));
+
+            // 2. Burst cache hits (simulate rapid mouse hover in KDE Plasma)
+            if ((i % 10) == 0) {
+                for (int b = 0; b < 15; ++b) {
+                    wattcurb::tray::TrayClient::render_tooltip(state, title, sizeof(title), desc, sizeof(desc));
+                }
+            }
+
+            // 3. Icon name resolution across all LUT buckets
             wattcurb::tray::TrayClient::resolve_icon_name(state, icon, sizeof(icon));
-            if ((i % 4) == 0) {
+
+            // 4. Hover sensor probe simulation
+            if ((i % 5) == 0) {
                 wattcurb::tray::TrayClient::probe_sensors_for_hover(state);
             }
         }

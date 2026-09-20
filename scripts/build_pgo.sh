@@ -55,34 +55,42 @@ echo ""
 
 # ── Stage 2: Profile Training with Representative Workloads ──────────
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "[2/5] Stage 2: Representative Workload Training Phase"
+echo "[2/5] Stage 2: Extended Multi-Faceted Representative Workload Phase"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-echo "  → Running full Oracle Gate test suite..."
+echo "  [Workload 1/7] Running full Oracle Gate test suite..."
 "${BUILD_PGO_GEN}/wattcurb_tests" > /dev/null 2>&1 || true
 
-echo "  → Running daemon CLI: --features"
+echo "  [Workload 2/7] Running 10s real-hardware Executive Briefing (--briefing -w 10 -i 1)..."
+"${BUILD_PGO_GEN}/wattcurb" --briefing -w 10 -i 1 > /dev/null 2>&1 || true
+
+echo "  [Workload 3/7] Running 10s terminal Detailed Table Dashboard (--detail -w 10 -i 1)..."
+"${BUILD_PGO_GEN}/wattcurb" --detail -w 10 -i 1 > /dev/null 2>&1 || true
+
+echo "  [Workload 4/7] Running 10s Extreme Battery Profile & Mitigation Synthesis (-X -w 10 -i 1)..."
+"${BUILD_PGO_GEN}/wattcurb" -X -w 10 -i 1 > /dev/null 2>&1 || true
+
+echo "  [Workload 5/7] Running 8s High-Frequency Rapid Sampling (--duration 8 -i 0.5 -n 40)..."
+"${BUILD_PGO_GEN}/wattcurb" --duration 8 -i 0.5 -n 40 > /dev/null 2>&1 || true
+
+echo "  [Workload 6/7] Running CLI & SHM IPC Burst Queries (--status, --history, --features)..."
 "${BUILD_PGO_GEN}/wattcurb" --features > /dev/null 2>&1 || true
+for _ in {1..30}; do
+    "${BUILD_PGO_GEN}/wattcurb" --status > /dev/null 2>&1 || true
+    "${BUILD_PGO_GEN}/wattcurb" --history > /dev/null 2>&1 || true
+done
 
-echo "  → Running daemon CLI: --interval 1 --top 30"
-"${BUILD_PGO_GEN}/wattcurb" --interval 1 --top 30 > /dev/null 2>&1 || true
-
-echo "  → Running daemon CLI: --briefing"
-"${BUILD_PGO_GEN}/wattcurb" --briefing > /dev/null 2>&1 || true
-
-echo "  → Running daemon CLI: --extreme-profile -w 2 -i 1"
-"${BUILD_PGO_GEN}/wattcurb" -X -w 2 -i 1 > /dev/null 2>&1 || true
-
-echo "  → Running desktop tray PGO training suite (--benchmark)..."
+echo "  [Workload 7/7] Running Desktop Tray & Dashboard Multi-Faceted UI Simulators..."
+echo "    → Desktop Tray (50,000 multi-scenario interactive cycles)..."
 "${BUILD_PGO_GEN}/wattcurb-tray" --benchmark
 
 if [ "${HAS_DASHBOARD}" -eq 1 ]; then
-    echo "  → Running matrix dashboard PGO training suite (--benchmark)..."
+    echo "    → Matrix Dashboard (5,000 multi-scale JSON & property cycles)..."
     QT_QPA_PLATFORM=offscreen "${BUILD_PGO_GEN}/wattcurb-dashboard" --benchmark
 fi
 
 echo ""
-echo "  ✓ Profile data (.gcda) collected across ALL 3 targets:"
+echo "  ✓ Multi-faceted profile data (.gcda) collected across ALL 3 targets:"
 find "${BUILD_PGO_GEN}" -name '*.gcda' | sort | sed "s|${BUILD_PGO_GEN}/|    * |"
 echo ""
 
