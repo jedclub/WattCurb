@@ -5,6 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="${SCRIPT_DIR}/output"
 [ ! -d "${BIN_DIR}" ] && BIN_DIR="${SCRIPT_DIR}/bin"
+[ ! -f "${BIN_DIR}/wattcurb" ] && [ -f "${SCRIPT_DIR}/build/wattcurb" ] && BIN_DIR="${SCRIPT_DIR}/build"
 
 if [ ! -f "${BIN_DIR}/wattcurb" ]; then
     echo "[!] Error: Precompiled binaries not found in ${BIN_DIR}."
@@ -67,10 +68,11 @@ EOF
 ${SUDO} systemctl daemon-reload
 ${SUDO} systemctl enable --now wattcurb.service
 
-# 4. Install Desktop Autostart & User Tray Service
-echo "[3/4] Configuring desktop autostart..."
-mkdir -p "${HOME}/.config/autostart"
-cat << 'EOF' > "${HOME}/.config/autostart/wattcurb-tray.desktop"
+# 4. Install Desktop Autostart & Application Entries
+echo "[3/4] Configuring desktop autostart and application entries..."
+# 4.1. System-wide XDG autostart (ensures tray starts automatically on any user login)
+${SUDO} mkdir -p /etc/xdg/autostart
+${SUDO} tee /etc/xdg/autostart/wattcurb-tray.desktop > /dev/null << 'EOF'
 [Desktop Entry]
 Name=WattCurb Tray
 Comment=WattCurb Ultra-Low-Overhead Power Indicator
@@ -81,18 +83,64 @@ Type=Application
 Categories=Utility;System;
 StartupNotify=false
 X-GNOME-Autostart-enabled=true
+X-KDE-autostart-after=panel
+X-systemd-skip=true
 EOF
 
-# 5. Launch Tray Indicator
-echo "[4/4] Starting desktop tray indicator..."
-pkill -f "wattcurb-tray" 2>/dev/null || true
-nohup /usr/local/bin/wattcurb-tray >/dev/null 2>&1 &
+# 4.2. User-specific autostart backup
+TARGET_USER="${SUDO_USER:-$USER}"
+if [ -n "${TARGET_USER}" ] && [ "${TARGET_USER}" != "root" ]; then
+    USER_HOME=$(getent passwd "${TARGET_USER}" | cut -d: -f6)
+    if [ -d "${USER_HOME}" ]; then
+        mkdir -p "${USER_HOME}/.config/autostart"
+        cp /etc/xdg/autostart/wattcurb-tray.desktop "${USER_HOME}/.config/autostart/wattcurb-tray.desktop"
+        chown "${TARGET_USER}:${TARGET_USER}" "${USER_HOME}/.config/autostart/wattcurb-tray.desktop" 2>/dev/null || true
+    fi
+fi
+
+# 4.3. System-wide Desktop Entry for Dashboard
+if [ -f "${BIN_DIR}/wattcurb-dashboard" ]; then
+    ${SUDO} mkdir -p /usr/share/applications
+    ${SUDO} tee /usr/share/applications/wattcurb-dashboard.desktop > /dev/null << 'EOF'
+[Desktop Entry]
+Name=WattCurb Matrix Dashboard
+Comment=WattCurb Ultra-Low-Overhead Power & Metric Matrix
+Exec=/usr/local/bin/wattcurb-dashboard
+Icon=utilities-system-monitor
+Terminal=false
+Type=Application
+Categories=Utility;System;Monitor;
+EOF
+fi
+
+# 5. Launch Desktop Tray Indicator in Active Graphical Session
+echo "[4/4] Starting desktop tray indicator in user graphical session..."
+if [ -n "${TARGET_USER}" ] && [ "${TARGET_USER}" != "root" ]; then
+    TARGET_UID=$(id -u "${TARGET_USER}" 2>/dev/null || echo "1000")
+    TARGET_RUNTIME="/run/user/${TARGET_UID}"
+
+    # Terminate any existing tray client for this user
+    sudo -u "${TARGET_USER}" pkill -f "wattcurb-tray" 2>/dev/null || true
+
+    # Launch tray under the desktop user's graphical session environment
+    if [ -d "${TARGET_RUNTIME}" ]; then
+        sudo -u "${TARGET_USER}" \
+            XDG_RUNTIME_DIR="${TARGET_RUNTIME}" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=${TARGET_RUNTIME}/bus" \
+            nohup /usr/local/bin/wattcurb-tray >/dev/null 2>&1 &
+    else
+        sudo -u "${TARGET_USER}" nohup /usr/local/bin/wattcurb-tray >/dev/null 2>&1 &
+    fi
+else
+    pkill -f "wattcurb-tray" 2>/dev/null || true
+    nohup /usr/local/bin/wattcurb-tray >/dev/null 2>&1 &
+fi
 
 echo "==================================================================="
 echo "  ✅ WattCurb Installation Complete!                              "
 echo "==================================================================="
-echo "  • Daemon Status : sudo systemctl status wattcurb.service"
+echo "  • Daemon Status : sudo systemctl status wattcurb.service (Active & Autostart)"
 echo "  • Live Status   : wattcurb --status"
 echo "  • Executive View: wattcurb --briefing"
-echo "  • Tray Indicator: Running in system tray"
+echo "  • Tray Indicator: Running in system tray (Auto-launches on desktop login)"
 echo "==================================================================="

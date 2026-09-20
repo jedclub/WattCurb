@@ -175,4 +175,15 @@ if(TARGET wattcurb-dashboard)
     install(TARGETS wattcurb-dashboard
         RUNTIME DESTINATION bin
     )
+    install(FILES desktop/wattcurb-dashboard.desktop
+        DESTINATION share/applications
+    )
 endif()
+
+install(FILES desktop/wattcurb-tray.desktop
+    DESTINATION /etc/xdg/autostart
+)
+
+install(FILES scripts/wattcurb.service
+    DESTINATION /usr/lib/systemd/system
+)

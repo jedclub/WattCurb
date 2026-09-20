@@ -18,11 +18,17 @@ pkill -f "wattcurb-tray" 2>/dev/null || true
 pkill -f "wattcurb-dashboard" 2>/dev/null || true
 pkill -f "wattcurb --daemon" 2>/dev/null || true
 
-# 2. Remove systemd units and autostart
+# 2. Remove systemd units, autostart, and desktop entries
 ${SUDO} rm -f /etc/systemd/system/wattcurb.service
 ${SUDO} systemctl daemon-reload 2>/dev/null || true
+${SUDO} rm -f /etc/xdg/autostart/wattcurb-tray.desktop
+${SUDO} rm -f /usr/share/applications/wattcurb-dashboard.desktop
 rm -f "${HOME}/.config/autostart/wattcurb-tray.desktop"
 rm -f "${HOME}/.config/systemd/user/wattcurb-tray.service"
+if [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ]; then
+    USER_HOME=$(getent passwd "${SUDO_USER}" | cut -d: -f6)
+    rm -f "${USER_HOME}/.config/autostart/wattcurb-tray.desktop" 2>/dev/null || true
+fi
 
 # 3. Remove binaries
 ${SUDO} rm -f /usr/local/bin/wattcurb

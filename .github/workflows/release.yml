@@ -116,7 +116,7 @@ jobs:
           PKG_NAME="wattcurb-${TAG}-linux-x86_64"
           STAGE_DIR="/tmp/${PKG_NAME}"
           rm -rf "${STAGE_DIR}"
-          mkdir -p "${STAGE_DIR}/bin" "${STAGE_DIR}/docs"
+          mkdir -p "${STAGE_DIR}/bin" "${STAGE_DIR}/docs" "${STAGE_DIR}/systemd" "${STAGE_DIR}/desktop"
 
           # Strip binaries with maximum ELF section garbage collection
           strip --strip-all -o output/wattcurb build/wattcurb
@@ -126,6 +126,9 @@ jobs:
           cp output/wattcurb "${STAGE_DIR}/bin/"
           cp output/wattcurb-tray "${STAGE_DIR}/bin/"
           cp output/wattcurb-dashboard "${STAGE_DIR}/bin/"
+          cp scripts/wattcurb.service "${STAGE_DIR}/systemd/"
+          cp desktop/wattcurb-tray.desktop "${STAGE_DIR}/desktop/"
+          cp desktop/wattcurb-dashboard.desktop "${STAGE_DIR}/desktop/"
           cp install.sh "${STAGE_DIR}/"
           cp uninstall.sh "${STAGE_DIR}/"
           cp README.md "${STAGE_DIR}/"

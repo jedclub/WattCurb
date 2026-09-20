@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=WattCurb Matrix Dashboard
+Comment=WattCurb Ultra-Low-Overhead Power & Metric Matrix
+Exec=/usr/local/bin/wattcurb-dashboard
+Icon=utilities-system-monitor
+Terminal=false
+Type=Application
+Categories=Utility;System;Monitor;
+StartupNotify=true

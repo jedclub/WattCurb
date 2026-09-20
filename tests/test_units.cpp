@@ -31,6 +31,7 @@
 #include <cmath>
 #include <chrono>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <sys/resource.h>
 #include <linux/perf_event.h>
@@ -3020,6 +3021,29 @@ void test_token_minimization_harness_integrity() {
     std::cout << " [PASS] test_token_minimization_harness_integrity (REF-TEST-044: Harness isolation verified)\n";
 }
 
+// Implements REF-TEST-045 & REF-REQ-080: Package Autostart & Immediate Graphical Session Tray Launch
+void test_package_autostart_and_installer_integrity() {
+    std::cout << " [ORACLE GATE] Verifying Package Autostart & Installer Integrity (REF-REQ-080)...\n";
+    assert(::access("desktop/wattcurb-tray.desktop", R_OK) == 0 && "desktop/wattcurb-tray.desktop must exist");
+    assert(::access("desktop/wattcurb-dashboard.desktop", R_OK) == 0 && "desktop/wattcurb-dashboard.desktop must exist");
+
+    std::ifstream tray_desktop("desktop/wattcurb-tray.desktop");
+    std::string tray_content((std::istreambuf_iterator<char>(tray_desktop)), std::istreambuf_iterator<char>());
+    assert(tray_content.find("Exec=/usr/local/bin/wattcurb-tray") != std::string::npos);
+    assert(tray_content.find("Categories=Utility;System;") != std::string::npos);
+
+    std::ifstream inst_sh("install.sh");
+    std::string inst_content((std::istreambuf_iterator<char>(inst_sh)), std::istreambuf_iterator<char>());
+    assert(inst_content.find("/etc/xdg/autostart/wattcurb-tray.desktop") != std::string::npos);
+    assert(inst_content.find("DBUS_SESSION_BUS_ADDRESS") != std::string::npos);
+
+    std::ifstream uninst_sh("uninstall.sh");
+    std::string uninst_content((std::istreambuf_iterator<char>(uninst_sh)), std::istreambuf_iterator<char>());
+    assert(uninst_content.find("/etc/xdg/autostart/wattcurb-tray.desktop") != std::string::npos);
+
+    std::cout << " [PASS] test_package_autostart_and_installer_integrity (REF-TEST-045: Autostart & GUI launch verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -3028,6 +3052,7 @@ int main() {
 
     std::cout << "=== WattCurb Unit Test Suite & Oracle Gate Verifier ===\n";
     test::test_token_minimization_harness_integrity();
+    test::test_package_autostart_and_installer_integrity();
     test::test_deep_battery_drain_report_oracle_gate();
     test::test_modeset_flapping_elimination_and_test_isolation();
     test::test_cpu_features();
