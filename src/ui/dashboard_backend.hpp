@@ -7,6 +7,7 @@
 #include <QVariantMap>
 #include <cstdint>
 #include "ipc/tray_shared_state.hpp"
+#include "report/battery_history_analyzer.hpp"
 
 namespace wattcurb::ui {
 
@@ -86,6 +87,11 @@ class DashboardBackend : public QObject {
     Q_PROPERTY(QVariantList processPowerShares READ processPowerShares NOTIFY powerSharesChanged)
     Q_PROPERTY(double totalDeviceWatts READ totalDeviceWatts NOTIFY powerSharesChanged)
     Q_PROPERTY(double totalProcessWatts READ totalProcessWatts NOTIFY powerSharesChanged)
+
+    // Deep Battery Drain Report Properties (REF-REQ-078, REF-ARCH-055)
+    Q_PROPERTY(QVariantMap batteryReportSummary READ batteryReportSummary NOTIFY batteryReportChanged)
+    Q_PROPERTY(QVariantList batteryReportHardwareShares READ batteryReportHardwareShares NOTIFY batteryReportChanged)
+    Q_PROPERTY(QVariantList batteryReportProcessCulprits READ batteryReportProcessCulprits NOTIFY batteryReportChanged)
 
     // Status / Metadata
     Q_PROPERTY(bool isRescanning READ isRescanning NOTIFY rescanStatusChanged)
@@ -169,6 +175,11 @@ public:
     double totalDeviceWatts() const noexcept { return total_device_w_; }
     double totalProcessWatts() const noexcept { return total_process_w_; }
 
+    // Deep Battery Drain Report Getters (REF-REQ-078, REF-ARCH-055)
+    QVariantMap batteryReportSummary() const { return battery_report_summary_; }
+    QVariantList batteryReportHardwareShares() const { return battery_report_hardware_shares_; }
+    QVariantList batteryReportProcessCulprits() const { return battery_report_process_culprits_; }
+
     bool isRescanning() const noexcept { return is_rescanning_; }
     QString lastUpdateTime() const { return last_update_time_; }
 
@@ -177,6 +188,12 @@ public:
     Q_INVOKABLE void triggerRescan();
     Q_INVOKABLE void openSystemMonitor();
     Q_INVOKABLE void refreshNow();
+
+    // Battery Report Actions (REF-REQ-078)
+    Q_INVOKABLE void generateBatteryReport();
+    Q_INVOKABLE void copyReportToClipboard();
+    Q_INVOKABLE QString getReportMarkdown();
+    Q_INVOKABLE void requestReportWindow();
 
     // Test & Benchmark helpers (REF-REQ-074, REF-TEST-039)
     void runPollIteration() noexcept;
@@ -190,6 +207,8 @@ signals:
     void historyChanged();
     void powerSharesChanged();
     void languageChanged();
+    void batteryReportChanged();
+    void reportWindowRequested();
 
 private slots:
     void onPollTimer();
@@ -271,6 +290,13 @@ private:
     double total_device_w_{0.0};
     double total_process_w_{0.0};
     void update_power_shares();
+
+    // Deep Battery Drain Report Cache (REF-REQ-078, REF-ARCH-055)
+    report::BatteryDrainReportResult cached_report_result_{};
+    QVariantMap battery_report_summary_{};
+    QVariantList battery_report_hardware_shares_{};
+    QVariantList battery_report_process_culprits_{};
+    std::vector<ProcessAttributedPower> cached_top_procs_{};
 };
 
 } // namespace wattcurb::ui

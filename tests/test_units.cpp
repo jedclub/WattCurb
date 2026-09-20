@@ -13,6 +13,7 @@
 #include "report/report_generator.hpp"
 #include "ipc/tray_shared_state.hpp"
 #include "ipc/history_ring_buffer.hpp"
+#include "report/battery_history_analyzer.hpp"
 #include "core/event_logger.hpp"
 #include "core/l10n.hpp"
 #include "tray/tray_client.hpp"
@@ -2879,6 +2880,135 @@ void test_multilingual_l10n_and_auto_system_locale() {
     std::cout << " [PASS] test_multilingual_l10n_and_auto_system_locale (REF-TEST-041: 13 languages, 46 strings, POSIX auto-detect verified)\n";
 }
 
+// Implements REF-TEST-043 & REF-REQ-078: Deep Battery Drain Telemetry & Standalone Report Oracle Gate
+void test_deep_battery_drain_report_oracle_gate() {
+    std::cout << " [ORACLE GATE] Running Deep Battery Drain History Analytics Suite...\n";
+
+    // 1. Generate realistic 120-sample mock history (80 discharging, 40 AC)
+    std::vector<wattcurb::ipc::HistoryPoint> pts(120);
+    uint64_t base_time = 1726800000ULL;
+    for (size_t i = 0; i < 120; ++i) {
+        pts[i].timestamp_sec = base_time + i * 10;
+        if (i < 80) {
+            pts[i].battery_state = 1; // Discharging
+            pts[i].battery_percent = static_cast<uint8_t>(90 - (i * 15 / 79)); // 90% -> 75%
+            pts[i].total_system_mw = 16000; // 16W
+            pts[i].cpu_package_mw = 6500;   // 6.5W
+            pts[i].gpu_mw = 2500;           // 2.5W
+            pts[i].cstate_c3_percent = 72;
+            pts[i].cpu_temp_c = 49;
+        } else {
+            pts[i].battery_state = 0; // AC Powered
+            pts[i].battery_percent = 75;
+            pts[i].total_system_mw = 18000;
+            pts[i].cpu_package_mw = 8000;
+            pts[i].gpu_mw = 3000;
+            pts[i].cstate_c3_percent = 60;
+            pts[i].cpu_temp_c = 52;
+        }
+    }
+
+    // Set a peak draw
+    pts[40].total_system_mw = 28500; // 28.5W peak
+
+    // 2. Mock process attributed power telemetry
+    std::vector<wattcurb::ProcessAttributedPower> procs;
+    {
+        wattcurb::ProcessAttributedPower p1{};
+        p1.pid = 1101;
+        p1.comm = "kwin_wayland";
+        p1.total_attributed_watts = 3.5;
+        p1.primary_hw_domain = "GPU Silicon";
+        p1.hardware_mechanism = "Wayland Compositor 120Hz Loop";
+        p1.recommended_action = 1; // Freeze/Throttle
+        procs.push_back(p1);
+
+        wattcurb::ProcessAttributedPower p2{};
+        p2.pid = 1102;
+        p2.comm = "firefox";
+        p2.total_attributed_watts = 2.8;
+        p2.primary_hw_domain = "CPU Compute";
+        p2.hardware_mechanism = "JS High Frequency Timers (350/s)";
+        p2.recommended_action = 4; // Timer Slack Align
+        procs.push_back(p2);
+
+        wattcurb::ProcessAttributedPower p3{};
+        p3.pid = 1103;
+        p3.comm = "baloo_file";
+        p3.total_attributed_watts = 1.2;
+        p3.primary_hw_domain = "NVMe Storage";
+        p3.hardware_mechanism = "Metadata Extraction Burst";
+        p3.recommended_action = 2; // Throttle
+        procs.push_back(p3);
+    }
+
+    auto t0 = std::chrono::steady_clock::now();
+    auto report = wattcurb::report::BatteryHistoryAnalyzer::analyze(pts.data(), pts.size(), procs, 11.4);
+    auto t1 = std::chrono::steady_clock::now();
+
+    double analysis_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
+
+    // Verify Summary
+    assert(report.summary.total_samples_analyzed == 120);
+    assert(report.summary.discharging_samples == 80);
+    assert(report.summary.total_discharge_duration_sec == 800); // 80 * 10s
+    assert(report.summary.total_discharge_wh > 3.0 && report.summary.total_discharge_wh < 4.5);
+    assert(report.summary.total_discharge_mah > 200.0);
+    assert(report.summary.battery_start_pct == 90);
+    assert(report.summary.battery_end_pct == 75);
+    assert(report.summary.battery_drop_pct == 15);
+    assert(report.summary.peak_discharge_watts == 28.5);
+
+    // Verify Hardware Domains
+    assert(report.hardware_shares.size() == 5);
+    assert(report.hardware_shares[0].wh > 1.0); // CPU
+    assert(report.hardware_shares[1].wh > 0.4); // GPU
+    assert(report.hardware_shares[2].wh > 0.3); // Display
+    assert(report.hardware_shares[3].wh > 0.1); // Storage
+    assert(report.hardware_shares[4].wh > 0.0); // Platform
+
+    // Verify Process Culprits
+    assert(report.process_culprits.size() == 3);
+    assert(report.process_culprits[0].comm == "kwin_wayland");
+    assert(report.process_culprits[0].rank == 1);
+    assert(report.process_culprits[1].comm == "firefox");
+    assert(report.process_culprits[1].rank == 2);
+
+    // Verify Diagnostics and Markdown formatting
+    assert(!report.summary.diagnostic_summary.empty());
+    assert(!report.summary.recommendation_text.empty());
+    std::string md = report.to_markdown();
+    assert(md.find("WattCurb Deep Battery Drain Telemetry Audit Report") != std::string::npos);
+    assert(md.find("Physical Hardware Domain Drain Breakdown") != std::string::npos);
+    assert(md.find("kwin_wayland") != std::string::npos);
+
+    // Oracle Gate Latency: 120 points must process in < 2000 us
+    std::cout << "   * Analysis Latency (120 pts): " << analysis_us << " us\n";
+    assert(analysis_us < 2000.0 && "History analysis must execute in < 2.0 ms!");
+
+#if defined(WATTCURB_HAS_QT6)
+    // Test Qt6 Dashboard backend integration
+    int fake_argc = 1;
+    char fake_name[] = "wattcurb_tests";
+    char* fake_argv[] = { fake_name, nullptr };
+    QCoreApplication app(fake_argc, fake_argv);
+
+    wattcurb::ui::DashboardBackend backend;
+    backend.generateBatteryReport();
+
+    auto sum_map = backend.batteryReportSummary();
+    auto hw_shares = backend.batteryReportHardwareShares();
+    auto proc_culprits = backend.batteryReportProcessCulprits();
+    auto md_str = backend.getReportMarkdown();
+
+    assert(!sum_map.isEmpty() && "DashboardBackend batteryReportSummary must not be empty");
+    assert(!hw_shares.isEmpty() && "DashboardBackend batteryReportHardwareShares must not be empty");
+    assert(!md_str.isEmpty() && "DashboardBackend getReportMarkdown must not be empty");
+#endif
+
+    std::cout << " [PASS] test_deep_battery_drain_report_oracle_gate (REF-TEST-043: Full SHM sweep, hardware decomposition, process attribution verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -2886,6 +3016,7 @@ int main() {
     ::setenv("WATTCURB_TEST_MOCK_DESKTOP", "1", 1);
 
     std::cout << "=== WattCurb Unit Test Suite & Oracle Gate Verifier ===\n";
+    test::test_deep_battery_drain_report_oracle_gate();
     test::test_modeset_flapping_elimination_and_test_isolation();
     test::test_cpu_features();
     test::test_hw_isa_primitives();

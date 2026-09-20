@@ -11,10 +11,29 @@
 int main(int argc, char* argv[]) {
     wattcurb::core::l10n::init_from_system();
     bool benchmark_mode = false;
+    bool report_mode = false;
+    bool report_cli_mode = false;
+
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--benchmark") == 0 || std::strcmp(argv[i], "-B") == 0) {
             benchmark_mode = true;
+        } else if (std::strcmp(argv[i], "--report") == 0 || std::strcmp(argv[i], "-r") == 0) {
+            report_mode = true;
+        } else if (std::strcmp(argv[i], "--report-cli") == 0) {
+            report_cli_mode = true;
         }
+    }
+
+    if (report_cli_mode) {
+        qputenv("QT_QPA_PLATFORM", "offscreen");
+        int fake_argc = 1;
+        char fake_name[] = "wattcurb-dashboard";
+        char* fake_argv[] = { fake_name, nullptr };
+        QGuiApplication app(fake_argc, fake_argv);
+        wattcurb::ui::DashboardBackend backend;
+        backend.generateBatteryReport();
+        std::cout << backend.getReportMarkdown().toStdString() << "\n";
+        return 0;
     }
 
     // REF-REQ-075 & REF-ARCH-052: Headless benchmark mode for PGO profile generation
@@ -130,10 +149,11 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // Enforce singleton dashboard window
-    wattcurb::core::SingletonLock dashboard_lock("wattcurb-dashboard.lock");
-    if (!dashboard_lock.is_locked()) {
-        std::cerr << "[!] WattCurb dashboard is already running. Exiting.\n";
+    // Enforce singleton lock per mode
+    std::string lock_name = report_mode ? "wattcurb-report.lock" : "wattcurb-dashboard.lock";
+    wattcurb::core::SingletonLock mode_lock(lock_name);
+    if (!mode_lock.is_locked()) {
+        std::cerr << "[!] WattCurb " << (report_mode ? "report window" : "dashboard") << " is already running. Exiting.\n";
         return 0;
     }
 
@@ -141,29 +161,36 @@ int main(int argc, char* argv[]) {
     qputenv("QT_QUICK_CONTROLS_STYLE", "Basic");
 
     QGuiApplication app(argc, argv);
-    app.setApplicationName("wattcurb-dashboard");
-    app.setApplicationDisplayName("WattCurb 전력 소비 정밀 분석 매트릭");
-    app.setDesktopFileName("wattcurb-dashboard");
-    app.setWindowIcon(QIcon::fromTheme("utilities-system-monitor"));
+    app.setApplicationName(report_mode ? "wattcurb-report" : "wattcurb-dashboard");
+    app.setApplicationDisplayName(report_mode ? "WattCurb 배터리 심층 드레인 전수 분석 리포트" : "WattCurb 전력 소비 정밀 분석 매트릭");
+    app.setDesktopFileName(report_mode ? "wattcurb-report" : "wattcurb-dashboard");
+    app.setWindowIcon(QIcon::fromTheme(report_mode ? "battery" : "utilities-system-monitor"));
 
     wattcurb::ui::DashboardBackend backend;
+    if (report_mode) {
+        backend.generateBatteryReport();
+    }
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("backend", &backend);
 
     // Try QRC first, fallback to filesystem
-    QUrl qmlUrl("qrc:/qml/DashboardWindow.qml");
+    QString qmlFile = report_mode ? "qml/BatteryReportWindow.qml" : "qml/DashboardWindow.qml";
+    QUrl qmlUrl("qrc:/" + qmlFile);
     
     // Check if running from dev directory directly
-    if (QFileInfo::exists("/home/jedclub/Develop/WattCurb/src/ui/qml/DashboardWindow.qml")) {
-        qmlUrl = QUrl::fromLocalFile("/home/jedclub/Develop/WattCurb/src/ui/qml/DashboardWindow.qml");
+    QString devPath = "/home/jedclub/Develop/WattCurb/src/ui/" + qmlFile;
+    if (QFileInfo::exists(devPath)) {
+        qmlUrl = QUrl::fromLocalFile(devPath);
     }
 
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreated,
-                     &app, [qmlUrl](QObject *obj, const QUrl &objUrl) {
+                     &app, [qmlUrl, report_mode](QObject *obj, const QUrl &objUrl) {
         if (!obj && qmlUrl == objUrl) {
-            std::cerr << "[!] Failed to load QML dashboard window!\n";
+            std::cerr << "[!] Failed to load QML window!\n";
             QCoreApplication::exit(-1);
+        } else if (obj && report_mode) {
+            obj->setProperty("visible", true);
         }
     }, Qt::QueuedConnection);
 

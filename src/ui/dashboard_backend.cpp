@@ -10,6 +10,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QClipboard>
+#include <QGuiApplication>
 #include <fstream>
 #include <thread>
 #include <algorithm>
@@ -48,6 +50,9 @@ DashboardBackend::DashboardBackend(QObject* parent)
     poll_timer_ = new QTimer(this);
     connect(poll_timer_, &QTimer::timeout, this, &DashboardBackend::onPollTimer);
     poll_timer_->start(1500);
+
+    // Initial battery drain history audit
+    generateBatteryReport();
 }
 
 DashboardBackend::~DashboardBackend() {
@@ -221,6 +226,8 @@ bool DashboardBackend::ingestTelemetryJson(const std::string& resp) noexcept {
     cached_proc_summaries_.clear();
     cached_proc_summaries_.reserve(25);
     cached_proc_sum_ = 0.0;
+    cached_top_procs_.clear();
+    cached_top_procs_.reserve(25);
 
     {
         WATTCURB_PROFILE_SCOPE("dashboard.json.processes");
@@ -270,6 +277,25 @@ bool DashboardBackend::ingestTelemetryJson(const std::string& resp) noexcept {
             // Populate zero-copy process summary for power shares
             cached_proc_summaries_.push_back(ProcessShareSummary{pid, comm, w});
             cached_proc_sum_ += w;
+
+            // Populate cached_top_procs_ for deep battery drain attribution
+            ProcessAttributedPower pap{};
+            pap.pid = pid;
+            pap.comm = comm.toUtf8().constData();
+            pap.uid = static_cast<uint32_t>(p.value("uid").toInt());
+            pap.total_attributed_watts = w;
+            pap.cpu_watts = map[QStringLiteral("cpuWatts")].toDouble();
+            pap.gpu_watts = map[QStringLiteral("gpuWatts")].toDouble();
+            pap.dram_attributed_watts = map[QStringLiteral("dramWatts")].toDouble();
+            pap.io_watts = map[QStringLiteral("ioWatts")].toDouble();
+            pap.wakeup_tax_watts = map[QStringLiteral("wakeTaxWatts")].toDouble();
+            pap.fan_attributed_watts = map[QStringLiteral("fanWatts")].toDouble();
+            pap.wifi_attributed_watts = map[QStringLiteral("wifiWatts")].toDouble();
+            pap.wdi_score = map[QStringLiteral("wdiScore")].toDouble();
+            pap.primary_hw_domain = map[QStringLiteral("domain")].toString().toUtf8().constData();
+            pap.hardware_mechanism = map[QStringLiteral("mechanism")].toString().toUtf8().constData();
+            pap.recommended_action = static_cast<uint8_t>(map[QStringLiteral("action")].toInt());
+            cached_top_procs_.push_back(pap);
         }
 
         if (!new_list.isEmpty()) {
@@ -652,6 +678,117 @@ QString DashboardBackend::currentLanguage() const {
 
 QString DashboardBackend::currentLanguageCode() const {
     return QString::fromUtf8(core::l10n::get_language_code(core::l10n::get_active_language()));
+}
+
+void DashboardBackend::generateBatteryReport() {
+    WATTCURB_PROFILE_SCOPE("dashboard.report.generate");
+
+    // Fallback: if cached_top_procs_ is empty, generate from process_list_
+    if (cached_top_procs_.empty() && !process_list_.isEmpty()) {
+        for (const auto& val : process_list_) {
+            QVariantMap m = val.toMap();
+            ProcessAttributedPower pap{};
+            pap.pid = m[QStringLiteral("pid")].toInt();
+            pap.comm = m[QStringLiteral("comm")].toString().toUtf8().constData();
+            pap.uid = static_cast<uint32_t>(m[QStringLiteral("uid")].toInt());
+            pap.total_attributed_watts = m[QStringLiteral("totalWatts")].toDouble();
+            pap.cpu_watts = m[QStringLiteral("cpuWatts")].toDouble();
+            pap.gpu_watts = m[QStringLiteral("gpuWatts")].toDouble();
+            pap.dram_attributed_watts = m[QStringLiteral("dramWatts")].toDouble();
+            pap.io_watts = m[QStringLiteral("ioWatts")].toDouble();
+            pap.wakeup_tax_watts = m[QStringLiteral("wakeTaxWatts")].toDouble();
+            pap.fan_attributed_watts = m[QStringLiteral("fanWatts")].toDouble();
+            pap.wifi_attributed_watts = m[QStringLiteral("wifiWatts")].toDouble();
+            pap.wdi_score = m[QStringLiteral("wdiScore")].toDouble();
+            pap.primary_hw_domain = m[QStringLiteral("domain")].toString().toUtf8().constData();
+            pap.hardware_mechanism = m[QStringLiteral("mechanism")].toString().toUtf8().constData();
+            pap.recommended_action = static_cast<uint8_t>(m[QStringLiteral("action")].toInt());
+            cached_top_procs_.push_back(pap);
+        }
+    }
+
+    cached_report_result_ = report::BatteryHistoryAnalyzer::analyze_shm(
+        cached_top_procs_,
+        battery_voltage_v_
+    );
+
+    // Summary map
+    const auto& s = cached_report_result_.summary;
+    QVariantMap sum_map;
+    sum_map[QStringLiteral("totalSamples")] = s.total_samples_analyzed;
+    sum_map[QStringLiteral("dischargingSamples")] = s.discharging_samples;
+    sum_map[QStringLiteral("durationSec")] = static_cast<qlonglong>(s.total_discharge_duration_sec);
+    sum_map[QStringLiteral("durationStr")] = QString::fromStdString(s.duration_str);
+    sum_map[QStringLiteral("totalDischargeWh")] = s.total_discharge_wh;
+    sum_map[QStringLiteral("totalDischargeMah")] = s.total_discharge_mah;
+    sum_map[QStringLiteral("totalDischargeJoules")] = s.total_discharge_joules;
+    sum_map[QStringLiteral("batteryStartPct")] = s.battery_start_pct;
+    sum_map[QStringLiteral("batteryEndPct")] = s.battery_end_pct;
+    sum_map[QStringLiteral("batteryDropPct")] = s.battery_drop_pct;
+    sum_map[QStringLiteral("avgDischargeWatts")] = s.avg_discharge_watts;
+    sum_map[QStringLiteral("peakDischargeWatts")] = s.peak_discharge_watts;
+    sum_map[QStringLiteral("peakTimestampSec")] = static_cast<qlonglong>(s.peak_timestamp_sec);
+    sum_map[QStringLiteral("peakTimeStr")] = QString::fromStdString(s.peak_time_str);
+    sum_map[QStringLiteral("avgCstateC3Percent")] = s.avg_cstate_c3_percent;
+    sum_map[QStringLiteral("avgCpuTempC")] = s.avg_cpu_temp_c;
+    sum_map[QStringLiteral("primaryCulpritComm")] = QString::fromStdString(s.primary_culprit_comm);
+    sum_map[QStringLiteral("primaryCulpritDomain")] = QString::fromStdString(s.primary_culprit_domain);
+    sum_map[QStringLiteral("primaryCulpritSharePct")] = s.primary_culprit_share_pct;
+    sum_map[QStringLiteral("diagnosticSummary")] = QString::fromStdString(s.diagnostic_summary);
+    sum_map[QStringLiteral("recommendationText")] = QString::fromStdString(s.recommendation_text);
+    battery_report_summary_ = sum_map;
+
+    // Hardware shares list
+    QVariantList hw_list;
+    for (const auto& h : cached_report_result_.hardware_shares) {
+        QVariantMap hm;
+        hm[QStringLiteral("name")] = QString::fromStdString(h.name);
+        hm[QStringLiteral("icon")] = QString::fromStdString(h.icon);
+        hm[QStringLiteral("wh")] = h.wh;
+        hm[QStringLiteral("avgWatts")] = h.avg_watts;
+        hm[QStringLiteral("percent")] = h.percent;
+        hm[QStringLiteral("color")] = QString::fromStdString(h.color_hex);
+        hm[QStringLiteral("tip")] = QString::fromStdString(h.saving_tip);
+        hw_list.append(hm);
+    }
+    battery_report_hardware_shares_ = hw_list;
+
+    // Process culprits list
+    QVariantList proc_list;
+    for (const auto& p : cached_report_result_.process_culprits) {
+        QVariantMap pm;
+        pm[QStringLiteral("rank")] = p.rank;
+        pm[QStringLiteral("pid")] = p.pid;
+        pm[QStringLiteral("comm")] = QString::fromStdString(p.comm);
+        pm[QStringLiteral("uid")] = p.uid;
+        pm[QStringLiteral("domain")] = QString::fromStdString(p.domain);
+        pm[QStringLiteral("drainWh")] = p.drain_wh;
+        pm[QStringLiteral("avgWatts")] = p.avg_watts;
+        pm[QStringLiteral("sharePercent")] = p.share_percent;
+        pm[QStringLiteral("wdiScore")] = p.wdi_score;
+        pm[QStringLiteral("mechanism")] = QString::fromStdString(p.mechanism);
+        pm[QStringLiteral("action")] = QString::fromStdString(p.action_str);
+        proc_list.append(pm);
+    }
+    battery_report_process_culprits_ = proc_list;
+
+    emit batteryReportChanged();
+}
+
+void DashboardBackend::copyReportToClipboard() {
+    QClipboard* clipboard = QGuiApplication::clipboard();
+    if (clipboard) {
+        clipboard->setText(QString::fromStdString(cached_report_result_.to_markdown()));
+    }
+}
+
+QString DashboardBackend::getReportMarkdown() {
+    return QString::fromStdString(cached_report_result_.to_markdown());
+}
+
+void DashboardBackend::requestReportWindow() {
+    generateBatteryReport();
+    emit reportWindowRequested();
 }
 
 } // namespace wattcurb::ui

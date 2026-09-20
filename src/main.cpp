@@ -5,6 +5,7 @@
 #include "policy/attribution_engine.hpp"
 #include "policy/battery_feature.hpp"
 #include "report/report_generator.hpp"
+#include "report/battery_history_analyzer.hpp"
 #include "core/scoped_profiler.hpp"
 #include "ipc/tray_shared_state.hpp"
 #include "ipc/history_ring_buffer.hpp"
@@ -36,6 +37,7 @@ void print_help(const char* prog) {
               << "WattCurb: Ultra-low-overhead Linux power profiler and modular battery mitigation daemon\n\n"
               << "Developer & Debugging Reporting (REF-REQ-020):\n"
               << "  -b, --briefing         High-fidelity detailed executive briefing (10s observation by default)\n"
+              << "  -R, --battery-report   Audit all accumulated battery history logs & print deep drain report\n"
               << "      --detail           Comprehensive engineering/developer terminal table dashboard\n"
               << "  -F, --features         Print catalog of all modular optimization features with rationale\n"
               << "  -X, --extreme-profile  Execute 30s extreme battery profile for LLM feature synthesis\n\n"
@@ -240,6 +242,7 @@ int main(int argc, char* argv[]) {
     bool dev_profile = false;
     bool feature_catalog_mode = false;
     bool extreme_profile_mode = false;
+    bool battery_report_mode = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string_view arg = argv[i];
@@ -248,6 +251,8 @@ int main(int argc, char* argv[]) {
             return 0;
         } else if (arg == "-F" || arg == "--features") {
             feature_catalog_mode = true;
+        } else if (arg == "-R" || arg == "--battery-report") {
+            battery_report_mode = true;
         } else if (arg == "-X" || arg == "--extreme-profile") {
             extreme_profile_mode = true;
             if (duration_sec == 0.0) duration_sec = 30.0;
@@ -297,6 +302,63 @@ int main(int argc, char* argv[]) {
 
     if (logs_query) {
         return query_daemon_logs();
+    }
+
+    if (battery_report_mode) {
+        std::vector<wattcurb::ProcessAttributedPower> top_procs;
+        std::string resp;
+        if (wattcurb::core::SingletonLock::query_daemon("FULL_TELEMETRY\n", resp, "wattcurb.lock", 300)) {
+            size_t proc_pos = resp.find("\"processes\":");
+            if (proc_pos != std::string::npos) {
+                size_t p = proc_pos;
+                while ((p = resp.find("\"comm\": \"", p)) != std::string::npos) {
+                    p += 9;
+                    size_t end_comm = resp.find("\"", p);
+                    if (end_comm == std::string::npos) break;
+                    std::string comm = resp.substr(p, end_comm - p);
+
+                    double total_w = 0.5;
+                    size_t w_pos = resp.find("\"total_w\":", p);
+                    if (w_pos != std::string::npos && w_pos < p + 300) {
+                        total_w = std::strtod(resp.c_str() + w_pos + 10, nullptr);
+                    }
+
+                    int pid = 0;
+                    size_t pid_pos = resp.find("\"pid\":", p - 60);
+                    if (pid_pos != std::string::npos && pid_pos < p) {
+                        pid = std::atoi(resp.c_str() + pid_pos + 6);
+                    }
+
+                    std::string domain = "CPU Compute";
+                    size_t d_pos = resp.find("\"domain\": \"", p);
+                    if (d_pos != std::string::npos && d_pos < p + 500) {
+                        d_pos += 11;
+                        size_t end_d = resp.find("\"", d_pos);
+                        if (end_d != std::string::npos) domain = resp.substr(d_pos, end_d - d_pos);
+                    }
+
+                    std::string mech = "Active Load";
+                    size_t m_pos = resp.find("\"mechanism\": \"", p);
+                    if (m_pos != std::string::npos && m_pos < p + 600) {
+                        m_pos += 14;
+                        size_t end_m = resp.find("\"", m_pos);
+                        if (end_m != std::string::npos) mech = resp.substr(m_pos, end_m - m_pos);
+                    }
+
+                    wattcurb::ProcessAttributedPower pap{};
+                    pap.pid = pid;
+                    pap.comm = comm.c_str();
+                    pap.total_attributed_watts = total_w;
+                    pap.primary_hw_domain = domain.c_str();
+                    pap.hardware_mechanism = mech.c_str();
+                    top_procs.push_back(pap);
+                    if (top_procs.size() >= 12) break;
+                }
+            }
+        }
+        auto report = wattcurb::report::BatteryHistoryAnalyzer::analyze_shm(top_procs);
+        std::cout << report.to_markdown() << "\n";
+        return 0;
     }
 
     // Extended High-Fidelity Executive Briefing query/execution (REF-REQ-020)

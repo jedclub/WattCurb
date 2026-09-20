@@ -36,6 +36,20 @@ ApplicationWindow {
     property real hoverTargetX: 0
     property real hoverTargetY: 0
 
+    // Standalone Deep Battery Drain Report Window (REF-REQ-078, REF-ARCH-055)
+    BatteryReportWindow {
+        id: reportWindow
+    }
+
+    Connections {
+        target: backend
+        function onReportWindowRequested() {
+            reportWindow.show();
+            reportWindow.raise();
+            reportWindow.requestActivate();
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 10
@@ -139,6 +153,35 @@ ApplicationWindow {
                         color: root.colCyan
                         font.bold: true
                         font.pixelSize: 12
+                    }
+                }
+
+                // Deep Battery Report Standalone Window Button (REF-REQ-078)
+                Button {
+                    height: 28
+                    Layout.preferredWidth: reportBtnLabel.implicitWidth + 24
+                    contentItem: RowLayout {
+                        spacing: 4
+                        Text { text: "🔋"; font.pixelSize: 12 }
+                        Text {
+                            id: reportBtnLabel
+                            text: "배터리 정밀 분석 리포트"
+                            color: "#ffffff"
+                            font.bold: true
+                            font.pixelSize: 11
+                        }
+                    }
+                    background: Rectangle {
+                        color: parent.down ? "#047857" : (parent.hovered ? "#059669" : "#0d9488")
+                        radius: 4
+                        border.color: root.colCyan
+                        border.width: 1
+                    }
+                    onClicked: {
+                        backend.generateBatteryReport();
+                        reportWindow.show();
+                        reportWindow.raise();
+                        reportWindow.requestActivate();
                     }
                 }
 
@@ -394,7 +437,36 @@ ApplicationWindow {
                         RowLayout {
                             Text { text: "🔋 " + backend.tr("BATTERY") + " (BAT0)"; color: root.colGreen; font.bold: true; font.pixelSize: 13 }
                             Item { Layout.fillWidth: true }
-                            Text { text: "🔍 " + backend.tr("DETAILS"); color: root.textMuted; font.pixelSize: 11 }
+
+                            Rectangle {
+                                height: 20
+                                Layout.preferredWidth: batReportBtnText.implicitWidth + 14
+                                radius: 3
+                                color: batReportMa.containsMouse ? "#059669" : "#0d2b1d"
+                                border.color: root.colGreen
+                                border.width: 1
+                                Text {
+                                    id: batReportBtnText
+                                    anchors.centerIn: parent
+                                    text: "⚡ 전수 리포트"
+                                    color: "#ffffff"
+                                    font.bold: true
+                                    font.pixelSize: 10
+                                }
+                                MouseArea {
+                                    id: batReportMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        backend.generateBatteryReport();
+                                        reportWindow.show();
+                                        reportWindow.raise();
+                                        reportWindow.requestActivate();
+                                    }
+                                }
+                            }
+
                             Text { text: backend.batteryPercent + "%"; color: root.colGreen; font.bold: true; font.pixelSize: 20; font.family: "Monospace" }
                         }
 

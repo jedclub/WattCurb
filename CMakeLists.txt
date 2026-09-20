@@ -91,6 +91,7 @@ set(WATTCURB_LIB_SOURCES
     src/policy/unified_rollback_coordinator.cpp
     src/policy/battery_feature.cpp
     src/report/report_generator.cpp
+    src/report/battery_history_analyzer.cpp
 )
 
 add_library(wattcurb_lib STATIC ${WATTCURB_LIB_SOURCES})
@@ -122,6 +123,7 @@ if(Qt6_FOUND)
         src/ui/dashboard_backend.hpp
         src/core/singleton_lock.cpp
         src/core/l10n.cpp
+        src/report/battery_history_analyzer.cpp
         src/ui/qml.qrc
     )
     target_include_directories(wattcurb-dashboard PRIVATE src)
