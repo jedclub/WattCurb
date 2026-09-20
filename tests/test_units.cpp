@@ -3078,6 +3078,52 @@ void test_tray_report_action_and_tactile_button_integrity() {
     std::cout << " [PASS] test_tray_report_action_and_tactile_button_integrity (REF-TEST-046: Tray action & tactile UX verified)\n";
 }
 
+// Implements REF-TEST-047, REF-REQ-083 & REF-ARCH-060: Process Full Name Resolution & Tooltip Integrity
+void test_process_full_name_and_interactive_tooltips() {
+    std::cout << " [ORACLE GATE] Verifying Process Full Name & Interactive Tooltip Integrity (REF-REQ-083)...\n";
+
+    // 1. Verify ProcessDrainCulprit data structure fields
+    wattcurb::report::ProcessDrainCulprit culprit;
+    culprit.rank = 1;
+    culprit.pid = ::getpid();
+    culprit.comm = "test_comm";
+    culprit.full_name = "test_full_name";
+    culprit.cmdline = "test_full_name --arg1 --arg2";
+
+    assert(!culprit.full_name.empty());
+    assert(!culprit.cmdline.empty());
+
+    // 2. Test BatteryHistoryAnalyzer on live PID (should resolve self cmdline)
+    std::vector<wattcurb::ProcessAttributedPower> procs;
+    wattcurb::ProcessAttributedPower p{};
+    p.pid = ::getpid();
+    p.comm = "wattcurb_tests";
+    p.total_attributed_watts = 2.5;
+    p.primary_hw_domain = "CPU Compute";
+    procs.push_back(p);
+
+    std::vector<wattcurb::ipc::HistoryPoint> pts(1);
+    pts[0].battery_state = 1; // Discharging
+    pts[0].total_system_mw = 16000;
+    pts[0].battery_percent = 80;
+    pts[0].timestamp_sec = 1000;
+
+    auto res = wattcurb::report::BatteryHistoryAnalyzer::analyze(pts.data(), pts.size(), procs, 11.4);
+    assert(!res.process_culprits.empty());
+    assert(res.process_culprits[0].full_name.find("wattcurb_tests") != std::string::npos);
+
+    // 3. Verify QML source contains 200px width, modelData.fullName, and interactive ToolTip
+    std::ifstream qml_in("src/ui/qml/BatteryReportWindow.qml");
+    std::string qml_content((std::istreambuf_iterator<char>(qml_in)), std::istreambuf_iterator<char>());
+
+    assert(qml_content.find("Layout.preferredWidth: 200") != std::string::npos);
+    assert(qml_content.find("modelData.fullName || modelData.comm") != std::string::npos);
+    assert(qml_content.find("ToolTip.visible: procMa.containsMouse") != std::string::npos);
+    assert(qml_content.find("modelData.cmdline") != std::string::npos);
+
+    std::cout << " [PASS] test_process_full_name_and_interactive_tooltips (REF-TEST-047: Full name & cyber tooltips verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -3088,6 +3134,7 @@ int main() {
     test::test_token_minimization_harness_integrity();
     test::test_package_autostart_and_installer_integrity();
     test::test_tray_report_action_and_tactile_button_integrity();
+    test::test_process_full_name_and_interactive_tooltips();
     test::test_deep_battery_drain_report_oracle_gate();
     test::test_modeset_flapping_elimination_and_test_isolation();
     test::test_cpu_features();

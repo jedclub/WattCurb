@@ -32,6 +32,8 @@ struct ProcessDrainCulprit {
     double wdi_score{0.0};
     std::string mechanism;
     std::string action_str;
+    std::string full_name; // REF-REQ-083: Full process name or script name
+    std::string cmdline;   // REF-REQ-083: Full command line arguments
 };
 
 struct BatteryDischargeSummary {

@@ -24,6 +24,60 @@ static std::string format_time(uint64_t timestamp_sec) {
     return "Unknown";
 }
 
+// Implements REF-REQ-083 & REF-ARCH-060: On-demand resolution of full process name and cmdline
+static std::pair<std::string, std::string> resolve_proc_full_info(int pid, const std::string& comm) {
+    if (pid <= 0) return {comm, ""};
+    char path[64];
+    std::snprintf(path, sizeof(path), "/proc/%d/cmdline", pid);
+    int fd = ::open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        return {comm, ""};
+    }
+    char buf[512];
+    ssize_t n = ::read(fd, buf, sizeof(buf) - 1);
+    ::close(fd);
+    if (n <= 0) {
+        return {comm, ""};
+    }
+    buf[n] = '\0';
+
+    // Extract first argument (executable path)
+    std::string first_arg(buf);
+    std::string full_name = first_arg;
+    auto slash = full_name.find_last_of('/');
+    if (slash != std::string::npos && slash + 1 < full_name.size()) {
+        full_name = full_name.substr(slash + 1);
+    }
+
+    // Disambiguate script interpreters (python, bash, sh, node, perl, ruby)
+    if (full_name == "python" || full_name == "python3" || full_name == "bash" ||
+        full_name == "sh" || full_name == "node" || full_name == "perl" || full_name == "ruby") {
+        size_t offset = first_arg.size() + 1;
+        while (offset < static_cast<size_t>(n)) {
+            std::string arg(buf + offset);
+            offset += arg.size() + 1;
+            if (!arg.empty() && arg[0] != '-') {
+                auto arg_slash = arg.find_last_of('/');
+                std::string script_name = (arg_slash != std::string::npos && arg_slash + 1 < arg.size())
+                                              ? arg.substr(arg_slash + 1) : arg;
+                full_name += " (" + script_name + ")";
+                break;
+            }
+        }
+    } else if (full_name == "firefox" && comm.rfind("Isolated", 0) == 0) {
+        full_name = "firefox (Web Content)";
+    }
+
+    // Format full command line: replace null bytes with spaces
+    for (ssize_t i = 0; i < n - 1; ++i) {
+        if (buf[i] == '\0') buf[i] = ' ';
+    }
+    std::string cmdline(buf);
+
+    if (full_name.empty()) full_name = comm;
+    return {full_name, cmdline};
+}
+
 BatteryDrainReportResult BatteryHistoryAnalyzer::analyze(
     const ipc::HistoryPoint* points,
     size_t count,
@@ -215,6 +269,8 @@ BatteryDrainReportResult BatteryHistoryAnalyzer::analyze(
         std::string domain_str = p.primary_hw_domain.empty() ? "CPU Compute" : std::string(p.primary_hw_domain.view());
         std::string mech_str = p.hardware_mechanism.empty() ? "Execution Load" : std::string(p.hardware_mechanism.view());
 
+        auto [full_name, cmdline] = resolve_proc_full_info(p.pid, std::string(p.comm.view()));
+
         result.process_culprits.push_back({
             static_cast<int>(rank++),
             p.pid,
@@ -226,7 +282,9 @@ BatteryDrainReportResult BatteryHistoryAnalyzer::analyze(
             share * 100.0,
             p.wdi_score,
             mech_str,
-            act_str
+            act_str,
+            full_name,
+            cmdline
         });
 
         if (rank > 12) break; // Keep top 12 culprits
@@ -359,7 +417,8 @@ std::string BatteryDrainReportResult::to_markdown() const {
     ss << "| Rank | PID | Process Name | Hardware Domain | Est. Drain (Wh) | Power (W) | Load (%) | WDI | Causation Mechanism | Mitigation |\n";
     ss << "|:---:|:---:|:---|:---|:---:|:---:|:---:|:---:|:---|:---|\n";
     for (const auto& p : process_culprits) {
-        ss << "| #" << p.rank << " | " << p.pid << " | `" << p.comm << "` | " << p.domain << " | "
+        std::string display_name = p.full_name.empty() ? p.comm : p.full_name;
+        ss << "| #" << p.rank << " | " << p.pid << " | `" << display_name << "` | " << p.domain << " | "
            << std::setprecision(2) << p.drain_wh << " | " << p.avg_watts << " | " << std::setprecision(1) << p.share_percent
            << "% | " << p.wdi_score << " | " << p.mechanism << " | " << p.action_str << " |\n";
     }

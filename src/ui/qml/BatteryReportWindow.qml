@@ -482,7 +482,7 @@ Window {
                             spacing: 8
 
                             Text { text: "순위"; color: reportWin.textDim; font.bold: true; font.pixelSize: 11; Layout.preferredWidth: 32 }
-                            Text { text: "프로세스명 (PID)"; color: reportWin.textDim; font.bold: true; font.pixelSize: 11; Layout.preferredWidth: 160 }
+                            Text { text: "프로세스명 (PID)"; color: reportWin.textDim; font.bold: true; font.pixelSize: 11; Layout.preferredWidth: 200 }
                             Text { text: "하드웨어 도메인"; color: reportWin.textDim; font.bold: true; font.pixelSize: 11; Layout.preferredWidth: 120 }
                             Text { text: "추정 방전량"; color: reportWin.textDim; font.bold: true; font.pixelSize: 11; Layout.preferredWidth: 85; horizontalAlignment: Text.AlignRight }
                             Text { text: "평균 전력"; color: reportWin.textDim; font.bold: true; font.pixelSize: 11; Layout.preferredWidth: 70; horizontalAlignment: Text.AlignRight }
@@ -534,23 +534,108 @@ Window {
                                     }
                                 }
 
-                                // Process comm + PID
-                                RowLayout {
-                                    Layout.preferredWidth: 160
-                                    spacing: 4
-                                    Text {
-                                        text: modelData.comm || ""
-                                        color: reportWin.textMain
-                                        font.bold: true
-                                        font.pixelSize: 11
-                                        elide: Text.ElideRight
-                                        Layout.fillWidth: true
+                                // Process comm + PID with Interactive Cyber ToolTip (REF-REQ-083, REF-ARCH-060)
+                                Item {
+                                    Layout.preferredWidth: 200
+                                    Layout.fillHeight: true
+
+                                    MouseArea {
+                                        id: procMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+
+                                        ToolTip.visible: procMa.containsMouse
+                                        ToolTip.delay: 150
+                                        ToolTip.timeout: 10000
+                                        ToolTip.background: Rectangle {
+                                            color: "#0f172a"
+                                            border.color: reportWin.colCyan
+                                            border.width: 1.5
+                                            radius: 6
+
+                                            Rectangle {
+                                                anchors.fill: parent
+                                                anchors.margins: -1
+                                                radius: 6
+                                                color: "transparent"
+                                                border.color: "#3300d2ff"
+                                                border.width: 1
+                                                opacity: 0.5
+                                            }
+                                        }
+                                        ToolTip.contentItem: ColumnLayout {
+                                            spacing: 4
+                                            RowLayout {
+                                                spacing: 6
+                                                Rectangle { width: 4; height: 14; radius: 2; color: reportWin.colCyan }
+                                                Text {
+                                                    text: modelData.fullName || modelData.comm || ""
+                                                    color: "#ffffff"
+                                                    font.bold: true
+                                                    font.pixelSize: 12
+                                                    font.family: "Monospace"
+                                                }
+                                                Text {
+                                                    text: "(PID " + modelData.pid + ")"
+                                                    color: reportWin.colOrange
+                                                    font.pixelSize: 11
+                                                    font.family: "Monospace"
+                                                }
+                                            }
+                                            Text {
+                                                visible: !!modelData.cmdline && modelData.cmdline !== (modelData.fullName || modelData.comm)
+                                                text: modelData.cmdline || ""
+                                                color: reportWin.textDim
+                                                font.pixelSize: 10
+                                                font.family: "Monospace"
+                                                wrapMode: Text.WrapAnywhere
+                                                Layout.maximumWidth: 440
+                                            }
+                                            Rectangle {
+                                                Layout.fillWidth: true
+                                                height: 1
+                                                color: reportWin.borderPanel
+                                            }
+                                            RowLayout {
+                                                spacing: 12
+                                                Text {
+                                                    text: "도메인: " + (modelData.domain || "CPU")
+                                                    color: reportWin.colCyan
+                                                    font.pixelSize: 10
+                                                }
+                                                Text {
+                                                    text: "방전량: " + (modelData.drainWh ? modelData.drainWh.toFixed(2) : "0.00") + " Wh (" + (modelData.sharePercent ? modelData.sharePercent.toFixed(1) : "0.0") + "%)"
+                                                    color: reportWin.colOrange
+                                                    font.bold: true
+                                                    font.pixelSize: 10
+                                                }
+                                            }
+                                            Text {
+                                                text: "메커니즘: " + (modelData.mechanism || "Normal execution")
+                                                color: reportWin.textMuted
+                                                font.pixelSize: 9
+                                            }
+                                        }
                                     }
-                                    Text {
-                                        text: "(" + modelData.pid + ")"
-                                        color: reportWin.textMuted
-                                        font.pixelSize: 10
-                                        font.family: "Monospace"
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        spacing: 4
+                                        Text {
+                                            text: modelData.fullName || modelData.comm || ""
+                                            color: procMa.containsMouse ? reportWin.colCyan : reportWin.textMain
+                                            font.bold: true
+                                            font.pixelSize: 11
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+                                        Text {
+                                            text: "(" + modelData.pid + ")"
+                                            color: procMa.containsMouse ? reportWin.colCyan : reportWin.textMuted
+                                            font.pixelSize: 10
+                                            font.family: "Monospace"
+                                        }
                                     }
                                 }
 
@@ -606,12 +691,27 @@ Window {
                                 RowLayout {
                                     Layout.fillWidth: true
                                     spacing: 4
-                                    Text {
-                                        text: modelData.mechanism || "Normal execution"
-                                        color: reportWin.textDim
-                                        font.pixelSize: 10
-                                        elide: Text.ElideRight
+                                    Item {
                                         Layout.fillWidth: true
+                                        Layout.fillHeight: true
+
+                                        MouseArea {
+                                            id: mechMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            ToolTip.visible: mechMa.containsMouse && (modelData.mechanism && modelData.mechanism.length > 25)
+                                            ToolTip.delay: 250
+                                            ToolTip.text: modelData.mechanism || ""
+                                        }
+
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: parent.width
+                                            text: modelData.mechanism || "Normal execution"
+                                            color: mechMa.containsMouse ? reportWin.textMain : reportWin.textDim
+                                            font.pixelSize: 10
+                                            elide: Text.ElideRight
+                                        }
                                     }
                                     Rectangle {
                                         height: 18

@@ -760,6 +760,8 @@ void DashboardBackend::generateBatteryReport() {
         pm[QStringLiteral("rank")] = p.rank;
         pm[QStringLiteral("pid")] = p.pid;
         pm[QStringLiteral("comm")] = QString::fromStdString(p.comm);
+        pm[QStringLiteral("fullName")] = QString::fromStdString(p.full_name.empty() ? p.comm : p.full_name);
+        pm[QStringLiteral("cmdline")] = QString::fromStdString(p.cmdline);
         pm[QStringLiteral("uid")] = p.uid;
         pm[QStringLiteral("domain")] = QString::fromStdString(p.domain);
         pm[QStringLiteral("drainWh")] = p.drain_wh;
