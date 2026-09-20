@@ -14,6 +14,7 @@
 #include "ipc/tray_shared_state.hpp"
 #include "ipc/history_ring_buffer.hpp"
 #include "core/event_logger.hpp"
+#include "core/l10n.hpp"
 #include "tray/tray_client.hpp"
 #include "core/daemon_runner.hpp"
 #include "core/scoped_profiler.hpp"
@@ -1817,13 +1818,13 @@ void test_thinkpower_tray_client() {
     TrayClient::render_tooltip(state, title, sizeof(title), desc, sizeof(desc));
     verify_utf8(title);
     verify_utf8(desc);
-    assert(std::string_view(desc).find("충전 중") != std::string_view::npos);
+    assert(std::string_view(desc).find(wattcurb::core::l10n::tr(wattcurb::core::l10n::StringId::STATUS_AC_CHARGING)) != std::string_view::npos);
 
     state.battery_state = 2;
     TrayClient::render_tooltip(state, title, sizeof(title), desc, sizeof(desc));
     verify_utf8(title);
     verify_utf8(desc);
-    assert(std::string_view(desc).find("완충 AC 직결") != std::string_view::npos);
+    assert(std::string_view(desc).find(wattcurb::core::l10n::tr(wattcurb::core::l10n::StringId::STATUS_AC_PASSTHROUGH)) != std::string_view::npos);
 
     // 2. Icon Name Resolution Test (Breeze 10% quantized battery + profile icons)
     char icon[64]{};
@@ -2781,6 +2782,98 @@ void test_dashboard_matrix_profiling_audit() {
 }
 #endif
 
+void test_multilingual_l10n_and_auto_system_locale() {
+    std::cout << "--- [REF-TEST-041] Multilingual L10n & Auto System Locale Verification ---\n";
+
+    using namespace wattcurb::core::l10n;
+
+    // 1. Completeness test: Verify all 13 languages have non-empty translations for all 46 strings
+    for (size_t l = 0; l < static_cast<size_t>(Language::COUNT); ++l) {
+        Language lang = static_cast<Language>(l);
+        const char* code = get_language_code(lang);
+        const char* name = get_language_name(lang);
+        assert(code != nullptr && std::strlen(code) >= 2);
+        assert(name != nullptr && std::strlen(name) > 0);
+
+        for (size_t s = 0; s < static_cast<size_t>(StringId::COUNT); ++s) {
+            StringId id = static_cast<StringId>(s);
+            const char* str = tr(id, lang);
+            assert(str != nullptr);
+            assert(std::strlen(str) > 0 && "Every StringId must have a non-empty translation in all 13 languages!");
+        }
+    }
+
+    // 2. Locale parser test across diverse POSIX strings
+    assert(parse_language_code("en_US.UTF-8") == Language::EN);
+    assert(parse_language_code("en_GB") == Language::EN);
+    assert(parse_language_code("zh_CN.UTF-8") == Language::ZH);
+    assert(parse_language_code("zh_TW") == Language::ZH);
+    assert(parse_language_code("hi_IN") == Language::HI);
+    assert(parse_language_code("es_ES@euro") == Language::ES);
+    assert(parse_language_code("es_MX.utf8") == Language::ES);
+    assert(parse_language_code("fr_FR.UTF-8") == Language::FR);
+    assert(parse_language_code("fr_CA") == Language::FR);
+    assert(parse_language_code("ar_EG.UTF-8") == Language::AR);
+    assert(parse_language_code("ar_SA") == Language::AR);
+    assert(parse_language_code("bn_BD") == Language::BN);
+    assert(parse_language_code("bn_IN") == Language::BN);
+    assert(parse_language_code("pt_BR.UTF-8") == Language::PT);
+    assert(parse_language_code("pt_PT") == Language::PT);
+    assert(parse_language_code("ru_RU.UTF-8") == Language::RU);
+    assert(parse_language_code("ur_PK") == Language::UR);
+    assert(parse_language_code("id_ID") == Language::ID);
+    assert(parse_language_code("de_DE.UTF-8") == Language::DE);
+    assert(parse_language_code("de_AT") == Language::DE);
+    assert(parse_language_code("ko_KR.UTF-8") == Language::KO);
+    assert(parse_language_code("ko") == Language::KO);
+    assert(parse_language_code("xyz_UNKNOWN") == std::nullopt);
+
+    // 3. Environment detection hierarchy
+    ::setenv("WATTCURB_LANG", "fr", 1);
+    assert(detect_system_language() == Language::FR);
+    ::unsetenv("WATTCURB_LANG");
+
+    ::setenv("LC_ALL", "pt_BR.UTF-8", 1);
+    assert(detect_system_language() == Language::PT);
+    ::unsetenv("LC_ALL");
+
+    ::setenv("LC_MESSAGES", "ru_RU.UTF-8", 1);
+    assert(detect_system_language() == Language::RU);
+    ::unsetenv("LC_MESSAGES");
+
+    ::setenv("LANG", "zh_CN.UTF-8", 1);
+    assert(detect_system_language() == Language::ZH);
+    ::unsetenv("LANG");
+
+    // Default fallback
+    assert(detect_system_language() == Language::EN);
+
+    // 4. String key parser test
+    assert(parse_string_key("STATUS_DISCHARGING") == StringId::STATUS_DISCHARGING);
+    assert(parse_string_key("TOTAL_DRAIN") == StringId::DASH_TOTAL_DRAIN);
+    assert(parse_string_key("CPU_MEM") == StringId::DASH_CPU_MEM_SUBSYSTEM);
+    assert(parse_string_key("NON_EXISTENT_KEY") == std::nullopt);
+
+    // 5. Oracle Gate Micro-Benchmark (100,000 lookups, verify sub-20ns latency and 0 heap allocation)
+    set_language(Language::KO);
+    auto t0 = std::chrono::steady_clock::now();
+    uint64_t sum_len = 0;
+    for (int i = 0; i < 100000; ++i) {
+        StringId id = static_cast<StringId>(i % static_cast<int>(StringId::COUNT));
+        const char* s = tr(id);
+        sum_len += std::strlen(s);
+    }
+    auto t1 = std::chrono::steady_clock::now();
+    double ns_per_lookup = std::chrono::duration<double, std::nano>(t1 - t0).count() / 100000.0;
+    assert(sum_len > 0);
+
+    std::cout << " [ORACLE GATE] O(1) L10n Translation Latency (100000 iters):\n";
+    std::cout << "   * Average Latency : " << ns_per_lookup << " ns/op\n";
+    assert(ns_per_lookup < 20.0 && "L10n lookup must be strictly < 20.0 ns/op (Zero-Cost table lookup)!");
+
+    std::cout << " [PASS] test_multilingual_l10n_and_auto_system_locale (REF-TEST-041: 13 languages, 46 strings, POSIX auto-detect verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -2809,6 +2902,7 @@ int main() {
 #if defined(WATTCURB_HAS_QT6)
     test::test_dashboard_matrix_profiling_audit();
 #endif
+    test::test_multilingual_l10n_and_auto_system_locale();
     test::test_anti_starvation_and_greedy_capping();
     test::test_state_journaling_and_faithful_restoration();
     test::test_zero_disk_wakeup_logging_and_history_ring_buffer();

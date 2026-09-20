@@ -2,6 +2,7 @@
 #include "ipc/tray_shared_state.hpp"
 #include "core/singleton_lock.hpp"
 #include "core/scoped_profiler.hpp"
+#include "core/l10n.hpp"
 #include <csignal>
 #include <cstdio>
 #include <cstring>
@@ -22,8 +23,9 @@ void sigusr1_handler(int) noexcept {
 } // anonymous namespace
 
 int main(int argc, char* argv[]) {
-    // Implements REF-REQ-035, REF-ARCH-025, REF-REQ-072:
-    // Standalone Ultra-Low-Overhead SNI Desktop Tray Client for WattCurb with Fine-Grained Profiler
+    // Implements REF-REQ-035, REF-ARCH-025, REF-REQ-072, REF-REQ-076:
+    // Standalone Ultra-Low-Overhead SNI Desktop Tray Client for WattCurb with L10n Auto-Detection
+    wattcurb::core::l10n::init_from_system();
 
     bool profile_mode = false;
     bool benchmark_mode = false;

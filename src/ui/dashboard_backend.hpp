@@ -91,9 +91,19 @@ class DashboardBackend : public QObject {
     Q_PROPERTY(bool isRescanning READ isRescanning NOTIFY rescanStatusChanged)
     Q_PROPERTY(QString lastUpdateTime READ lastUpdateTime NOTIFY telemetryChanged)
 
+    // Localization (REF-REQ-076, REF-ARCH-053)
+    Q_PROPERTY(QString currentLanguage READ currentLanguage NOTIFY languageChanged)
+    Q_PROPERTY(QString currentLanguageCode READ currentLanguageCode NOTIFY languageChanged)
+
 public:
     explicit DashboardBackend(QObject* parent = nullptr);
     ~DashboardBackend() override;
+
+    // Localization bridge for QML
+    Q_INVOKABLE QString tr(const QString& key) const;
+    Q_INVOKABLE void setLanguage(const QString& code);
+    QString currentLanguage() const;
+    QString currentLanguageCode() const;
 
     QVariantList systemHistory() const { return system_history_; }
     QVariantList cpuHistory() const { return cpu_history_; }
@@ -179,6 +189,7 @@ signals:
     void rescanStatusChanged();
     void historyChanged();
     void powerSharesChanged();
+    void languageChanged();
 
 private slots:
     void onPollTimer();

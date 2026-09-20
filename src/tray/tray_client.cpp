@@ -2,6 +2,7 @@
 #include "core/singleton_lock.hpp"
 #include "core/posix_fs.hpp"
 #include "core/scoped_profiler.hpp"
+#include "core/l10n.hpp"
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
@@ -426,15 +427,15 @@ void TrayClient::render_tooltip(
     unsigned int sys_w = state.system_drain_mw / 1000;
     unsigned int sys_frac = (state.system_drain_mw % 1000) / 100;
 
-    const char* status_kr = state.battery_state == 1 ? "방전 중" : 
-                           (state.battery_state == 2 ? "AC 직결 (완충)" : "AC 충전 중");
+    const char* status_str = state.battery_state == 1 ? core::l10n::tr(core::l10n::StringId::STATUS_DISCHARGING) : 
+                           (state.battery_state == 2 ? core::l10n::tr(core::l10n::StringId::STATUS_AC_PASSTHROUGH) : core::l10n::tr(core::l10n::StringId::STATUS_AC_CHARGING));
 
-    std::snprintf(out_title, title_cap, "⚡ WattCurb: %u.%u W (%s)", sys_w, sys_frac, status_kr);
+    std::snprintf(out_title, title_cap, "⚡ WattCurb: %u.%u W (%s)", sys_w, sys_frac, status_str);
 
-    const char* profile_short = "Performance (4.1G 언락)";
-    if (state.power_profile_mode == 1) profile_short = "Balanced (균형)";
-    else if (state.power_profile_mode == 2) profile_short = "SmartSave (절전 1.7G)";
-    else if (state.power_profile_mode == 3) profile_short = "UltraSave (극저전력 1.4G)";
+    const char* profile_short = core::l10n::tr(core::l10n::StringId::PROFILE_PERFORMANCE_SHORT);
+    if (state.power_profile_mode == 1) profile_short = core::l10n::tr(core::l10n::StringId::PROFILE_BALANCED_SHORT);
+    else if (state.power_profile_mode == 2) profile_short = core::l10n::tr(core::l10n::StringId::PROFILE_SMARTSAVE_SHORT);
+    else if (state.power_profile_mode == 3) profile_short = core::l10n::tr(core::l10n::StringId::PROFILE_ULTRASAVE_SHORT);
 
     unsigned int cpu_w = state.cpu_drain_mw / 1000;
     unsigned int cpu_frac = (state.cpu_drain_mw % 1000) / 100;
@@ -490,21 +491,22 @@ void TrayClient::render_tooltip(
                 state.culprits[0].comm, c1_w, c1_f);
         } else {
             std::snprintf(culprits_line, sizeof(culprits_line),
-                "<font color=\"#94a3b8\"><i>유휴 안정 (누수 없음)</i></font>");
+                "<font color=\"#94a3b8\"><i>%s</i></font>",
+                core::l10n::tr(core::l10n::StringId::HUD_IDLE_STABLE));
         }
     }
 
     char bat_detail[64]{};
     if (state.battery_state == 1) {
         if (state.time_to_empty_min > 0) {
-            std::snprintf(bat_detail, sizeof(bat_detail), "%u분 남음", state.time_to_empty_min);
+            std::snprintf(bat_detail, sizeof(bat_detail), core::l10n::tr(core::l10n::StringId::BATTERY_TIME_LEFT), state.time_to_empty_min);
         } else {
-            std::snprintf(bat_detail, sizeof(bat_detail), "방전 중");
+            std::snprintf(bat_detail, sizeof(bat_detail), "%s", core::l10n::tr(core::l10n::StringId::STATUS_DISCHARGING));
         }
     } else if (state.battery_state == 2) {
-        std::snprintf(bat_detail, sizeof(bat_detail), "완충 AC 직결");
+        std::snprintf(bat_detail, sizeof(bat_detail), "%s", core::l10n::tr(core::l10n::StringId::STATUS_AC_PASSTHROUGH));
     } else {
-        std::snprintf(bat_detail, sizeof(bat_detail), "충전 중");
+        std::snprintf(bat_detail, sizeof(bat_detail), "%s", core::l10n::tr(core::l10n::StringId::STATUS_AC_CHARGING));
     }
 
     // Ref-Req-050 & REF-REQ-072: Clean, fixed-column progressive bar layout with ScopedProfiler
@@ -1025,7 +1027,8 @@ int TrayClient::dbusmenu_method_get_layout(sd_bus_message* msg, void* userdata, 
     char h1[128]{}, h2[128]{}, h3[128]{};
     unsigned int sys_w = state.system_drain_mw / 1000;
     unsigned int sys_frac = (state.system_drain_mw % 1000) / 100;
-    const char* status_str = state.battery_state == 1 ? "On Battery" : (state.battery_state == 2 ? "Charging" : "AC Passthrough");
+    const char* status_str = state.battery_state == 1 ? core::l10n::tr(core::l10n::StringId::STATUS_ON_BATTERY) : 
+                           (state.battery_state == 2 ? core::l10n::tr(core::l10n::StringId::STATUS_AC_CHARGING) : core::l10n::tr(core::l10n::StringId::STATUS_AC_PASSTHROUGH));
     char sign = (state.battery_state == 2) ? '+' : '-';
 
     std::snprintf(h1, sizeof(h1), "⚡ %u%% (Est: %u min) | %c%u.%u W (%s)",
@@ -1051,13 +1054,13 @@ int TrayClient::dbusmenu_method_get_layout(sd_bus_message* msg, void* userdata, 
     add_item(2, h2, false);
     add_item(3, h3, false);
     add_item(4, nullptr, true, "separator");
-    add_item(5, "Performance (고성능 모드 - 4.1GHz Boost)", true, nullptr, "radio", (cur_mode == 0 ? 1 : 0));
-    add_item(6, "Balanced (균형 모드 - 기본 권장)", true, nullptr, "radio", (cur_mode == 1 ? 1 : 0));
-    add_item(7, "Smart Save (스마트 절전 모드 - 1.7GHz)", true, nullptr, "radio", (cur_mode == 2 ? 1 : 0));
-    add_item(8, "Ultra Save (초절전 모드 - 1.4GHz 상한)", true, nullptr, "radio", (cur_mode == 3 ? 1 : 0));
+    add_item(5, core::l10n::tr(core::l10n::StringId::PROFILE_PERFORMANCE_LONG), true, nullptr, "radio", (cur_mode == 0 ? 1 : 0));
+    add_item(6, core::l10n::tr(core::l10n::StringId::PROFILE_BALANCED_LONG), true, nullptr, "radio", (cur_mode == 1 ? 1 : 0));
+    add_item(7, core::l10n::tr(core::l10n::StringId::PROFILE_SMARTSAVE_LONG), true, nullptr, "radio", (cur_mode == 2 ? 1 : 0));
+    add_item(8, core::l10n::tr(core::l10n::StringId::PROFILE_ULTRASAVE_LONG), true, nullptr, "radio", (cur_mode == 3 ? 1 : 0));
     add_item(9, nullptr, true, "separator");
-    add_item(10, "📈 정밀 분석 매트릭 창 열기 (Matrix Dashboard)");
-    add_item(11, "📊 KDE 시스템 모니터 열기 (System Monitor)");
+    add_item(10, core::l10n::tr(core::l10n::StringId::ACTION_OPEN_DASHBOARD));
+    add_item(11, core::l10n::tr(core::l10n::StringId::ACTION_OPEN_SYSMONITOR));
 
     sd_bus_message_close_container(reply); // children av
     sd_bus_message_close_container(reply); // root r

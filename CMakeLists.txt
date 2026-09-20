@@ -78,6 +78,7 @@ set(WATTCURB_LIB_SOURCES
     src/core/singleton_lock.cpp
     src/core/daemon_runner.cpp
     src/core/event_logger.cpp
+    src/core/l10n.cpp
     src/hw/hardware_probe.cpp
     src/proc/process_analyzer.cpp
     src/policy/attribution_engine.cpp
@@ -101,6 +102,7 @@ add_executable(wattcurb-tray
     src/tray/main_tray.cpp
     src/tray/tray_client.cpp
     src/core/singleton_lock.cpp
+    src/core/l10n.cpp
 )
 target_include_directories(wattcurb-tray PRIVATE src ${SYSTEMD_INCLUDE_DIRS})
 target_link_libraries(wattcurb-tray PRIVATE ${SYSTEMD_LIBRARIES})
@@ -116,6 +118,7 @@ if(Qt6_FOUND)
         src/ui/dashboard_backend.cpp
         src/ui/dashboard_backend.hpp
         src/core/singleton_lock.cpp
+        src/core/l10n.cpp
         src/ui/qml.qrc
     )
     target_include_directories(wattcurb-dashboard PRIVATE src)

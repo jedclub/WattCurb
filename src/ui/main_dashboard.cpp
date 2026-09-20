@@ -6,8 +6,10 @@
 #include <iostream>
 #include "ui/dashboard_backend.hpp"
 #include "core/singleton_lock.hpp"
+#include "core/l10n.hpp"
 
 int main(int argc, char* argv[]) {
+    wattcurb::core::l10n::init_from_system();
     bool benchmark_mode = false;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--benchmark") == 0 || std::strcmp(argv[i], "-B") == 0) {

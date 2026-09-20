@@ -84,7 +84,7 @@ ApplicationWindow {
                 RowLayout {
                     spacing: 8
                     Text {
-                        text: "TOTAL DRAIN:"
+                        text: backend.tr("TOTAL_DRAIN") + ":"
                         color: root.textDim
                         font.bold: true
                         font.pixelSize: 12
@@ -209,9 +209,9 @@ ApplicationWindow {
 
                         // Title & Live Watts
                         RowLayout {
-                            Text { text: "💻 CPU & MEMORY SUBSYSTEM"; color: root.colCyan; font.bold: true; font.pixelSize: 13 }
+                            Text { text: "💻 " + backend.tr("CPU_MEM"); color: root.colCyan; font.bold: true; font.pixelSize: 13 }
                             Item { Layout.fillWidth: true }
-                            Text { text: "🔍 상세" ; color: root.textMuted; font.pixelSize: 11 }
+                            Text { text: "🔍 " + backend.tr("DETAILS"); color: root.textMuted; font.pixelSize: 11 }
                             Text { text: backend.cpuDrainWatts.toFixed(2) + " W"; color: root.colCyan; font.bold: true; font.pixelSize: 18; font.family: "Monospace" }
                         }
 
@@ -392,9 +392,9 @@ ApplicationWindow {
                         spacing: 4
 
                         RowLayout {
-                            Text { text: "🔋 BATTERY & POWER SUPPLY (BAT0)"; color: root.colGreen; font.bold: true; font.pixelSize: 13 }
+                            Text { text: "🔋 " + backend.tr("BATTERY") + " (BAT0)"; color: root.colGreen; font.bold: true; font.pixelSize: 13 }
                             Item { Layout.fillWidth: true }
-                            Text { text: "🔍 상세" ; color: root.textMuted; font.pixelSize: 11 }
+                            Text { text: "🔍 " + backend.tr("DETAILS"); color: root.textMuted; font.pixelSize: 11 }
                             Text { text: backend.batteryPercent + "%"; color: root.colGreen; font.bold: true; font.pixelSize: 20; font.family: "Monospace" }
                         }
 
@@ -498,7 +498,7 @@ ApplicationWindow {
                         // GPU Header
                         RowLayout {
                             Layout.fillWidth: true
-                            Text { text: "🎮 GPU SILICON & LOAD:"; color: root.textMain; font.pixelSize: 13; font.bold: true }
+                            Text { text: "🎮 " + backend.tr("GPU") + ":"; color: root.textMain; font.pixelSize: 13; font.bold: true }
                             Item { Layout.fillWidth: true }
                             Text { text: backend.gpuDrainWatts.toFixed(2) + " W"; color: root.colGreen; font.pixelSize: 16; font.bold: true; font.family: "Monospace" }
                             Text { text: "(Load: " + backend.gpuLoadPercent + "%)"; color: root.colGreen; font.bold: true; font.pixelSize: 12 }
@@ -558,7 +558,7 @@ ApplicationWindow {
                         // Display
                         RowLayout {
                             Layout.fillWidth: true
-                            Text { text: "🖥️ Display & Backlight:"; color: root.textMain; font.pixelSize: 13; font.bold: true }
+                            Text { text: "🖥️ " + backend.tr("DISPLAY") + ":"; color: root.textMain; font.pixelSize: 13; font.bold: true }
                             Item { Layout.fillWidth: true }
                             Text { text: backend.displayDrainWatts.toFixed(2) + " W"; color: root.colOrange; font.pixelSize: 14; font.bold: true; font.family: "Monospace" }
                             Text { text: "(" + backend.displayBrightnessPct + "% bright)"; color: root.textDim; font.pixelSize: 12 }
@@ -570,7 +570,7 @@ ApplicationWindow {
                         // Storage
                         RowLayout {
                             Layout.fillWidth: true
-                            Text { text: "💾 Storage & NVMe SSD:"; color: root.textMain; font.pixelSize: 13; font.bold: true }
+                            Text { text: "💾 " + backend.tr("STORAGE") + ":"; color: root.textMain; font.pixelSize: 13; font.bold: true }
                             Item { Layout.fillWidth: true }
                             Text { text: backend.nvmeDrainWatts.toFixed(2) + " W"; color: root.colCyan; font.pixelSize: 14; font.bold: true; font.family: "Monospace" }
                         }
@@ -609,7 +609,7 @@ ApplicationWindow {
                         RowLayout {
                             Layout.fillWidth: true
                             Text {
-                                text: "📈 SYSTEM TOTAL POWER DRAIN TIMELINE (btop Real-Time History 35s)"
+                                text: "📈 " + backend.tr("TIMELINE") + " (35s)"
                                 color: root.colCyan
                                 font.bold: true
                                 font.pixelSize: 12
@@ -937,7 +937,7 @@ ApplicationWindow {
                     RowLayout {
                         Layout.fillWidth: true
                         Text {
-                            text: "💻 장치별 소비전력 지분 (DEVICE SHARE)"
+                            text: "💻 " + backend.tr("DASH_POWER_SHARE_HW")
                             color: root.colCyan
                             font.bold: true
                             font.pixelSize: 13
@@ -1099,7 +1099,7 @@ ApplicationWindow {
                     RowLayout {
                         Layout.fillWidth: true
                         Text {
-                            text: "🚀 프로세스별 소비전력 지분 (PROCESS SHARE)"
+                            text: "🚀 " + backend.tr("DASH_POWER_SHARE_PROC")
                             color: root.colOrange
                             font.bold: true
                             font.pixelSize: 13

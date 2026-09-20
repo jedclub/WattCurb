@@ -1,6 +1,7 @@
 #include "ui/dashboard_backend.hpp"
 #include "core/singleton_lock.hpp"
 #include "core/scoped_profiler.hpp"
+#include "core/l10n.hpp"
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -346,9 +347,9 @@ int DashboardBackend::batteryState() const noexcept {
 
 QString DashboardBackend::batteryStateString() const {
     switch (latest_state_.battery_state) {
-        case 1: return QStringLiteral("방전 중 (Discharging)");
-        case 2: return QStringLiteral("AC 직결 (AC Passthrough)");
-        default: return QStringLiteral("AC 연결 (AC Powered)");
+        case 1: return QString::fromUtf8(core::l10n::tr(core::l10n::StringId::STATUS_DISCHARGING));
+        case 2: return QString::fromUtf8(core::l10n::tr(core::l10n::StringId::STATUS_AC_PASSTHROUGH));
+        default: return QString::fromUtf8(core::l10n::tr(core::l10n::StringId::STATUS_AC_CONNECTED));
     }
 }
 
@@ -358,16 +359,18 @@ int DashboardBackend::timeToEmptyMin() const noexcept {
 
 QString DashboardBackend::timeToEmptyString() const {
     if (latest_state_.battery_state != 1) {
-        return QStringLiteral("전원 연결됨 (무제한)");
+        return QString::fromUtf8(core::l10n::tr(core::l10n::StringId::BATTERY_TIME_UNLIMITED));
     }
     int mins = latest_state_.time_to_empty_min;
-    if (mins <= 0) return QStringLiteral("계산 중...");
+    if (mins <= 0) return QString::fromUtf8(core::l10n::tr(core::l10n::StringId::BATTERY_TIME_CALCULATING));
     int h = mins / 60;
     int m = mins % 60;
     if (h > 0) {
-        return QStringLiteral("%1시간 %2분").arg(h).arg(m, 2, 10, QLatin1Char('0'));
+        QString fmt = QString::fromUtf8(core::l10n::tr(core::l10n::StringId::BATTERY_TIME_HOURS_MINS));
+        return fmt.arg(h).arg(m, 2, 10, QLatin1Char('0'));
     }
-    return QStringLiteral("%1분").arg(m);
+    QString fmt = QString::fromUtf8(core::l10n::tr(core::l10n::StringId::BATTERY_TIME_MINS));
+    return fmt.arg(m);
 }
 
 double DashboardBackend::cpuDrainWatts() const noexcept {
@@ -417,11 +420,11 @@ int DashboardBackend::powerProfileMode() const noexcept {
 QString DashboardBackend::powerProfileName() const {
     int m = powerProfileMode();
     switch (m) {
-        case 0: return QStringLiteral("Performance (고성능 4.1GHz)");
-        case 1: return QStringLiteral("Balanced (기본 균형)");
-        case 2: return QStringLiteral("Smart Save (스마트 절전 1.7GHz)");
-        case 3: return QStringLiteral("Ultra Save (울트라 절전 1.4GHz 상한)");
-        default: return QStringLiteral("Balanced");
+        case 0: return QString::fromUtf8(core::l10n::tr(core::l10n::StringId::PROFILE_PERFORMANCE_LONG));
+        case 1: return QString::fromUtf8(core::l10n::tr(core::l10n::StringId::PROFILE_BALANCED_LONG));
+        case 2: return QString::fromUtf8(core::l10n::tr(core::l10n::StringId::PROFILE_SMARTSAVE_LONG));
+        case 3: return QString::fromUtf8(core::l10n::tr(core::l10n::StringId::PROFILE_ULTRASAVE_LONG));
+        default: return QString::fromUtf8(core::l10n::tr(core::l10n::StringId::PROFILE_BALANCED_SHORT));
     }
 }
 
@@ -500,12 +503,12 @@ void DashboardBackend::update_power_shares() {
             dev_list.append(m);
         };
 
-        add_dev(QStringLiteral("CPU Subsystem"), cpu_w, QStringLiteral("#00d2ff")); // Cyan
-        add_dev(QStringLiteral("GPU Silicon"), gpu_w, QStringLiteral("#a855f7"));   // Purple
-        add_dev(QStringLiteral("Display & Light"), disp_w, QStringLiteral("#f59e0b")); // Orange
-        add_dev(QStringLiteral("NVMe Storage"), nvme_w, QStringLiteral("#10b981")); // Emerald
+        add_dev(QString::fromUtf8(core::l10n::tr(core::l10n::StringId::DEV_CPU_PKG)), cpu_w, QStringLiteral("#00d2ff")); // Cyan
+        add_dev(QString::fromUtf8(core::l10n::tr(core::l10n::StringId::DEV_GPU_SILICON)), gpu_w, QStringLiteral("#a855f7"));   // Purple
+        add_dev(QString::fromUtf8(core::l10n::tr(core::l10n::StringId::DEV_DISPLAY)), disp_w, QStringLiteral("#f59e0b")); // Orange
+        add_dev(QString::fromUtf8(core::l10n::tr(core::l10n::StringId::DEV_STORAGE)), nvme_w, QStringLiteral("#10b981")); // Emerald
         if (fan_w > 0.05) {
-            add_dev(QStringLiteral("Cooling Fan"), fan_w, QStringLiteral("#3b82f6"));   // Blue
+            add_dev(QString::fromUtf8(core::l10n::tr(core::l10n::StringId::DEV_COOLING_FAN)), fan_w, QStringLiteral("#3b82f6"));   // Blue
         }
         if (plat_w > 0.05) {
             // Physical Constituent Decomposition of Platform & Loss (REF-REQ-064)
@@ -610,6 +613,33 @@ void DashboardBackend::update_power_shares() {
         }
         process_power_shares_ = proc_list;
     }
+}
+
+QString DashboardBackend::tr(const QString& key) const {
+    auto id = core::l10n::parse_string_key(key.toStdString());
+    if (id) {
+        return QString::fromUtf8(core::l10n::tr(*id));
+    }
+    return key;
+}
+
+void DashboardBackend::setLanguage(const QString& code) {
+    auto lang = core::l10n::parse_language_code(code.toStdString());
+    if (lang) {
+        core::l10n::set_language(*lang);
+        emit languageChanged();
+        emit telemetryChanged();
+        emit profileChanged();
+        emit powerSharesChanged();
+    }
+}
+
+QString DashboardBackend::currentLanguage() const {
+    return QString::fromUtf8(core::l10n::get_language_name(core::l10n::get_active_language()));
+}
+
+QString DashboardBackend::currentLanguageCode() const {
+    return QString::fromUtf8(core::l10n::get_language_code(core::l10n::get_active_language()));
 }
 
 } // namespace wattcurb::ui

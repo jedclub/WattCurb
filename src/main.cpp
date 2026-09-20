@@ -9,6 +9,7 @@
 #include "ipc/tray_shared_state.hpp"
 #include "ipc/history_ring_buffer.hpp"
 #include "core/event_logger.hpp"
+#include "core/l10n.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -91,17 +92,28 @@ int query_daemon_status() {
             auto* shm = static_cast<const wattcurb::ipc::WattCurbSharedState*>(ptr);
             wattcurb::ipc::WattCurbSharedState state{};
             if (shm->read_atomic(state)) {
-                std::cout << "\033[1m[WattCurb Resident Daemon Binary Status (REF-ARCH-018)]\033[0m\n"
-                          << "  - Total System Drain : " << std::fixed << std::setprecision(2) << (state.system_drain_mw / 1000.0) << " W\n"
-                          << "  - CPU Package Drain  : " << (state.cpu_drain_mw / 1000.0) << " W (" << state.cpu_temp_c << "°C)\n"
-                          << "  - GPU Silicon Drain  : " << (state.gpu_drain_mw / 1000.0) << " W\n"
-                          << "  - Battery Level      : " << static_cast<int>(state.battery_percent) << "% ("
-                          << (state.battery_state == 1 ? "Discharging" : (state.battery_state == 2 ? "AC Pass-through" : "AC Connected")) << ")\n"
-                          << "  - System Wakeups     : " << state.wakeups_per_sec << " wakeups/sec\n"
-                          << "  - Cooling Fan        : " << state.fan_rpm << " RPM\n"
-                          << "  - Active Mitigations : " << state.active_mitigations << " features active\n";
+                const char* bat_status_str = state.battery_state == 1 ? wattcurb::core::l10n::tr(wattcurb::core::l10n::StringId::STATUS_DISCHARGING) :
+                                             (state.battery_state == 2 ? wattcurb::core::l10n::tr(wattcurb::core::l10n::StringId::STATUS_AC_PASSTHROUGH) :
+                                              wattcurb::core::l10n::tr(wattcurb::core::l10n::StringId::STATUS_AC_CONNECTED));
+
+                std::cout << "\033[1m[" << wattcurb::core::l10n::tr(wattcurb::core::l10n::StringId::CLI_STATUS_HEADER) << "]\033[0m\n"
+                          << "  - " << wattcurb::core::l10n::tr(wattcurb::core::l10n::StringId::CLI_TOTAL_DRAIN) << " : "
+                          << std::fixed << std::setprecision(2) << (state.system_drain_mw / 1000.0) << " W\n"
+                          << "  - " << wattcurb::core::l10n::tr(wattcurb::core::l10n::StringId::CLI_CPU_DRAIN) << "  : "
+                          << (state.cpu_drain_mw / 1000.0) << " W (" << state.cpu_temp_c << "°C)\n"
+                          << "  - " << wattcurb::core::l10n::tr(wattcurb::core::l10n::StringId::CLI_GPU_DRAIN) << "  : "
+                          << (state.gpu_drain_mw / 1000.0) << " W\n"
+                          << "  - " << wattcurb::core::l10n::tr(wattcurb::core::l10n::StringId::CLI_BATTERY_LEVEL) << "      : "
+                          << static_cast<int>(state.battery_percent) << "% (" << bat_status_str << ")\n"
+                          << "  - " << wattcurb::core::l10n::tr(wattcurb::core::l10n::StringId::CLI_WAKEUPS) << "     : "
+                          << state.wakeups_per_sec << " wakeups/sec\n"
+                          << "  - " << wattcurb::core::l10n::tr(wattcurb::core::l10n::StringId::CLI_COOLING_FAN) << "        : "
+                          << state.fan_rpm << " RPM\n"
+                          << "  - " << wattcurb::core::l10n::tr(wattcurb::core::l10n::StringId::CLI_ACTIVE_MITIGATIONS) << " : "
+                          << state.active_mitigations << " features active\n";
                 if (state.culprits[0].pid > 0) {
-                    std::cout << "  - Top Drain Culprit  : PID " << state.culprits[0].pid << " (" << state.culprits[0].comm
+                    std::cout << "  - " << wattcurb::core::l10n::tr(wattcurb::core::l10n::StringId::CLI_TOP_CULPRIT)
+                              << "  : PID " << state.culprits[0].pid << " (" << state.culprits[0].comm
                               << ") -> " << (state.culprits[0].drain_mw / 1000.0) << " W\n";
                 }
                 ::munmap(ptr, sizeof(wattcurb::ipc::WattCurbSharedState));
@@ -211,6 +223,7 @@ int query_daemon_logs() {
 }
 
 int main(int argc, char* argv[]) {
+    wattcurb::core::l10n::init_from_system();
     double interval_sec = 2.0;
     double duration_sec = 0.0;
     double period_sec = 3.0;
