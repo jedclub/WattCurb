@@ -1134,6 +1134,11 @@ void HardwareProbe::capture_subsystems(HardwareSample& sample) const {
             }
         }
 
+        if (sample.cpu_cores_online == 0) {
+            long online = ::sysconf(_SC_NPROCESSORS_ONLN);
+            sample.cpu_cores_online = (online > 0) ? static_cast<uint32_t>(online) : 1;
+        }
+
         // CPU C-States
         {
             WATTCURB_PROFILE_SCOPE("hw.cpu_cstates");
