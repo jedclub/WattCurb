@@ -1,7 +1,9 @@
 #include "policy/mitigation_engine.hpp"
 #include "core/posix_fs.hpp"
 #include "core/scoped_profiler.hpp"
+#include "core/event_logger.hpp"
 #include <sched.h>
+#include <signal.h>
 #include <sys/syscall.h>
 #include <sys/resource.h>
 #include <unistd.h>
@@ -31,10 +33,6 @@ namespace {
 #ifndef IOPRIO_PRIO_VALUE
 #define IOPRIO_PRIO_VALUE(class_val, data_val) (((class_val) << 13) | ((data_val) & 0x1fff))
 #endif
-
-// Saved state for backlight restoration
-static uint32_t s_saved_backlight_level{0};
-static char s_saved_backlight_device[64]{0};
 
 // REF-REQ-055: Hardware baseline state recorded at bootstrap
 static MitigationEngine::HardwareBaselineState s_hardware_baseline{};
@@ -735,6 +733,231 @@ cpu_set_t MitigationEngine::get_all_cores_cpuset() noexcept {
     return s_all;
 }
 
+namespace {
+
+void parse_cpulist(const char* buf, cpu_set_t& set) noexcept {
+    CPU_ZERO(&set);
+    if (!buf) return;
+    const char* p = buf;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == ',') ++p;
+        if (!*p) break;
+        char* end = nullptr;
+        long first = std::strtol(p, &end, 10);
+        if (end == p) break;
+        p = end;
+        long last = first;
+        if (*p == '-') {
+            ++p;
+            last = std::strtol(p, &end, 10);
+            if (end != p) p = end;
+        }
+        if (first >= 0 && last >= first && last < CPU_SETSIZE) {
+            for (long c = first; c <= last; ++c) {
+                CPU_SET(static_cast<size_t>(c), &set);
+            }
+        }
+    }
+}
+
+bool is_interactive_terminal_or_shell(std::string_view comm) noexcept {
+    return (comm == "konsole" || comm == "alacritty" || comm == "kitty" ||
+            comm == "foot" || comm == "wezterm" || comm == "ptyxis" ||
+            comm == "gnome-terminal" || comm == "xterm" || comm == "rxvt" ||
+            comm == "bash" || comm == "zsh" || comm == "fish" ||
+            comm == "tmux" || comm == "screen" || comm == "ssh");
+}
+
+bool is_desktop_compositor(std::string_view comm) noexcept {
+    return (comm == "kwin_wayland" || comm == "kwin_x11" || comm == "kwin" ||
+            comm == "mutter" || comm == "sway" || comm == "hyprland" ||
+            comm == "Xorg" || comm == "Xwayland" || comm == "weston");
+}
+
+} // namespace
+
+const MitigationEngine::CpuClusterTopology& MitigationEngine::get_cluster_topology() noexcept {
+    static const CpuClusterTopology s_topo = []() noexcept {
+        CpuClusterTopology topo{};
+        topo.total_cpus = get_total_online_cpus();
+        topo.all_cores_cpuset = get_all_cores_cpuset();
+        topo.cluster_count = 1;
+
+        // Auto-detect physical L3 cache cluster topology via sysfs (REF-RES-020, REF-REQ-084, REF-ARCH-061)
+        bool detected_l3 = false;
+        int fd0 = ::open("/sys/devices/system/cpu/cpu0/cache/index3/shared_cpu_list", O_RDONLY | O_CLOEXEC);
+        if (fd0 >= 0) {
+            char buf[64]{0};
+            ssize_t n0 = ::read(fd0, buf, sizeof(buf) - 1);
+            ::close(fd0);
+            if (n0 > 0) {
+                buf[n0] = '\0';
+                parse_cpulist(buf, topo.c1_cpuset);
+
+                // Find first CPU not in c1_cpuset to discover Cluster 2
+                int32_t second_cpu = -1;
+                for (int32_t c = 0; c < topo.total_cpus; ++c) {
+                    if (!CPU_ISSET(static_cast<size_t>(c), &topo.c1_cpuset)) {
+                        second_cpu = c;
+                        break;
+                    }
+                }
+
+                if (second_cpu >= 0) {
+                    char path[96];
+                    std::snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cache/index3/shared_cpu_list", second_cpu);
+                    int fd1 = ::open(path, O_RDONLY | O_CLOEXEC);
+                    if (fd1 >= 0) {
+                        char buf2[64]{0};
+                        ssize_t n1 = ::read(fd1, buf2, sizeof(buf2) - 1);
+                        ::close(fd1);
+                        if (n1 > 0) {
+                            buf2[n1] = '\0';
+                            parse_cpulist(buf2, topo.c2_cpuset);
+                            topo.cluster_count = 2;
+                            detected_l3 = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback for uniform L3 or single-cluster CPUs
+        if (!detected_l3 || topo.cluster_count < 2) {
+            CPU_ZERO(&topo.c1_cpuset);
+            CPU_ZERO(&topo.c2_cpuset);
+            if (topo.total_cpus >= 4) {
+                int32_t half = topo.total_cpus / 2;
+                for (int32_t c = 0; c < half; ++c) {
+                    CPU_SET(static_cast<size_t>(c), &topo.c1_cpuset);
+                }
+                for (int32_t c = half; c < topo.total_cpus; ++c) {
+                    CPU_SET(static_cast<size_t>(c), &topo.c2_cpuset);
+                }
+                topo.cluster_count = 2;
+            } else {
+                topo.c1_cpuset = topo.all_cores_cpuset;
+                topo.c2_cpuset = topo.all_cores_cpuset;
+                topo.cluster_count = 1;
+            }
+        }
+
+        // Interactive Headroom within C1 (e.g. Cores 0..3 on 8-core C1)
+        CPU_ZERO(&topo.interactive_shield_cpuset);
+        int32_t c1_size = 0;
+        for (int32_t c = 0; c < topo.total_cpus; ++c) {
+            if (CPU_ISSET(static_cast<size_t>(c), &topo.c1_cpuset)) ++c1_size;
+        }
+        int32_t shield_cores = std::max(1, c1_size / 2);
+        int32_t counted = 0;
+        for (int32_t c = 0; c < topo.total_cpus && counted < shield_cores; ++c) {
+            if (CPU_ISSET(static_cast<size_t>(c), &topo.c1_cpuset)) {
+                CPU_SET(static_cast<size_t>(c), &topo.interactive_shield_cpuset);
+                ++counted;
+            }
+        }
+
+        return topo;
+    }();
+    return s_topo;
+}
+
+cpu_set_t MitigationEngine::get_c1_cpuset() noexcept {
+    return get_cluster_topology().c1_cpuset;
+}
+
+cpu_set_t MitigationEngine::get_c2_cpuset() noexcept {
+    return get_cluster_topology().c2_cpuset;
+}
+
+cpu_set_t MitigationEngine::get_interactive_shield_cpuset() noexcept {
+    return get_cluster_topology().interactive_shield_cpuset;
+}
+
+bool MitigationEngine::shield_interactive_process(int32_t pid, std::string_view comm) noexcept {
+    if (pid <= 1) return false;
+
+    bool is_comp = is_desktop_compositor(comm);
+    int target_nice = is_comp ? -10 : -5;
+
+    int cur_nice = ::getpriority(PRIO_PROCESS, static_cast<id_t>(pid));
+    if (cur_nice > target_nice) {
+        ::setpriority(PRIO_PROCESS, static_cast<id_t>(pid), target_nice);
+    }
+
+    // Pin to Cluster 1 (C1: Cores 0..7) to guarantee zero cross-CCX cache thrashing
+    const auto& topo = get_cluster_topology();
+    ::sched_setaffinity(pid, sizeof(cpu_set_t), &topo.c1_cpuset);
+    return true;
+}
+
+void MitigationEngine::shield_all_interactive_terminals() noexcept {
+    WATTCURB_PROFILE_SCOPE("mitig.shield_terminals");
+    DIR* proc_dir = ::opendir("/proc");
+    if (!proc_dir) return;
+
+    struct dirent* entry = nullptr;
+    while ((entry = ::readdir(proc_dir)) != nullptr) {
+        if (entry->d_type != DT_DIR && entry->d_type != DT_UNKNOWN) continue;
+        if (entry->d_name[0] < '0' || entry->d_name[0] > '9') continue;
+
+        int32_t pid = std::atoi(entry->d_name);
+        if (pid <= 1) continue;
+
+        char comm_path[64];
+        std::snprintf(comm_path, sizeof(comm_path), "/proc/%d/comm", pid);
+        int fd = ::open(comm_path, O_RDONLY | O_CLOEXEC);
+        if (fd < 0) continue;
+
+        char comm_buf[64];
+        ssize_t n = ::read(fd, comm_buf, sizeof(comm_buf) - 1);
+        ::close(fd);
+        if (n <= 0) continue;
+        if (comm_buf[n - 1] == '\n') --n;
+        comm_buf[n] = '\0';
+        std::string_view comm(comm_buf, static_cast<size_t>(n));
+
+        if (is_interactive_terminal_or_shell(comm) || is_desktop_compositor(comm)) {
+            shield_interactive_process(pid, comm);
+        }
+    }
+    ::closedir(proc_dir);
+}
+
+bool MitigationEngine::is_heavy_compute_candidate(const ProcessAttributedPower& proc) noexcept {
+    if (proc.pid <= 1) return false;
+    auto tier = static_cast<ProcessSafetyTier>(proc.safety_tier);
+    if (tier == ProcessSafetyTier::CriticalImmune || tier == ProcessSafetyTier::DesktopCore) {
+        return false;
+    }
+
+    std::string_view comm(proc.comm.c_str());
+    if (comm.starts_with("wattcurb") || comm.starts_with("pipewire") || comm.starts_with("wireplumber")) {
+        return false;
+    }
+    bool is_compiler_or_builder = 
+        (comm == "gcc" || comm == "g++" || comm == "clang" || comm == "clang++" ||
+         comm == "rustc" || comm == "cargo" || comm == "ninja" || comm == "make" ||
+         comm == "python3" || comm == "python" || comm == "node" || comm == "java" ||
+         comm == "ffmpeg" || comm == "as" || comm == "ld" || comm.starts_with("cc1") ||
+         comm.starts_with("rust-lld") || comm.starts_with("Isolated Web Co"));
+
+    if (is_compiler_or_builder && (proc.cpu_watts > 0.4 || proc.num_threads >= 2)) {
+        return true;
+    }
+    if (proc.cpu_watts > 0.8) {
+        return true;
+    }
+    if (proc.num_threads >= 4 && proc.cpu_watts > 0.25) {
+        return true;
+    }
+    if (proc.wdi_score > 4.0 && proc.cpu_watts > 0.20) {
+        return true;
+    }
+    return false;
+}
+
+
 bool MitigationEngine::apply_core_affinity_cap(int32_t pid, const cpu_set_t* allowed_set) noexcept {
     WATTCURB_PROFILE_SCOPE("mitig.apply_affinity_cap");
     if (pid <= 1 || is_immune_process(pid)) return false;
@@ -814,7 +1037,7 @@ bool MitigationEngine::apply_sched_batch(int32_t pid, int nice_val) noexcept {
     struct sched_param sp{};
     sp.sched_priority = 0;
     bool any_success = (::sched_setscheduler(pid, SCHED_BATCH, &sp) == 0);
-    ::setpriority(PRIO_PROCESS, pid, nice_val);
+    ::setpriority(PRIO_PROCESS, static_cast<id_t>(pid), nice_val);
 
     char task_dir[64];
     std::snprintf(task_dir, sizeof(task_dir), "/proc/%d/task", pid);
@@ -833,7 +1056,7 @@ bool MitigationEngine::apply_sched_batch(int32_t pid, int nice_val) noexcept {
             if (::sched_setscheduler(static_cast<pid_t>(tid), SCHED_BATCH, &sp) == 0) {
                 any_success = true;
             }
-            ::setpriority(PRIO_PROCESS, static_cast<pid_t>(tid), nice_val);
+            ::setpriority(PRIO_PROCESS, static_cast<id_t>(tid), nice_val);
         }
     }
     ::closedir(dir);
@@ -898,7 +1121,7 @@ void MitigationEngine::audit_and_heal_audio_stack() noexcept {
                                 restore_sched_normal(audio_pid);
                             }
                             // Elevate priority to real-time interactive level (-19 for audio, -10 for compositor)
-                            ::setpriority(PRIO_PROCESS, audio_pid, target_nice);
+                            ::setpriority(PRIO_PROCESS, static_cast<id_t>(audio_pid), target_nice);
                             // Ensure audio/compositor threads have full access to all cores including clean headroom
                             ::sched_setaffinity(audio_pid, sizeof(cpu_set_t), &all_cores);
                         }
@@ -939,7 +1162,7 @@ bool MitigationEngine::restore_sched_normal(int32_t pid, int original_policy, in
     int target_policy = (original_policy >= 0) ? original_policy : SCHED_OTHER;
 
     // 1. Reset nice priority to original_nice
-    ::setpriority(PRIO_PROCESS, pid, original_nice);
+    ::setpriority(PRIO_PROCESS, static_cast<id_t>(pid), original_nice);
 
     // 2. Restore CPU scheduler to original_policy
     struct sched_param sp{};
@@ -958,7 +1181,7 @@ bool MitigationEngine::restore_sched_normal(int32_t pid, int original_policy, in
             long tid = std::strtol(entry->d_name, &endptr, 10);
             if (tid > 0 && *endptr == '\0') {
                 ::sched_setscheduler(static_cast<pid_t>(tid), target_policy, &sp);
-                ::setpriority(PRIO_PROCESS, static_cast<pid_t>(tid), original_nice);
+                ::setpriority(PRIO_PROCESS, static_cast<id_t>(tid), original_nice);
             }
         }
         ::closedir(dir);
@@ -1417,16 +1640,130 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
 
     status.current_profile = m_current_profile;
 
-    // In Performance mode: zero throttling, zero freezes, maximum throughput
+    // Periodically shield all active desktop terminals & shells (REF-REQ-084, REF-ARCH-061)
+    if (m_scan_counter++ % 10 == 0) {
+        shield_all_interactive_terminals();
+    }
+
+    // In Performance mode: Active C1/C2 Cluster Dispersion & Interactive Terminal Shield (REF-REQ-084, REF-ARCH-061)
     if (m_current_profile == PowerProfileMode::Performance) {
         audit_and_heal_audio_stack();
+
+        // 1. Proactively shield interactive terminals and shells
+        for (const auto& proc : report.top_processes) {
+            if (proc.pid <= 1) continue;
+            auto tier = static_cast<ProcessSafetyTier>(proc.safety_tier);
+            if (tier == ProcessSafetyTier::DesktopCore) {
+                shield_interactive_process(proc.pid, proc.comm.view());
+            }
+        }
+
+        // 2. Adaptive C2 Cluster Dispersion for heavy compute process groups
+        const auto& topo = get_cluster_topology();
+        for (const auto& proc : report.top_processes) {
+            if (proc.pid <= 1) continue;
+            if (!is_heavy_compute_candidate(proc)) continue;
+
+            bool already_tracked = false;
+            for (auto& tm : m_tracked) {
+                if (tm.pid == proc.pid) {
+                    already_tracked = true;
+                    if (!tm.c2_cluster_dispersed && topo.cluster_count >= 2) {
+                        if (apply_core_affinity_cap(proc.pid, &topo.c2_cpuset)) {
+                            apply_sched_batch(proc.pid, 5);
+                            tm.c2_cluster_dispersed = true;
+                            tm.sched_batch_applied = true;
+                            tm.low_power_ticks = 0;
+                            core::EventLogger::log_mitigation(proc.pid, proc.comm.c_str(), "C2ClusterDispersion", "Confined heavy compute to C2 (Cores 8..15) with SCHED_BATCH (nice 5) to shield terminal interactivity");
+                            ++status.throttled_count;
+                        }
+                    }
+                    break;
+                }
+            }
+
+            if (!already_tracked && m_tracked.size() < MAX_TRACKED_MITIGATIONS) {
+                int orig_nice = ::getpriority(PRIO_PROCESS, static_cast<id_t>(proc.pid));
+                int orig_sched = ::sched_getscheduler(proc.pid);
+                cpu_set_t orig_aff;
+                CPU_ZERO(&orig_aff);
+                ::sched_getaffinity(proc.pid, sizeof(cpu_set_t), &orig_aff);
+
+                const cpu_set_t& target_set = (topo.cluster_count >= 2) ? topo.c2_cpuset : topo.all_cores_cpuset;
+                if (apply_core_affinity_cap(proc.pid, &target_set)) {
+                    apply_sched_batch(proc.pid, 5);
+                    m_tracked.push_back(TrackedMitigation{
+                        .pid = proc.pid,
+                        .tier = static_cast<ProcessSafetyTier>(proc.safety_tier),
+                        .current_action = MitigationAction::AffinityCap,
+                        .applied_timestamp_sec = 0,
+                        .original_nice = orig_nice,
+                        .original_sched_policy = (orig_sched >= 0) ? orig_sched : SCHED_OTHER,
+                        .original_timerslack_ns = proc.timerslack_ns,
+                        .original_affinity = orig_aff,
+                        .affinity_capped = true,
+                        .sched_batch_applied = true,
+                        .sched_idle_applied = false,
+                        .c2_cluster_dispersed = (topo.cluster_count >= 2),
+                        .low_power_ticks = 0
+                    });
+                    core::EventLogger::log_mitigation(proc.pid, proc.comm.c_str(), "C2ClusterDispersion", "Confined heavy compute to C2 (Cores 8..15) with SCHED_BATCH (nice 5) to shield terminal interactivity");
+                    ++status.throttled_count;
+                }
+            }
+        }
+
+        // 3. Dynamic Variable De-Escalation ("가변적 적용")
+        for (size_t i = 0; i < m_tracked.size(); ) {
+            auto& tm = m_tracked[i];
+            if (!tm.c2_cluster_dispersed) {
+                ++i;
+                continue;
+            }
+
+            if (::kill(tm.pid, 0) != 0) {
+                m_tracked[i] = m_tracked.back();
+                m_tracked.pop_back();
+                continue;
+            }
+
+            bool found_active = false;
+            double cur_watts = 0.0;
+            for (const auto& proc : report.top_processes) {
+                if (proc.pid == tm.pid) {
+                    found_active = true;
+                    cur_watts = proc.cpu_watts;
+                    break;
+                }
+            }
+
+            if (!found_active || cur_watts < 0.30) {
+                ++tm.low_power_ticks;
+            } else {
+                tm.low_power_ticks = 0;
+            }
+
+            if (tm.low_power_ticks >= 2) {
+                restore_core_affinity(tm.pid, &tm.original_affinity);
+                restore_sched_normal(tm.pid, tm.original_sched_policy, tm.original_nice);
+                core::EventLogger::log_rollback(tm.pid, "heavy-compute", "Adaptive de-escalation: CPU power subsided below 0.3W, restored all-core affinity");
+                m_tracked[i] = m_tracked.back();
+                m_tracked.pop_back();
+            } else {
+                ++i;
+            }
+        }
+
         if (status.feature_summary_count < status.feature_summaries.size()) {
             status.feature_summaries[status.feature_summary_count++] = "CPU: 4.1GHz Boost (Performance)";
         }
         if (status.feature_summary_count < status.feature_summaries.size()) {
-            status.feature_summaries[status.feature_summary_count++] = "Mitigations: All Off (Full Speed)";
+            status.feature_summaries[status.feature_summary_count++] = "C1/C2 Dual-Cluster Spatial Load Dispersion";
         }
-        status.active_summary = "Performance Mode (4.1GHz Boost, Unconstrained)";
+        if (status.feature_summary_count < status.feature_summaries.size()) {
+            status.feature_summaries[status.feature_summary_count++] = "Terminal Latency Shield: Active (nice -5, C1)";
+        }
+        status.active_summary = "Performance Mode (C1/C2 Cluster Dispersion & Terminal Shield Active)";
         report.mitigation_status = status;
         return status;
     }
@@ -1460,8 +1797,14 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
 
         auto tier = static_cast<ProcessSafetyTier>(proc.safety_tier);
 
-        // Tier 0 (CriticalImmune) & Tier 1 (DesktopCore) are strictly untouchable! (REF-REQ-031 Sec 3.1)
-        if (tier == ProcessSafetyTier::CriticalImmune || tier == ProcessSafetyTier::DesktopCore) {
+        // Proactive DesktopCore Shield (compositors, terminals, shells)
+        if (tier == ProcessSafetyTier::DesktopCore) {
+            shield_interactive_process(proc.pid, proc.comm.view());
+            continue;
+        }
+
+        // Tier 0 (CriticalImmune) is strictly untouchable! (REF-REQ-031 Sec 3.1)
+        if (tier == ProcessSafetyTier::CriticalImmune) {
             continue;
         }
 
@@ -1527,7 +1870,7 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
 
         // Apply Actuations (Zero-Freeze: Only SchedIdle, TimerSlack, MemoryReclaim)
         if (should_throttle && !already_tracked) {
-            int orig_nice = ::getpriority(PRIO_PROCESS, proc.pid);
+            int orig_nice = ::getpriority(PRIO_PROCESS, static_cast<id_t>(proc.pid));
             int orig_sched = ::sched_getscheduler(proc.pid);
             cpu_set_t orig_aff;
             CPU_ZERO(&orig_aff);
@@ -1568,17 +1911,6 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
             }
         }
 
-        // Anti-Starvation & CPU Headroom Protection (REF-REQ-054, REF-ARCH-030, REF-REQ-057)
-        if (tier == ProcessSafetyTier::DesktopCore) {
-            // Proactive compositor shield: prioritize to nice -10 and ensure all cores access
-            if (::getpriority(PRIO_PROCESS, proc.pid) > -10) {
-                ::setpriority(PRIO_PROCESS, proc.pid, -10);
-            }
-            cpu_set_t all_c = get_all_cores_cpuset();
-            ::sched_setaffinity(proc.pid, sizeof(cpu_set_t), &all_c);
-            continue;
-        }
-
         bool should_cap_affinity = false;
         if (tier != ProcessSafetyTier::CriticalImmune && tier != ProcessSafetyTier::DesktopCore && !is_immune_process(proc.pid)) {
             double cpu_w_threshold = 1.2;
@@ -1605,13 +1937,21 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
         }
 
         if (should_cap_affinity) {
-            int orig_nice = ::getpriority(PRIO_PROCESS, proc.pid);
+            int orig_nice = ::getpriority(PRIO_PROCESS, static_cast<id_t>(proc.pid));
             int orig_sched = ::sched_getscheduler(proc.pid);
             cpu_set_t orig_aff;
             CPU_ZERO(&orig_aff);
             ::sched_getaffinity(proc.pid, sizeof(cpu_set_t), &orig_aff);
 
-            cpu_set_t allowed_set = get_headroom_allowed_cpuset(m_current_profile);
+            const auto& topo = get_cluster_topology();
+            cpu_set_t allowed_set;
+            bool is_heavy = is_heavy_compute_candidate(proc);
+            if (is_heavy && topo.cluster_count >= 2) {
+                allowed_set = topo.c2_cpuset;
+            } else {
+                allowed_set = get_headroom_allowed_cpuset(m_current_profile);
+            }
+
             if (apply_core_affinity_cap(proc.pid, &allowed_set)) {
                 int nice_val = 10;
                 if (m_current_profile == PowerProfileMode::UltraEndurance) nice_val = 15;
@@ -1629,7 +1969,9 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
                         .original_affinity = orig_aff,
                         .affinity_capped = true,
                         .sched_batch_applied = true,
-                        .sched_idle_applied = false
+                        .sched_idle_applied = false,
+                        .c2_cluster_dispersed = (is_heavy && topo.cluster_count >= 2),
+                        .low_power_ticks = 0
                     });
                     already_tracked = true;
                 } else if (already_tracked) {
@@ -1637,11 +1979,53 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
                         if (tm.pid == proc.pid) {
                             tm.affinity_capped = true;
                             tm.sched_batch_applied = true;
+                            if (is_heavy && topo.cluster_count >= 2) tm.c2_cluster_dispersed = true;
                             break;
                         }
                     }
                 }
             }
+        }
+    }
+
+    // Dynamic Variable De-Escalation for C2 dispersed / affinity capped processes (REF-REQ-084)
+    for (size_t i = 0; i < m_tracked.size(); ) {
+        auto& tm = m_tracked[i];
+        if (!tm.c2_cluster_dispersed) {
+            ++i;
+            continue;
+        }
+
+        if (::kill(tm.pid, 0) != 0) {
+            m_tracked[i] = m_tracked.back();
+            m_tracked.pop_back();
+            continue;
+        }
+
+        bool found_active = false;
+        double cur_watts = 0.0;
+        for (const auto& proc : report.top_processes) {
+            if (proc.pid == tm.pid) {
+                found_active = true;
+                cur_watts = proc.cpu_watts;
+                break;
+            }
+        }
+
+        if (!found_active || cur_watts < 0.30) {
+            ++tm.low_power_ticks;
+        } else {
+            tm.low_power_ticks = 0;
+        }
+
+        if (tm.low_power_ticks >= 2) {
+            restore_core_affinity(tm.pid, &tm.original_affinity);
+            restore_sched_normal(tm.pid, tm.original_sched_policy, tm.original_nice);
+            core::EventLogger::log_rollback(tm.pid, "heavy-compute", "Adaptive de-escalation: CPU power subsided below 0.3W, restored all-core affinity");
+            m_tracked[i] = m_tracked.back();
+            m_tracked.pop_back();
+        } else {
+            ++i;
         }
     }
 

@@ -38,6 +38,9 @@ ProcessClassification ProcessClassifierDB::classify(std::string_view comm) noexc
         comm == "Xorg" || comm == "Xwayland" || comm == "weston" ||
         comm == "foot" || comm == "kitty" || comm == "alacritty" ||
         comm == "konsole" || comm == "wezterm" || comm == "gnome-terminal" ||
+        comm == "ptyxis" || comm == "xterm" || comm == "rxvt" ||
+        comm == "bash" || comm == "zsh" || comm == "fish" ||
+        comm == "tmux" || comm == "screen" || comm == "ssh" ||
         comm == "opencode" || comm == "agy" || comm == "code" ||
         comm == "cursor" || comm == "zed" || comm == "nvim" || comm == "emacs") {
         return ProcessClassification{

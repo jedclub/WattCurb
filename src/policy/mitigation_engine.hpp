@@ -52,6 +52,24 @@ public:
     static bool restore_core_affinity(int32_t pid, const cpu_set_t* target_affinity = nullptr) noexcept;
     static bool apply_sched_batch(int32_t pid, int nice_val = 10) noexcept;
 
+    // Adaptive C1/C2 Dual-Cluster Spatial Load Dispersion & Interactive Latency Shield (REF-REQ-084, REF-ARCH-061)
+    struct alignas(64) CpuClusterTopology {
+        int32_t total_cpus{16};
+        int32_t cluster_count{2};
+        cpu_set_t c1_cpuset{};                 // Primary / Interactive Cluster (e.g. Cores 0..7)
+        cpu_set_t c2_cpuset{};                 // Secondary / Compute Cluster (e.g. Cores 8..15)
+        cpu_set_t interactive_shield_cpuset{}; // Clean headroom within C1 (e.g. Cores 0..3)
+        cpu_set_t all_cores_cpuset{};
+    };
+
+    static const CpuClusterTopology& get_cluster_topology() noexcept;
+    static cpu_set_t get_c1_cpuset() noexcept;
+    static cpu_set_t get_c2_cpuset() noexcept;
+    static cpu_set_t get_interactive_shield_cpuset() noexcept;
+    static bool shield_interactive_process(int32_t pid, std::string_view comm) noexcept;
+    static void shield_all_interactive_terminals() noexcept;
+    static bool is_heavy_compute_candidate(const ProcessAttributedPower& proc) noexcept;
+
     // Hardware Baseline & Actuation Primitives (REF-REQ-055, REF-ARCH-031, REF-REQ-063)
     struct alignas(64) HardwareBaselineState {
         bool captured{false};
@@ -121,6 +139,8 @@ public:
         bool affinity_capped{false};
         bool sched_batch_applied{false};
         bool sched_idle_applied{false};
+        bool c2_cluster_dispersed{false};
+        uint32_t low_power_ticks{0};
     };
 
     [[nodiscard]] const core::FixedVector<TrackedMitigation, MAX_TRACKED_MITIGATIONS>& tracked_mitigations() const noexcept {
@@ -132,6 +152,7 @@ private:
     std::optional<PowerProfileMode> m_profile_override{std::nullopt};
     bool m_aspm_modified{false};
     bool m_backlight_capped{false};
+    uint32_t m_scan_counter{0};
 
     core::FixedVector<TrackedMitigation, MAX_TRACKED_MITIGATIONS> m_tracked{};
 };

@@ -1987,6 +1987,142 @@ void test_anti_starvation_and_greedy_capping() {
               << avg_us_op << " us/op)\n";
 }
 
+// Implements REF-TEST-048: Adaptive C1/C2 Dual-Cluster Spatial Load Dispersion & Terminal Shield Oracle Gate
+void test_adaptive_c1_c2_cluster_dispersion() {
+    using namespace wattcurb;
+    using namespace wattcurb::policy;
+
+    std::cout << "--- [REF-TEST-048] Adaptive C1/C2 Dual-Cluster Spatial Load Dispersion & Terminal Shield Verification ---\n";
+
+    // 1. Hardware Cluster Topology Discovery (REF-REQ-084 Sec 2.1, REF-ARCH-061)
+    const auto& topo = MitigationEngine::get_cluster_topology();
+    int32_t total = MitigationEngine::get_total_online_cpus();
+    assert(topo.total_cpus == total && "Cluster topology total CPUs must match system online CPUs");
+    assert(topo.cluster_count >= 1 && "At least one CPU cluster must be discovered");
+
+    cpu_set_t c1 = MitigationEngine::get_c1_cpuset();
+    cpu_set_t c2 = MitigationEngine::get_c2_cpuset();
+    cpu_set_t shield = MitigationEngine::get_interactive_shield_cpuset();
+    cpu_set_t all_c = MitigationEngine::get_all_cores_cpuset();
+
+    for (int32_t c = 0; c < total; ++c) {
+        assert(CPU_ISSET(static_cast<size_t>(c), &all_c) && "All online cores must be in all_cores set");
+    }
+
+    if (topo.cluster_count >= 2) {
+        // Dual-Cluster CPU (e.g. AMD Ryzen 7 4750U with CCX 0: 0..7 and CCX 1: 8..15)
+        for (int32_t c = 0; c < 8 && c < total; ++c) {
+            assert(CPU_ISSET(static_cast<size_t>(c), &c1) && "Cores 0..7 must belong to Cluster 1 (C1)");
+            assert(!CPU_ISSET(static_cast<size_t>(c), &c2) && "Cores 0..7 must NOT belong to Cluster 2 (C2)");
+        }
+        for (int32_t c = 8; c < 16 && c < total; ++c) {
+            assert(CPU_ISSET(static_cast<size_t>(c), &c2) && "Cores 8..15 must belong to Cluster 2 (C2)");
+            assert(!CPU_ISSET(static_cast<size_t>(c), &c1) && "Cores 8..15 must NOT belong to Cluster 1 (C1)");
+        }
+        // Interactive Headroom within C1 (e.g. Cores 0..3)
+        for (int32_t c = 0; c < 4 && c < total; ++c) {
+            assert(CPU_ISSET(static_cast<size_t>(c), &shield) && "Clean interactive headroom must be within C1");
+        }
+    }
+
+    // 2. Interactive Terminal & Shell Classification (REF-REQ-084 Sec 2.2)
+    const char* terminal_comms[] = {
+        "konsole", "alacritty", "kitty", "foot", "wezterm", "ptyxis",
+        "gnome-terminal", "xterm", "rxvt", "bash", "zsh", "fish",
+        "tmux", "screen", "ssh"
+    };
+    for (const char* term : terminal_comms) {
+        auto cls = ProcessClassifierDB::classify(term);
+        assert(cls.tier == ProcessSafetyTier::DesktopCore && "Terminals and shells must be classified as DesktopCore");
+        assert(!cls.can_throttle_scheduler && "Terminals must be strictly immune from scheduler throttling");
+    }
+
+    // 3. Heavy Compute Workload Identification (REF-REQ-084 Sec 2.3)
+    ProcessAttributedPower heavy_ninja{};
+    heavy_ninja.pid = 4001;
+    heavy_ninja.comm = "ninja";
+    heavy_ninja.safety_tier = static_cast<uint8_t>(ProcessSafetyTier::BackgroundWorker);
+    heavy_ninja.cpu_watts = 2.4;
+    heavy_ninja.num_threads = 16;
+    assert(MitigationEngine::is_heavy_compute_candidate(heavy_ninja) && "Ninja build system must be identified as heavy compute");
+
+    ProcessAttributedPower heavy_gcc{};
+    heavy_gcc.pid = 4002;
+    heavy_gcc.comm = "gcc";
+    heavy_gcc.safety_tier = static_cast<uint8_t>(ProcessSafetyTier::BackgroundWorker);
+    heavy_gcc.cpu_watts = 1.1;
+    heavy_gcc.num_threads = 4;
+    assert(MitigationEngine::is_heavy_compute_candidate(heavy_gcc) && "GCC compiler must be identified as heavy compute");
+
+    // Immune Terminal with high CPU watts MUST NOT be flagged as heavy compute candidate
+    ProcessAttributedPower busy_bash{};
+    busy_bash.pid = 4003;
+    busy_bash.comm = "bash";
+    busy_bash.safety_tier = static_cast<uint8_t>(ProcessSafetyTier::DesktopCore);
+    busy_bash.cpu_watts = 1.5;
+    busy_bash.num_threads = 2;
+    assert(!MitigationEngine::is_heavy_compute_candidate(busy_bash) && "DesktopCore bash must be immune from compute confinement");
+
+    // 4. Closed-Loop Performance Mode Actuation & Terminal Shielding (REF-REQ-084 Sec 2.2 & 2.3)
+    MitigationEngine engine;
+    engine.set_profile_override(PowerProfileMode::Performance);
+
+    AnalysisReportData report{};
+    report.top_processes.push_back(busy_bash);
+    report.top_processes.push_back(heavy_ninja);
+
+    auto status = engine.evaluate_and_actuate(report, false, 100.0);
+    assert(status.current_profile == PowerProfileMode::Performance);
+    assert(status.active_summary.view().find("C1/C2 Cluster Dispersion & Terminal Shield Active") != std::string_view::npos);
+
+    bool has_c1_c2_summary = false;
+    bool has_term_shield_summary = false;
+    for (size_t i = 0; i < status.feature_summary_count; ++i) {
+        std::string_view feat = status.feature_summaries[i].view();
+        if (feat.find("C1/C2 Dual-Cluster") != std::string_view::npos) has_c1_c2_summary = true;
+        if (feat.find("Terminal Latency Shield") != std::string_view::npos) has_term_shield_summary = true;
+    }
+    assert(has_c1_c2_summary && "Performance mode must report C1/C2 Dual-Cluster Load Dispersion");
+    assert(has_term_shield_summary && "Performance mode must report Active Terminal Latency Shield");
+
+    // 5. Dynamic Variable De-Escalation Loop (REF-REQ-084 Sec 2.4 "가변적 적용")
+    // When compute load subsides below 0.3W for 2 consecutive cycles, restore baseline
+    report.top_processes[1].cpu_watts = 0.08; // ninja finished or idling
+    engine.evaluate_and_actuate(report, false, 100.0); // Tick 1 (low power recorded)
+    engine.evaluate_and_actuate(report, false, 100.0); // Tick 2 (de-escalation triggered)
+
+    // 6. Oracle Gate Micro-Benchmark: 50,000 iterations of cluster queries and candidate evaluation
+    constexpr size_t BENCH_COUNT = 50000;
+    auto t0 = std::chrono::steady_clock::now();
+    uint64_t tsc0 = wattcurb::core::hw_isa::read_tsc();
+
+    volatile int dummy = 0;
+    for (size_t i = 0; i < BENCH_COUNT; ++i) {
+        const auto& t = MitigationEngine::get_cluster_topology();
+        dummy += t.cluster_count;
+        dummy += MitigationEngine::is_heavy_compute_candidate(heavy_ninja);
+    }
+    (void)dummy;
+
+    auto t1 = std::chrono::steady_clock::now();
+    uint64_t tsc1 = wattcurb::core::hw_isa::read_tsc();
+
+    auto total_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+    double avg_us_op = (static_cast<double>(total_ns) / static_cast<double>(BENCH_COUNT)) / 1000.0;
+    double cycles_op = static_cast<double>(tsc1 - tsc0) / static_cast<double>(BENCH_COUNT);
+
+    std::cout << " [ORACLE GATE] Adaptive C1/C2 Cluster Benchmark (" << BENCH_COUNT << " iters):\n"
+              << "   * Average Latency : " << std::fixed << std::setprecision(4) << avg_us_op << " us/op\n"
+              << "   * Average Cycles  : " << std::setprecision(1) << cycles_op << " cycles/op\n";
+
+    assert(avg_us_op < 0.25 && "C1/C2 cluster operations must complete in < 0.25 us/op");
+
+    std::cout << " [PASS] test_adaptive_c1_c2_cluster_dispersion (REF-TEST-048: C1="
+              << (topo.cluster_count >= 2 ? "0..7" : "all") << ", C2="
+              << (topo.cluster_count >= 2 ? "8..15" : "all") << ", Terminal Shield Active, "
+              << avg_us_op << " us/op)\n";
+}
+
 // Implements REF-TEST-020: Dual-Domain Pre-Transition State Journaling & Faithful Restoration Verification
 void test_state_journaling_and_faithful_restoration() {
     using namespace wattcurb;
@@ -3159,6 +3295,7 @@ int main() {
 #endif
     test::test_multilingual_l10n_and_auto_system_locale();
     test::test_anti_starvation_and_greedy_capping();
+    test::test_adaptive_c1_c2_cluster_dispersion();
     test::test_state_journaling_and_faithful_restoration();
     test::test_zero_disk_wakeup_logging_and_history_ring_buffer();
     test::test_circular_power_share_visualization();

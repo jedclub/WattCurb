@@ -169,6 +169,13 @@ bool FeatureManager::actuate_cgroup_freeze(int32_t pid, bool freeze) noexcept {
 bool FeatureManager::actuate_ccx_affinity(int32_t pid, int32_t target_core) noexcept {
     if (pid <= 1 || target_core < 0) return false;
 
+    const auto& topo = MitigationEngine::get_cluster_topology();
+    if (topo.cluster_count >= 2) {
+        const cpu_set_t& target_set = CPU_ISSET(static_cast<size_t>(target_core), &topo.c1_cpuset) 
+                                      ? topo.c1_cpuset : topo.c2_cpuset;
+        return (::sched_setaffinity(pid, sizeof(cpu_set_t), &target_set) == 0);
+    }
+
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
 
@@ -182,7 +189,16 @@ bool FeatureManager::actuate_ccx_affinity(int32_t pid, int32_t target_core) noex
 }
 
 bool FeatureManager::actuate_anti_starvation_cap(int32_t pid, PowerProfileMode mode, const char* comm) noexcept {
-    cpu_set_t allowed_set = MitigationEngine::get_headroom_allowed_cpuset(mode);
+    const auto& topo = MitigationEngine::get_cluster_topology();
+    cpu_set_t allowed_set;
+    bool c2_dispersed = false;
+    if (topo.cluster_count >= 2 && mode == PowerProfileMode::Performance) {
+        allowed_set = topo.c2_cpuset;
+        c2_dispersed = true;
+    } else {
+        allowed_set = MitigationEngine::get_headroom_allowed_cpuset(mode);
+    }
+
     bool aff = MitigationEngine::apply_core_affinity_cap(pid, &allowed_set);
     int nice_val = 10;
     if (mode == PowerProfileMode::UltraEndurance) {
@@ -196,9 +212,10 @@ bool FeatureManager::actuate_anti_starvation_cap(int32_t pid, PowerProfileMode m
         MitigationEngine::apply_cgroup_cpu_quota(pid, 400000, 100000);
     }
     char det[128];
-    std::snprintf(det, sizeof(det), "Nice=%d, Headroom Mask applied, cgroup quota=%s",
-                  nice_val, (mode == PowerProfileMode::UltraEndurance ? "400ms/100ms" : "none"));
-    core::EventLogger::log_mitigation(pid, (comm && *comm) ? comm : "runaway-task", "AntiStarvationCap", det);
+    std::snprintf(det, sizeof(det), "Nice=%d, %s Mask applied, cgroup quota=%s",
+                  nice_val, (c2_dispersed ? "C2-Cluster" : "Headroom"), (mode == PowerProfileMode::UltraEndurance ? "400ms/100ms" : "none"));
+    core::EventLogger::log_mitigation(pid, (comm && *comm) ? comm : "runaway-task",
+                                      (c2_dispersed ? "C2ClusterDispersion" : "AntiStarvationCap"), det);
     return (aff || batch);
 }
 
@@ -293,8 +310,12 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
 
         auto tier = static_cast<ProcessSafetyTier>(proc.safety_tier);
 
-        // Strict Immunity for Tier 0 (CriticalImmune) & Tier 1 (DesktopCore)
-        if (tier == ProcessSafetyTier::CriticalImmune || tier == ProcessSafetyTier::DesktopCore) {
+        // Strict Immunity for Tier 0 (CriticalImmune) & Proactive Latency Shield for Tier 1 (DesktopCore)
+        if (tier == ProcessSafetyTier::DesktopCore) {
+            MitigationEngine::shield_interactive_process(proc.pid, proc.comm.view());
+            continue;
+        }
+        if (tier == ProcessSafetyTier::CriticalImmune) {
             continue;
         }
 
@@ -464,7 +485,7 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
                 }
 
                 if (!already_tracked) {
-                    int orig_nice = ::getpriority(PRIO_PROCESS, proc.pid);
+                    int orig_nice = ::getpriority(PRIO_PROCESS, static_cast<id_t>(proc.pid));
                     int orig_sched = ::sched_getscheduler(proc.pid);
                     cpu_set_t orig_aff;
                     CPU_ZERO(&orig_aff);
