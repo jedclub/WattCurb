@@ -66,10 +66,28 @@ struct BatteryDischargeSummary {
     std::string recommendation_text;
 };
 
+// Implements REF-REQ-086 & REF-ARCH-063: Cross-Profile Telemetry Comparison Entry
+struct ProfileComparisonEntry {
+    uint8_t mode{0};           // 0=Performance, 1=Balanced, 2=PowerSaver, 3=UltraEndurance
+    std::string mode_name;     // "Performance", "Balanced", "PowerSaver", "UltraEndurance"
+    std::string mode_icon;     // "🚀", "⚖️", "🌿", "🔋"
+    std::string color_hex;     // UI tint
+    uint32_t sample_count{0};
+    uint64_t duration_sec{0};
+    std::string duration_str;
+    double total_energy_wh{0.0};
+    double avg_watts{0.0};
+    double peak_watts{0.0};
+    double avg_c3_percent{0.0};
+    double avg_temp_c{0.0};
+};
+
 struct BatteryDrainReportResult {
     BatteryDischargeSummary summary;
     std::vector<HardwareDomainDrain> hardware_shares;
     std::vector<ProcessDrainCulprit> process_culprits;
+    std::vector<ProfileComparisonEntry> profile_comparisons;
+    int filter_mode{-1}; // -1: All, 0: Perf, 1: Balanced, 2: Save, 3: Ultra
     
     std::string to_markdown() const;
     std::string to_plain_text() const;
@@ -82,13 +100,15 @@ public:
         const ipc::HistoryPoint* points,
         size_t count,
         const std::vector<ProcessAttributedPower>& top_procs,
-        double current_voltage_v = 11.4
+        double current_voltage_v = 11.4,
+        int filter_mode = -1
     );
 
     // Read directly from live /dev/shm/wattcurb_history.shm
     static BatteryDrainReportResult analyze_shm(
         const std::vector<ProcessAttributedPower>& top_procs,
-        double current_voltage_v = 11.4
+        double current_voltage_v = 11.4,
+        int filter_mode = -1
     );
 };
 

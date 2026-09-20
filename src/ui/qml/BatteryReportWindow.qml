@@ -222,6 +222,77 @@ Window {
         }
 
         // =============================================================
+        // 1.5. POWER PROFILE FILTER TOOLBAR (REF-REQ-086, REF-ARCH-063)
+        // =============================================================
+        Rectangle {
+            Layout.fillWidth: true
+            height: 42
+            color: reportWin.bgPanel
+            border.color: reportWin.borderPanel
+            radius: 6
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
+                spacing: 8
+
+                Text {
+                    text: "📊 파워 프로파일 필터:"
+                    color: reportWin.textDim
+                    font.bold: true
+                    font.pixelSize: 11
+                }
+
+                TactileButton {
+                    text: "🌐 전체 (All)"
+                    accentColor: reportWin.colCyan
+                    highlighted: backend.reportFilterMode === -1
+                    onClicked: backend.setReportFilterMode(-1)
+                }
+
+                TactileButton {
+                    text: "🚀 성능 (Performance)"
+                    accentColor: reportWin.colRed
+                    highlighted: backend.reportFilterMode === 0
+                    onClicked: backend.setReportFilterMode(0)
+                }
+
+                TactileButton {
+                    text: "⚖️ 균형 (Balanced)"
+                    accentColor: reportWin.colCyan
+                    highlighted: backend.reportFilterMode === 1
+                    onClicked: backend.setReportFilterMode(1)
+                }
+
+                TactileButton {
+                    text: "🌿 절전 (PowerSaver)"
+                    accentColor: reportWin.colGreen
+                    highlighted: backend.reportFilterMode === 2
+                    onClicked: backend.setReportFilterMode(2)
+                }
+
+                TactileButton {
+                    text: "🔋 초절전 (Ultra)"
+                    accentColor: reportWin.colPurple
+                    highlighted: backend.reportFilterMode === 3
+                    onClicked: backend.setReportFilterMode(3)
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Text {
+                    text: (backend.reportFilterMode === -1)
+                        ? "전체 프로파일 통합 분석 모드"
+                        : ("선택 모드 심층 분석 중 (" + (backend.batteryReportSummary.durationStr || "") + ")")
+                    color: (backend.reportFilterMode === -1) ? reportWin.textMuted : reportWin.colCyan
+                    font.pixelSize: 11
+                    font.bold: backend.reportFilterMode !== -1
+                }
+            }
+        }
+
+        // =============================================================
         // 2. 4 EXECUTIVE KPI CARDS
         // =============================================================
         RowLayout {
@@ -337,6 +408,85 @@ Window {
                         text: "평균 온도: " + (backend.batteryReportSummary.avgCpuTempC ? backend.batteryReportSummary.avgCpuTempC.toFixed(1) : "0") + " °C · 슬립 방해 분석"
                         color: reportWin.textMuted
                         font.pixelSize: 10
+                    }
+                }
+            }
+        }
+
+        // =============================================================
+        // 2.5. CROSS-PROFILE COMPARATIVE MATRIX (REF-REQ-086-F03)
+        // =============================================================
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+
+            Repeater {
+                model: backend.batteryReportModeComparisons
+                delegate: Rectangle {
+                    id: compCard
+                    Layout.fillWidth: true
+                    height: 60
+                    color: (backend.reportFilterMode === modelData.mode) ? Qt.rgba(0, 0.8, 1, 0.12) : reportWin.bgPanel
+                    border.color: (backend.reportFilterMode === modelData.mode) ? (modelData.color || reportWin.colCyan) : reportWin.borderPanel
+                    border.width: (backend.reportFilterMode === modelData.mode) ? 1.5 : 1
+                    radius: 6
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: backend.setReportFilterMode(modelData.mode)
+                    }
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        spacing: 2
+
+                        RowLayout {
+                            spacing: 5
+                            Text { text: modelData.icon || "⚙️"; font.pixelSize: 12 }
+                            Text {
+                                text: modelData.name || ""
+                                color: modelData.color || reportWin.textMain
+                                font.bold: true
+                                font.pixelSize: 11
+                            }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                text: modelData.durationStr || "0 samples"
+                                color: reportWin.textMuted
+                                font.pixelSize: 9
+                                font.family: "Monospace"
+                            }
+                        }
+
+                        RowLayout {
+                            spacing: 6
+                            Text {
+                                text: (modelData.avgWatts ? modelData.avgWatts.toFixed(2) : "0.00") + " W"
+                                color: (modelData.avgWatts > 15.0) ? reportWin.colRed : ((modelData.avgWatts < 10.0) ? reportWin.colGreen : reportWin.colCyan)
+                                font.bold: true
+                                font.pixelSize: 13
+                                font.family: "Monospace"
+                            }
+                            Text { text: "평균"; color: reportWin.textMuted; font.pixelSize: 9 }
+
+                            Item { Layout.fillWidth: true }
+
+                            Text {
+                                text: "C3+ " + (modelData.avgC3Percent ? modelData.avgC3Percent.toFixed(1) : "0.0") + "%"
+                                color: (modelData.avgC3Percent >= 60.0) ? reportWin.colGreen : reportWin.colOrange
+                                font.pixelSize: 10
+                                font.bold: true
+                                font.family: "Monospace"
+                            }
+                            Text {
+                                text: "· " + (modelData.energyWh ? modelData.energyWh.toFixed(2) : "0.00") + "Wh"
+                                color: reportWin.textDim
+                                font.pixelSize: 10
+                                font.family: "Monospace"
+                            }
+                        }
                     }
                 }
             }

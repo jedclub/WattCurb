@@ -88,10 +88,12 @@ class DashboardBackend : public QObject {
     Q_PROPERTY(double totalDeviceWatts READ totalDeviceWatts NOTIFY powerSharesChanged)
     Q_PROPERTY(double totalProcessWatts READ totalProcessWatts NOTIFY powerSharesChanged)
 
-    // Deep Battery Drain Report Properties (REF-REQ-078, REF-ARCH-055)
+    // Deep Battery Drain Report Properties (REF-REQ-078, REF-ARCH-055, REF-REQ-086)
     Q_PROPERTY(QVariantMap batteryReportSummary READ batteryReportSummary NOTIFY batteryReportChanged)
     Q_PROPERTY(QVariantList batteryReportHardwareShares READ batteryReportHardwareShares NOTIFY batteryReportChanged)
     Q_PROPERTY(QVariantList batteryReportProcessCulprits READ batteryReportProcessCulprits NOTIFY batteryReportChanged)
+    Q_PROPERTY(QVariantList batteryReportModeComparisons READ batteryReportModeComparisons NOTIFY batteryReportChanged)
+    Q_PROPERTY(int reportFilterMode READ reportFilterMode WRITE setReportFilterMode NOTIFY reportFilterModeChanged)
 
     // Status / Metadata
     Q_PROPERTY(bool isRescanning READ isRescanning NOTIFY rescanStatusChanged)
@@ -175,10 +177,12 @@ public:
     double totalDeviceWatts() const noexcept { return total_device_w_; }
     double totalProcessWatts() const noexcept { return total_process_w_; }
 
-    // Deep Battery Drain Report Getters (REF-REQ-078, REF-ARCH-055)
+    // Deep Battery Drain Report Getters (REF-REQ-078, REF-ARCH-055, REF-REQ-086)
     QVariantMap batteryReportSummary() const { return battery_report_summary_; }
     QVariantList batteryReportHardwareShares() const { return battery_report_hardware_shares_; }
     QVariantList batteryReportProcessCulprits() const { return battery_report_process_culprits_; }
+    QVariantList batteryReportModeComparisons() const { return battery_report_mode_comparisons_; }
+    int reportFilterMode() const noexcept { return report_filter_mode_; }
 
     bool isRescanning() const noexcept { return is_rescanning_; }
     QString lastUpdateTime() const { return last_update_time_; }
@@ -189,8 +193,9 @@ public:
     Q_INVOKABLE void openSystemMonitor();
     Q_INVOKABLE void refreshNow();
 
-    // Battery Report Actions (REF-REQ-078)
+    // Battery Report Actions (REF-REQ-078, REF-REQ-086)
     Q_INVOKABLE void generateBatteryReport();
+    Q_INVOKABLE void setReportFilterMode(int mode);
     Q_INVOKABLE void copyReportToClipboard();
     Q_INVOKABLE QString getReportMarkdown();
     Q_INVOKABLE void requestReportWindow();
@@ -208,6 +213,7 @@ signals:
     void powerSharesChanged();
     void languageChanged();
     void batteryReportChanged();
+    void reportFilterModeChanged();
     void reportWindowRequested();
 
 private slots:
@@ -291,11 +297,13 @@ private:
     double total_process_w_{0.0};
     void update_power_shares();
 
-    // Deep Battery Drain Report Cache (REF-REQ-078, REF-ARCH-055)
+    // Deep Battery Drain Report Cache (REF-REQ-078, REF-ARCH-055, REF-REQ-086)
+    int report_filter_mode_{-1}; // -1: All, 0: Perf, 1: Balanced, 2: Save, 3: Ultra
     report::BatteryDrainReportResult cached_report_result_{};
     QVariantMap battery_report_summary_{};
     QVariantList battery_report_hardware_shares_{};
     QVariantList battery_report_process_culprits_{};
+    QVariantList battery_report_mode_comparisons_{};
     std::vector<ProcessAttributedPower> cached_top_procs_{};
 };
 

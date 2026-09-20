@@ -82,9 +82,11 @@ BatteryDrainReportResult BatteryHistoryAnalyzer::analyze(
     const ipc::HistoryPoint* points,
     size_t count,
     const std::vector<ProcessAttributedPower>& top_procs,
-    double current_voltage_v
+    double current_voltage_v,
+    int filter_mode
 ) {
     BatteryDrainReportResult result;
+    result.filter_mode = filter_mode;
     if (!points || count == 0) {
         result.summary.diagnostic_summary = "No telemetry history data available.";
         result.summary.recommendation_text = "Ensure the WattCurb daemon is running to collect power telemetry.";
@@ -94,24 +96,94 @@ BatteryDrainReportResult BatteryHistoryAnalyzer::analyze(
     if (current_voltage_v <= 0.0) current_voltage_v = 11.4;
 
     result.summary.total_samples_analyzed = static_cast<uint32_t>(count);
+    constexpr double INTERVAL_HOURS = 10.0 / 3600.0; // 10 seconds in hours
 
-    // 1. Identify discharging points vs total points
+    // Implements REF-REQ-086-F03: Multi-Mode Cross-Profile Comparative Matrix
+    struct ModeAccumulator {
+        uint32_t count{0};
+        double total_sys_energy_wh{0.0};
+        double peak_watts{0.0};
+        double c3_sum{0.0};
+        double temp_sum{0.0};
+    };
+    ModeAccumulator mode_accs[4]{};
+    for (size_t i = 0; i < count; ++i) {
+        if (points[i].battery_state == 1) { // Discharging
+            uint8_t m = points[i].power_profile_mode;
+            if (m < 4) {
+                mode_accs[m].count++;
+                double sys_w = static_cast<double>(points[i].total_system_mw) / 1000.0;
+                mode_accs[m].total_sys_energy_wh += (sys_w * INTERVAL_HOURS);
+                if (sys_w > mode_accs[m].peak_watts) mode_accs[m].peak_watts = sys_w;
+                mode_accs[m].c3_sum += points[i].cstate_c3_percent;
+                mode_accs[m].temp_sum += points[i].cpu_temp_c;
+            }
+        }
+    }
+
+    const char* mode_names[4] = {"Performance", "Balanced", "PowerSaver", "UltraEndurance"};
+    const char* mode_icons[4] = {"🚀", "⚖️", "🌿", "🔋"};
+    const char* mode_colors[4] = {"#ef4444", "#00d2ff", "#10b981", "#a855f7"};
+
+    for (uint8_t m = 0; m < 4; ++m) {
+        ProfileComparisonEntry entry{};
+        entry.mode = m;
+        entry.mode_name = mode_names[m];
+        entry.mode_icon = mode_icons[m];
+        entry.color_hex = mode_colors[m];
+        entry.sample_count = mode_accs[m].count;
+        entry.duration_sec = static_cast<uint64_t>(mode_accs[m].count) * 10ULL;
+        uint32_t mh = static_cast<uint32_t>(entry.duration_sec / 3600);
+        uint32_t mm = static_cast<uint32_t>((entry.duration_sec % 3600) / 60);
+        std::ostringstream dur_ss;
+        dur_ss << mh << "h " << mm << "m (" << entry.sample_count << " samples)";
+        entry.duration_str = dur_ss.str();
+        entry.total_energy_wh = mode_accs[m].total_sys_energy_wh;
+        double m_hrs = static_cast<double>(entry.duration_sec) / 3600.0;
+        entry.avg_watts = (m_hrs > 0.0) ? (entry.total_energy_wh / m_hrs) : 0.0;
+        entry.peak_watts = mode_accs[m].peak_watts;
+        entry.avg_c3_percent = (entry.sample_count > 0) ? (mode_accs[m].c3_sum / static_cast<double>(entry.sample_count)) : 0.0;
+        entry.avg_temp_c = (entry.sample_count > 0) ? (mode_accs[m].temp_sum / static_cast<double>(entry.sample_count)) : 0.0;
+        result.profile_comparisons.push_back(entry);
+    }
+
+    // 1. Identify discharging points matching filter_mode
     std::vector<const ipc::HistoryPoint*> discharge_pts;
     discharge_pts.reserve(count);
 
     for (size_t i = 0; i < count; ++i) {
         if (points[i].battery_state == 1) { // Discharging
-            discharge_pts.push_back(&points[i]);
+            if (filter_mode < 0 || points[i].power_profile_mode == static_cast<uint8_t>(filter_mode)) {
+                discharge_pts.push_back(&points[i]);
+            }
         }
+    }
+
+    if (filter_mode >= 0 && discharge_pts.empty()) {
+        std::string mode_str = (filter_mode >= 0 && filter_mode < 4) ? mode_names[filter_mode] : "Selected";
+        result.summary.diagnostic_summary = "선택된 파워 프로파일 (" + mode_str + ") 상태에서 기록된 방전 텔레메트리 샘플이 없습니다.";
+        result.summary.recommendation_text = "해당 파워 프로파일로 시스템을 일정 시간 동작시킨 후 배터리를 방전하면 데이터가 누적됩니다.";
+        result.summary.duration_str = "0h 0m (0 samples)";
+        return result;
     }
 
     bool is_pure_discharging = !discharge_pts.empty();
     const auto& active_pts = is_pure_discharging ? discharge_pts : [&]() {
         std::vector<const ipc::HistoryPoint*> all;
         all.reserve(count);
-        for (size_t i = 0; i < count; ++i) all.push_back(&points[i]);
+        for (size_t i = 0; i < count; ++i) {
+            if (filter_mode < 0 || points[i].power_profile_mode == static_cast<uint8_t>(filter_mode)) {
+                all.push_back(&points[i]);
+            }
+        }
         return all;
     }();
+
+    if (active_pts.empty()) {
+        result.summary.diagnostic_summary = "No telemetry history data available for selected filter.";
+        result.summary.recommendation_text = "Switch to 'All' filter or operate system under this profile.";
+        return result;
+    }
 
     result.summary.discharging_samples = static_cast<uint32_t>(discharge_pts.size());
     uint64_t duration_sec = static_cast<uint64_t>(active_pts.size()) * 10ULL;
@@ -120,7 +192,11 @@ BatteryDrainReportResult BatteryHistoryAnalyzer::analyze(
     uint32_t hours = static_cast<uint32_t>(duration_sec / 3600);
     uint32_t mins = static_cast<uint32_t>((duration_sec % 3600) / 60);
     std::ostringstream dur_ss;
-    dur_ss << hours << "h " << mins << "m (" << active_pts.size() << " samples)";
+    if (filter_mode >= 0 && filter_mode < 4) {
+        dur_ss << hours << "h " << mins << "m (" << active_pts.size() << " samples) [" << mode_names[filter_mode] << "]";
+    } else {
+        dur_ss << hours << "h " << mins << "m (" << active_pts.size() << " samples) [All Profiles]";
+    }
     result.summary.duration_str = dur_ss.str();
 
     // 2. Numerical Integration across active samples
@@ -134,8 +210,6 @@ BatteryDrainReportResult BatteryHistoryAnalyzer::analyze(
 
     int start_bat = active_pts.front()->battery_percent;
     int end_bat = active_pts.back()->battery_percent;
-
-    constexpr double INTERVAL_HOURS = 10.0 / 3600.0; // 10 seconds in hours
 
     for (const auto* pt : active_pts) {
         double sys_w = static_cast<double>(pt->total_system_mw) / 1000.0;
@@ -354,25 +428,26 @@ BatteryDrainReportResult BatteryHistoryAnalyzer::analyze(
 
 BatteryDrainReportResult BatteryHistoryAnalyzer::analyze_shm(
     const std::vector<ProcessAttributedPower>& top_procs,
-    double current_voltage_v
+    double current_voltage_v,
+    int filter_mode
 ) {
     int fd = ::open(ipc::HISTORY_SHM_PATH, O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
         // Fallback: return mock analysis if shm is not yet initialized
-        return analyze(nullptr, 0, top_procs, current_voltage_v);
+        return analyze(nullptr, 0, top_procs, current_voltage_v, filter_mode);
     }
 
     struct stat st{};
     if (::fstat(fd, &st) < 0 || static_cast<size_t>(st.st_size) != sizeof(ipc::HistoryRingBufferShm)) {
         ::close(fd);
-        return analyze(nullptr, 0, top_procs, current_voltage_v);
+        return analyze(nullptr, 0, top_procs, current_voltage_v, filter_mode);
     }
 
     void* ptr = ::mmap(nullptr, sizeof(ipc::HistoryRingBufferShm), PROT_READ, MAP_SHARED, fd, 0);
     ::close(fd);
 
     if (ptr == MAP_FAILED || ptr == nullptr) {
-        return analyze(nullptr, 0, top_procs, current_voltage_v);
+        return analyze(nullptr, 0, top_procs, current_voltage_v, filter_mode);
     }
 
     const auto* shm = static_cast<const ipc::HistoryRingBufferShm*>(ptr);
@@ -385,16 +460,22 @@ BatteryDrainReportResult BatteryHistoryAnalyzer::analyze_shm(
     ::munmap(ptr, sizeof(ipc::HistoryRingBufferShm));
 
     if (!success || count == 0) {
-        return analyze(nullptr, 0, top_procs, current_voltage_v);
+        return analyze(nullptr, 0, top_procs, current_voltage_v, filter_mode);
     }
 
-    return analyze(snapshot.data(), count, top_procs, current_voltage_v);
+    return analyze(snapshot.data(), count, top_procs, current_voltage_v, filter_mode);
 }
 
 std::string BatteryDrainReportResult::to_markdown() const {
     std::ostringstream ss;
     ss << std::fixed << std::setprecision(2);
-    ss << "# ⚡ WattCurb Deep Battery Drain Telemetry Audit Report\n\n";
+    ss << "# ⚡ WattCurb Deep Battery Drain Telemetry Audit Report";
+    if (filter_mode == 0) ss << " [Filtered: 🚀 Performance]";
+    else if (filter_mode == 1) ss << " [Filtered: ⚖️ Balanced]";
+    else if (filter_mode == 2) ss << " [Filtered: 🌿 PowerSaver]";
+    else if (filter_mode == 3) ss << " [Filtered: 🔋 UltraEndurance]";
+    ss << "\n\n";
+
     ss << "**Report Timestamp**: " << summary.peak_time_str << "  \n";
     ss << "**Analysis Window**: " << summary.duration_str << "  \n";
     ss << "**Samples Analyzed**: " << summary.total_samples_analyzed << " (Discharging: " << summary.discharging_samples << ")  \n";
@@ -405,7 +486,25 @@ std::string BatteryDrainReportResult::to_markdown() const {
     ss << "**Average Deep Sleep (C3+)**: " << std::setprecision(1) << summary.avg_cstate_c3_percent << "%  \n";
     ss << "**Average CPU Temperature**: " << summary.avg_cpu_temp_c << " °C\n\n";
 
-    ss << "## 1. 🔬 Physical Hardware Domain Drain Breakdown\n\n";
+    // Implements REF-REQ-086-F03: Comparative Breakdown Table
+    if (!profile_comparisons.empty()) {
+        ss << "## 1. 📊 Cross-Profile Power & Efficiency Comparative Breakdown\n\n";
+        ss << "| Power Profile | Samples | Active Duration | Discharged (Wh) | Avg Power (W) | Peak (W) | Deep Sleep (C3+) | Avg Temp (°C) |\n";
+        ss << "|:---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|\n";
+        for (const auto& c : profile_comparisons) {
+            ss << "| " << c.mode_icon << " **" << c.mode_name << "** | "
+               << c.sample_count << " | "
+               << c.duration_str << " | "
+               << std::setprecision(2) << c.total_energy_wh << " Wh | "
+               << c.avg_watts << " W | "
+               << c.peak_watts << " W | "
+               << std::setprecision(1) << c.avg_c3_percent << "% | "
+               << c.avg_temp_c << " °C |\n";
+        }
+        ss << "\n";
+    }
+
+    ss << "## 2. 🔬 Physical Hardware Domain Drain Breakdown\n\n";
     ss << "| Hardware Domain | Energy (Wh) | Avg Power (W) | Share (%) | Energy Optimization Advice |\n";
     ss << "|:---|:---:|:---:|:---:|:---|\n";
     for (const auto& h : hardware_shares) {
@@ -413,7 +512,7 @@ std::string BatteryDrainReportResult::to_markdown() const {
     }
     ss << "\n";
 
-    ss << "## 2. 🚨 Top Battery Drain Culprits (Process Level)\n\n";
+    ss << "## 3. 🚨 Top Battery Drain Culprits (Process Level)\n\n";
     ss << "| Rank | PID | Process Name | Hardware Domain | Est. Drain (Wh) | Power (W) | Load (%) | WDI | Causation Mechanism | Mitigation |\n";
     ss << "|:---:|:---:|:---|:---|:---:|:---:|:---:|:---:|:---|:---|\n";
     for (const auto& p : process_culprits) {
@@ -424,7 +523,7 @@ std::string BatteryDrainReportResult::to_markdown() const {
     }
     ss << "\n";
 
-    ss << "## 3. 🧠 Diagnostic Summary & Actionable Recommendations\n\n";
+    ss << "## 4. 🧠 Diagnostic Summary & Actionable Recommendations\n\n";
     ss << "### Diagnostic Synthesis:\n" << summary.diagnostic_summary << "\n\n";
     ss << "### Actionable Optimization Steps:\n" << summary.recommendation_text << "\n";
 

@@ -13,14 +13,33 @@ int main(int argc, char* argv[]) {
     bool benchmark_mode = false;
     bool report_mode = false;
     bool report_cli_mode = false;
+    int cli_filter_mode = -1;
+    bool cli_compare_only = false;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--benchmark") == 0 || std::strcmp(argv[i], "-B") == 0) {
             benchmark_mode = true;
         } else if (std::strcmp(argv[i], "--report") == 0 || std::strcmp(argv[i], "-r") == 0) {
             report_mode = true;
-        } else if (std::strcmp(argv[i], "--report-cli") == 0) {
+        } else if (std::strcmp(argv[i], "--report-cli") == 0 || std::strcmp(argv[i], "-rc") == 0) {
             report_cli_mode = true;
+        } else if (std::strcmp(argv[i], "--compare") == 0 || std::strcmp(argv[i], "-c") == 0) {
+            cli_compare_only = true;
+            report_cli_mode = true;
+        } else if ((std::strcmp(argv[i], "--mode") == 0 || std::strcmp(argv[i], "-m") == 0) && i + 1 < argc) {
+            std::string m_str = argv[++i];
+            std::transform(m_str.begin(), m_str.end(), m_str.begin(), ::tolower);
+            if (m_str == "perf" || m_str == "performance" || m_str == "0") {
+                cli_filter_mode = 0;
+            } else if (m_str == "balanced" || m_str == "balance" || m_str == "1") {
+                cli_filter_mode = 1;
+            } else if (m_str == "save" || m_str == "powersave" || m_str == "powersaver" || m_str == "2") {
+                cli_filter_mode = 2;
+            } else if (m_str == "ultra" || m_str == "ultraendurance" || m_str == "3") {
+                cli_filter_mode = 3;
+            } else if (m_str == "all" || m_str == "-1") {
+                cli_filter_mode = -1;
+            }
         }
     }
 
@@ -31,7 +50,27 @@ int main(int argc, char* argv[]) {
         char* fake_argv[] = { fake_name, nullptr };
         QGuiApplication app(fake_argc, fake_argv);
         wattcurb::ui::DashboardBackend backend;
+        backend.setReportFilterMode(cli_filter_mode);
         backend.generateBatteryReport();
+
+        if (cli_compare_only) {
+            std::cout << "# ⚡ WattCurb Power Profile Efficiency Comparison\n\n";
+            std::cout << "| Power Profile | Samples | Active Duration | Discharged (Wh) | Avg Power (W) | Peak (W) | Deep Sleep (C3+) | Avg Temp (°C) |\n";
+            std::cout << "|:---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|\n";
+            for (const auto& val : backend.batteryReportModeComparisons()) {
+                QVariantMap m = val.toMap();
+                std::cout << "| " << m["icon"].toString().toStdString() << " **" << m["name"].toString().toStdString() << "** | "
+                          << m["samples"].toInt() << " | "
+                          << m["durationStr"].toString().toStdString() << " | "
+                          << std::fixed << std::setprecision(2) << m["energyWh"].toDouble() << " Wh | "
+                          << m["avgWatts"].toDouble() << " W | "
+                          << m["peakWatts"].toDouble() << " W | "
+                          << std::setprecision(1) << m["avgC3Percent"].toDouble() << "% | "
+                          << m["avgTempC"].toDouble() << " °C |\n";
+            }
+            return 0;
+        }
+
         std::cout << backend.getReportMarkdown().toStdString() << "\n";
         return 0;
     }

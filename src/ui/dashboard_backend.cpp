@@ -709,7 +709,8 @@ void DashboardBackend::generateBatteryReport() {
 
     cached_report_result_ = report::BatteryHistoryAnalyzer::analyze_shm(
         cached_top_procs_,
-        battery_voltage_v_
+        battery_voltage_v_,
+        report_filter_mode_
     );
 
     // Summary map
@@ -736,6 +737,7 @@ void DashboardBackend::generateBatteryReport() {
     sum_map[QStringLiteral("primaryCulpritSharePct")] = s.primary_culprit_share_pct;
     sum_map[QStringLiteral("diagnosticSummary")] = QString::fromStdString(s.diagnostic_summary);
     sum_map[QStringLiteral("recommendationText")] = QString::fromStdString(s.recommendation_text);
+    sum_map[QStringLiteral("filterMode")] = report_filter_mode_;
     battery_report_summary_ = sum_map;
 
     // Hardware shares list
@@ -774,7 +776,35 @@ void DashboardBackend::generateBatteryReport() {
     }
     battery_report_process_culprits_ = proc_list;
 
+    // Implements REF-REQ-086-F03: Multi-Mode Cross-Profile Comparative Matrix
+    QVariantList comp_list;
+    for (const auto& c : cached_report_result_.profile_comparisons) {
+        QVariantMap cm;
+        cm[QStringLiteral("mode")] = static_cast<int>(c.mode);
+        cm[QStringLiteral("name")] = QString::fromStdString(c.mode_name);
+        cm[QStringLiteral("icon")] = QString::fromStdString(c.mode_icon);
+        cm[QStringLiteral("color")] = QString::fromStdString(c.color_hex);
+        cm[QStringLiteral("samples")] = static_cast<int>(c.sample_count);
+        cm[QStringLiteral("durationSec")] = static_cast<qlonglong>(c.duration_sec);
+        cm[QStringLiteral("durationStr")] = QString::fromStdString(c.duration_str);
+        cm[QStringLiteral("energyWh")] = c.total_energy_wh;
+        cm[QStringLiteral("avgWatts")] = c.avg_watts;
+        cm[QStringLiteral("peakWatts")] = c.peak_watts;
+        cm[QStringLiteral("avgC3Percent")] = c.avg_c3_percent;
+        cm[QStringLiteral("avgTempC")] = c.avg_temp_c;
+        comp_list.append(cm);
+    }
+    battery_report_mode_comparisons_ = comp_list;
+
     emit batteryReportChanged();
+}
+
+void DashboardBackend::setReportFilterMode(int mode) {
+    if (report_filter_mode_ != mode) {
+        report_filter_mode_ = mode;
+        emit reportFilterModeChanged();
+        generateBatteryReport();
+    }
 }
 
 void DashboardBackend::copyReportToClipboard() {

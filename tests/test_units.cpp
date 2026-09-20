@@ -3283,6 +3283,134 @@ void test_deep_battery_drain_report_oracle_gate() {
     std::cout << " [PASS] test_deep_battery_drain_report_oracle_gate (REF-TEST-043: Full SHM sweep, hardware decomposition, process attribution verified)\n";
 }
 
+// Implements REF-TEST-050 & REF-REQ-086: Power Profile Telemetry Filtering & Multi-Mode Comparative Breakdown
+void test_power_profile_filtering_and_comparisons() {
+    std::cout << " [ORACLE GATE] Verifying Power Profile Telemetry Filtering & Comparisons (REF-TEST-050)...\n";
+
+    // 1. Generate multi-mode realistic history points (100 total, 10s intervals)
+    // Mode 0 (Perf): 20 samples @ 22.0W, C3=12%, temp=58C
+    // Mode 1 (Balanced): 30 samples @ 15.0W, C3=45%, temp=50C
+    // Mode 2 (Save): 40 samples @ 8.0W, C3=78%, temp=42C
+    // Mode 3 (Ultra): 10 samples @ 5.0W, C3=92%, temp=38C
+    std::vector<wattcurb::ipc::HistoryPoint> pts(100);
+    uint64_t base_time = 1726900000ULL;
+
+    for (size_t i = 0; i < 100; ++i) {
+        pts[i].timestamp_sec = base_time + i * 10;
+        pts[i].battery_state = 1; // Discharging
+        pts[i].battery_percent = static_cast<uint8_t>(80 - (i * 20 / 99));
+
+        if (i < 20) {
+            pts[i].power_profile_mode = 0; // Performance
+            pts[i].total_system_mw = 22000;
+            pts[i].cpu_package_mw = 9500;
+            pts[i].gpu_mw = 3500;
+            pts[i].cstate_c3_percent = 12;
+            pts[i].cpu_temp_c = 58;
+        } else if (i < 50) {
+            pts[i].power_profile_mode = 1; // Balanced
+            pts[i].total_system_mw = 15000;
+            pts[i].cpu_package_mw = 6000;
+            pts[i].gpu_mw = 2000;
+            pts[i].cstate_c3_percent = 45;
+            pts[i].cpu_temp_c = 50;
+        } else if (i < 90) {
+            pts[i].power_profile_mode = 2; // PowerSaver
+            pts[i].total_system_mw = 8000;
+            pts[i].cpu_package_mw = 2800;
+            pts[i].gpu_mw = 800;
+            pts[i].cstate_c3_percent = 78;
+            pts[i].cpu_temp_c = 42;
+        } else {
+            pts[i].power_profile_mode = 3; // UltraEndurance
+            pts[i].total_system_mw = 5000;
+            pts[i].cpu_package_mw = 1500;
+            pts[i].gpu_mw = 400;
+            pts[i].cstate_c3_percent = 92;
+            pts[i].cpu_temp_c = 38;
+        }
+    }
+
+    std::vector<wattcurb::ProcessAttributedPower> mock_procs;
+    {
+        wattcurb::ProcessAttributedPower p{};
+        p.pid = 999;
+        p.comm = "test_proc";
+        p.total_attributed_watts = 2.0;
+        mock_procs.push_back(p);
+    }
+
+    // 2. Unfiltered Analysis (filter_mode = -1)
+    auto report_all = wattcurb::report::BatteryHistoryAnalyzer::analyze(pts.data(), pts.size(), mock_procs, 11.4, -1);
+    assert(report_all.summary.discharging_samples == 100);
+    assert(report_all.profile_comparisons.size() == 4 && "Must compute comparisons for all 4 profiles");
+
+    // Check individual comparison matrix entries
+    const auto& c0 = report_all.profile_comparisons[0];
+    const auto& c1 = report_all.profile_comparisons[1];
+    const auto& c2 = report_all.profile_comparisons[2];
+    const auto& c3 = report_all.profile_comparisons[3];
+
+    assert(c0.sample_count == 20 && c0.mode_name == "Performance");
+    assert(std::abs(c0.avg_watts - 22.0) < 0.1);
+    assert(std::abs(c0.avg_c3_percent - 12.0) < 0.1);
+
+    assert(c1.sample_count == 30 && c1.mode_name == "Balanced");
+    assert(std::abs(c1.avg_watts - 15.0) < 0.1);
+    assert(std::abs(c1.avg_c3_percent - 45.0) < 0.1);
+
+    assert(c2.sample_count == 40 && c2.mode_name == "PowerSaver");
+    assert(std::abs(c2.avg_watts - 8.0) < 0.1);
+    assert(std::abs(c2.avg_c3_percent - 78.0) < 0.1);
+
+    assert(c3.sample_count == 10 && c3.mode_name == "UltraEndurance");
+    assert(std::abs(c3.avg_watts - 5.0) < 0.1);
+    assert(std::abs(c3.avg_c3_percent - 92.0) < 0.1);
+
+    // Energy Conservation: sum of mode energies must match total energy
+    double sum_energy = c0.total_energy_wh + c1.total_energy_wh + c2.total_energy_wh + c3.total_energy_wh;
+    assert(std::abs(sum_energy - report_all.summary.total_discharge_wh) < 0.001 && "Multi-mode energy sum invariant violated!");
+
+    // 3. Filtered Analysis for PowerSaver (filter_mode = 2)
+    auto report_save = wattcurb::report::BatteryHistoryAnalyzer::analyze(pts.data(), pts.size(), mock_procs, 11.4, 2);
+    assert(report_save.filter_mode == 2);
+    assert(report_save.summary.discharging_samples == 40);
+    assert(std::abs(report_save.summary.avg_discharge_watts - 8.0) < 0.1);
+    assert(std::abs(report_save.summary.avg_cstate_c3_percent - 78.0) < 0.1);
+    assert(report_save.summary.duration_sec == 400);
+
+    // 4. Filtered Analysis for Performance (filter_mode = 0)
+    auto report_perf = wattcurb::report::BatteryHistoryAnalyzer::analyze(pts.data(), pts.size(), mock_procs, 11.4, 0);
+    assert(report_perf.filter_mode == 0);
+    assert(report_perf.summary.discharging_samples == 20);
+    assert(std::abs(report_perf.summary.avg_discharge_watts - 22.0) < 0.1);
+    assert(std::abs(report_perf.summary.avg_cstate_c3_percent - 12.0) < 0.1);
+
+    // 5. Check Markdown table contains comparative breakdown
+    std::string md = report_all.to_markdown();
+    assert(md.find("Cross-Profile Power & Efficiency Comparative Breakdown") != std::string::npos);
+    assert(md.find("Performance") != std::string::npos);
+    assert(md.find("PowerSaver") != std::string::npos);
+
+#if defined(WATTCURB_HAS_QT6)
+    // 6. Qt6 DashboardBackend Integration Verification
+    wattcurb::ui::DashboardBackend backend;
+    backend.setReportFilterMode(2); // Set to PowerSaver
+    assert(backend.reportFilterMode() == 2);
+    backend.generateBatteryReport();
+
+    auto comp_list = backend.batteryReportModeComparisons();
+    assert(comp_list.size() == 4);
+    assert(backend.batteryReportSummary().value("filterMode").toInt() == 2);
+
+    // Switch back to All
+    backend.setReportFilterMode(-1);
+    assert(backend.reportFilterMode() == -1);
+#endif
+
+    std::cout << " [PASS] test_power_profile_filtering_and_comparisons (REF-TEST-050: Filter & comparison matrix verified)\n";
+}
+
 // Implements REF-TEST-044 & REF-REQ-079: Token Minimization & Evaluation Harness Integrity
 void test_token_minimization_harness_integrity() {
     std::cout << " [ORACLE GATE] Verifying Token-Minimization Harness (REF-REQ-079)...\n";
@@ -3409,6 +3537,7 @@ int main() {
     test::test_tray_report_action_and_tactile_button_integrity();
     test::test_process_full_name_and_interactive_tooltips();
     test::test_deep_battery_drain_report_oracle_gate();
+    test::test_power_profile_filtering_and_comparisons();
     test::test_modeset_flapping_elimination_and_test_isolation();
     test::test_cpu_features();
     test::test_hw_isa_primitives();
