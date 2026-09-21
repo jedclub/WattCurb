@@ -1,12 +1,44 @@
 #!/bin/bash
 # WattCurb release deployment helper (REF-REQ-106).
 # Root-owned, not writable by non-root, so pkexec will accept it.
+#
+# Usage: wattcurb-deploy [deploy|enable|disable|status]
+#   deploy   (default) stage output/ into /usr/local/bin and install the unit
+#   enable   turn on boot autostart for wattcurb.service
+#   disable  turn it off
+#
+# enable/disable live here rather than in the polkit rule because systemd does
+# not report which unit a manage-unit-files action targets, so a rule covering
+# 'systemctl enable' could not be scoped to wattcurb.service and would amount to
+# granting arbitrary units at boot. Routing it through this helper keeps the
+# passwordless grant pinned to one unit name.
 set -euo pipefail
 SRC=/home/jedclub/Develop/WattCurb
-[ -f "$SRC/output/wattcurb" ] || { echo "no staged release in $SRC/output"; exit 1; }
-install -m 755 "$SRC/output/wattcurb"       /usr/local/bin/wattcurb
-install -m 755 "$SRC/output/wattcurb-tray"  /usr/local/bin/wattcurb-tray
-[ -f "$SRC/output/wattcurb-dashboard" ] && install -m 755 "$SRC/output/wattcurb-dashboard" /usr/local/bin/wattcurb-dashboard
-install -m 644 "$SRC/scripts/wattcurb.service" /etc/systemd/system/wattcurb.service
-systemctl daemon-reload
-echo "deployed: $(md5sum /usr/local/bin/wattcurb | cut -c1-32)"
+UNIT=wattcurb.service
+
+case "${1:-deploy}" in
+deploy)
+    [ -f "$SRC/output/wattcurb" ] || { echo "no staged release in $SRC/output"; exit 1; }
+    install -m 755 "$SRC/output/wattcurb"       /usr/local/bin/wattcurb
+    install -m 755 "$SRC/output/wattcurb-tray"  /usr/local/bin/wattcurb-tray
+    [ -f "$SRC/output/wattcurb-dashboard" ] && install -m 755 "$SRC/output/wattcurb-dashboard" /usr/local/bin/wattcurb-dashboard
+    install -m 644 "$SRC/scripts/wattcurb.service" /etc/systemd/system/"$UNIT"
+    systemctl daemon-reload
+    echo "deployed: $(md5sum /usr/local/bin/wattcurb | cut -c1-32)"
+    ;;
+enable)
+    systemctl enable "$UNIT"
+    echo "enabled: $(systemctl is-enabled "$UNIT")"
+    ;;
+disable)
+    systemctl disable "$UNIT"
+    echo "enabled: $(systemctl is-enabled "$UNIT" || true)"
+    ;;
+status)
+    echo "enabled: $(systemctl is-enabled "$UNIT" || true)  active: $(systemctl is-active "$UNIT" || true)"
+    ;;
+*)
+    echo "usage: wattcurb-deploy [deploy|enable|disable|status]" >&2
+    exit 2
+    ;;
+esac

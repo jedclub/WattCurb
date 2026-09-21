@@ -55,8 +55,18 @@ Repeated prompts are eliminated by two version-controlled files, installed once:
 
 | File | Installed to | Purpose |
 | :--- | :--- | :--- |
-| `scripts/49-wattcurb-dev.rules` | `/etc/polkit-1/rules.d/` | grants `jedclub` passwordless `manage-units` / `manage-unit-files` **for `wattcurb.service` only**, `reload-daemon`, and `pkexec` **for the deploy helper only** |
-| `scripts/wattcurb-deploy` | `/usr/local/libexec/` | root-owned; stages `output/` into `/usr/local/bin` and installs the unit |
+| `scripts/49-wattcurb-dev.rules` | `/etc/polkit-1/rules.d/` | grants `jedclub` passwordless `manage-units` **for `wattcurb.service` only**, `reload-daemon`, and `pkexec` **for the deploy helper only** |
+| `scripts/wattcurb-deploy` | `/usr/local/libexec/` | root-owned; `deploy` stages `output/` into `/usr/local/bin` and installs the unit, `enable`/`disable`/`status` act on `wattcurb.service` |
+
+`systemctl enable` is **not** covered by the rule. systemd reports the target
+unit to polkit for `manage-units` but not for `manage-unit-files`, so
+`action.lookup("unit")` is undefined there and the rule falls through to a
+prompt - confirmed on this host, where `systemctl enable wattcurb.service`
+returned `Failed to enable unit: Connection timed out` after the dialog went
+unanswered. A rule that granted `manage-unit-files` unconditionally could not
+be scoped to one unit and would amount to letting any unit be run at boot, so
+the verb lives in the helper instead, where the unit name is fixed in the
+script: `pkexec /usr/local/libexec/wattcurb-deploy enable`.
 
 Every other action still authenticates. The rule is scoped so that a stray
 `pkexec` of an arbitrary command is not covered.
