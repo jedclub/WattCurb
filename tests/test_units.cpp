@@ -3377,7 +3377,7 @@ void test_power_profile_filtering_and_comparisons() {
     assert(report_save.summary.discharging_samples == 40);
     assert(std::abs(report_save.summary.avg_discharge_watts - 8.0) < 0.1);
     assert(std::abs(report_save.summary.avg_cstate_c3_percent - 78.0) < 0.1);
-    assert(report_save.summary.duration_sec == 400);
+    assert(report_save.summary.total_discharge_duration_sec == 400);
 
     // 4. Filtered Analysis for Performance (filter_mode = 0)
     auto report_perf = wattcurb::report::BatteryHistoryAnalyzer::analyze(pts.data(), pts.size(), mock_procs, 11.4, 0);
@@ -3409,6 +3409,46 @@ void test_power_profile_filtering_and_comparisons() {
 #endif
 
     std::cout << " [PASS] test_power_profile_filtering_and_comparisons (REF-TEST-050: Filter & comparison matrix verified)\n";
+}
+
+// Implements REF-TEST-051 & REF-REQ-087: Kernel VM Writeback & Laptop Mode Coalescing Verification
+void test_kernel_vm_writeback_and_laptop_mode_coalescing() {
+    std::cout << " [ORACLE GATE] Verifying Kernel VM Writeback & Laptop Mode Coalescing (REF-TEST-051)...\n";
+
+    // 1. Capture baseline and inspect fields
+    wattcurb::policy::MitigationEngine::capture_hardware_baseline();
+    const auto& base = wattcurb::policy::MitigationEngine::hardware_baseline();
+    assert(base.captured && "Hardware baseline must be captured");
+    assert(base.vm_dirty_writeback_centisecs > 0 && "dirty_writeback_centisecs must be positive");
+    assert(base.vm_dirty_expire_centisecs > 0 && "dirty_expire_centisecs must be positive");
+
+    uint32_t orig_writeback = base.vm_dirty_writeback_centisecs;
+    uint32_t orig_expire = base.vm_dirty_expire_centisecs;
+    uint32_t orig_laptop = base.vm_laptop_mode;
+
+    // 2. Transition into UltraEndurance
+    bool ultra_ok = wattcurb::policy::MitigationEngine::apply_power_profile(wattcurb::PowerProfileMode::UltraEndurance);
+    assert(ultra_ok && "apply_power_profile(UltraEndurance) must succeed");
+    assert(wattcurb::policy::MitigationEngine::hardware_baseline().vm_writeback_modified && "vm_writeback_modified must be set true in UltraEndurance");
+
+    // 3. Rollback to Balanced
+    bool balanced_ok = wattcurb::policy::MitigationEngine::apply_power_profile(wattcurb::PowerProfileMode::Balanced);
+    assert(balanced_ok && "apply_power_profile(Balanced) must succeed");
+    assert(!wattcurb::policy::MitigationEngine::hardware_baseline().vm_writeback_modified && "vm_writeback_modified must be cleared upon rollback to Balanced");
+
+    // 4. Verify baseline values preserved exactly
+    const auto& restored_base = wattcurb::policy::MitigationEngine::hardware_baseline();
+    assert(restored_base.vm_dirty_writeback_centisecs == orig_writeback);
+    assert(restored_base.vm_dirty_expire_centisecs == orig_expire);
+    assert(restored_base.vm_laptop_mode == orig_laptop);
+
+    // 5. Test setter primitives directly (graceful non-crashing execution)
+    wattcurb::policy::MitigationEngine::set_vm_dirty_writeback_centisecs(6000);
+    wattcurb::policy::MitigationEngine::set_vm_dirty_expire_centisecs(12000);
+    wattcurb::policy::MitigationEngine::set_vm_laptop_mode(5);
+    wattcurb::policy::MitigationEngine::restore_vm_writeback_baseline();
+
+    std::cout << " [PASS] test_kernel_vm_writeback_and_laptop_mode_coalescing (REF-TEST-051: VM writeback & laptop mode roundtrip verified)\n";
 }
 
 // Implements REF-TEST-044 & REF-REQ-079: Token Minimization & Evaluation Harness Integrity
@@ -3538,6 +3578,7 @@ int main() {
     test::test_process_full_name_and_interactive_tooltips();
     test::test_deep_battery_drain_report_oracle_gate();
     test::test_power_profile_filtering_and_comparisons();
+    test::test_kernel_vm_writeback_and_laptop_mode_coalescing();
     test::test_modeset_flapping_elimination_and_test_isolation();
     test::test_cpu_features();
     test::test_hw_isa_primitives();

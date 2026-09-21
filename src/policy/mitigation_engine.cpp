@@ -192,6 +192,28 @@ void MitigationEngine::capture_hardware_baseline() noexcept {
         }
     }
 
+    // 11. Kernel VM Writeback & Laptop Mode Baselines (REF-REQ-087, REF-ARCH-064)
+    s_hardware_baseline.vm_dirty_writeback_centisecs = 500;
+    s_hardware_baseline.vm_dirty_expire_centisecs = 3000;
+    s_hardware_baseline.vm_laptop_mode = 0;
+    s_hardware_baseline.vm_writeback_modified = false;
+
+    n = 0;
+    if (core::fs::read_small_file("/proc/sys/vm/dirty_writeback_centisecs", buf, sizeof(buf) - 1, &n) && n > 0) {
+        buf[n] = '\0';
+        s_hardware_baseline.vm_dirty_writeback_centisecs = static_cast<uint32_t>(std::strtoul(buf, nullptr, 10));
+    }
+    n = 0;
+    if (core::fs::read_small_file("/proc/sys/vm/dirty_expire_centisecs", buf, sizeof(buf) - 1, &n) && n > 0) {
+        buf[n] = '\0';
+        s_hardware_baseline.vm_dirty_expire_centisecs = static_cast<uint32_t>(std::strtoul(buf, nullptr, 10));
+    }
+    n = 0;
+    if (core::fs::read_small_file("/proc/sys/vm/laptop_mode", buf, sizeof(buf) - 1, &n) && n > 0) {
+        buf[n] = '\0';
+        s_hardware_baseline.vm_laptop_mode = static_cast<uint32_t>(std::strtoul(buf, nullptr, 10));
+    }
+
     s_hardware_baseline.captured = true;
 }
 
@@ -225,6 +247,9 @@ void MitigationEngine::restore_hardware_baseline() noexcept {
         set_baloo_suspended(false);
     }
     restore_wifi_txpower();
+    if (s_hardware_baseline.vm_writeback_modified) {
+        restore_vm_writeback_baseline();
+    }
 }
 
 const MitigationEngine::HardwareBaselineState& MitigationEngine::hardware_baseline() noexcept {
@@ -445,6 +470,7 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         if (s_hardware_baseline.kwin_blur_unloaded) set_kwin_effects_suspended(false);
         if (s_hardware_baseline.baloo_suspended) set_baloo_suspended(false);
         restore_wifi_txpower();
+        if (s_hardware_baseline.vm_writeback_modified) restore_vm_writeback_baseline();
         return true;
 
     case PowerProfileMode::Balanced:
@@ -467,6 +493,7 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         if (s_hardware_baseline.kwin_blur_unloaded) set_kwin_effects_suspended(false);
         if (s_hardware_baseline.baloo_suspended) set_baloo_suspended(false);
         restore_wifi_txpower();
+        if (s_hardware_baseline.vm_writeback_modified) restore_vm_writeback_baseline();
         return true;
 
     case PowerProfileMode::PowerSaver:
@@ -487,6 +514,7 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         if (s_hardware_baseline.kwin_blur_unloaded) set_kwin_effects_suspended(false);
         if (s_hardware_baseline.baloo_suspended) set_baloo_suspended(false);
         restore_wifi_txpower();
+        if (s_hardware_baseline.vm_writeback_modified) restore_vm_writeback_baseline();
         return true;
 
     case PowerProfileMode::UltraEndurance:
@@ -508,6 +536,11 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_kwin_effects_suspended(true);
         set_baloo_suspended(true);
         set_wifi_txpower_limit(1200); // REF-REQ-064: Cap Wi-Fi Tx to 12.00 dBm (16mW RF)
+        // REF-REQ-087 & REF-ARCH-064: Kernel VM Writeback & Laptop Mode Coalescing
+        set_vm_dirty_writeback_centisecs(6000); // 60 seconds
+        set_vm_dirty_expire_centisecs(12000);   // 120 seconds
+        set_vm_laptop_mode(5);                  // Batch flushing mode
+        s_hardware_baseline.vm_writeback_modified = true;
         return true;
     }
     return false;
@@ -1553,6 +1586,43 @@ bool MitigationEngine::restore_wifi_txpower() noexcept {
     return (ret == 0);
 }
 
+// Implements REF-REQ-087 & REF-ARCH-064: Stack-allocated sysctl writer without heap allocation
+static bool write_uint32_sysctl(const char* path, uint32_t val) noexcept {
+    if (!path) return false;
+    int fd = ::open(path, O_WRONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+    char buf[32];
+    int len = std::snprintf(buf, sizeof(buf), "%u\n", val);
+    if (len <= 0) {
+        ::close(fd);
+        return false;
+    }
+    ssize_t w = ::write(fd, buf, static_cast<size_t>(len));
+    ::close(fd);
+    return (w > 0);
+}
+
+bool MitigationEngine::set_vm_dirty_writeback_centisecs(uint32_t centisecs) noexcept {
+    return write_uint32_sysctl("/proc/sys/vm/dirty_writeback_centisecs", centisecs);
+}
+
+bool MitigationEngine::set_vm_dirty_expire_centisecs(uint32_t centisecs) noexcept {
+    return write_uint32_sysctl("/proc/sys/vm/dirty_expire_centisecs", centisecs);
+}
+
+bool MitigationEngine::set_vm_laptop_mode(uint32_t mode) noexcept {
+    return write_uint32_sysctl("/proc/sys/vm/laptop_mode", mode);
+}
+
+bool MitigationEngine::restore_vm_writeback_baseline() noexcept {
+    if (!s_hardware_baseline.captured) return false;
+    set_vm_dirty_writeback_centisecs(s_hardware_baseline.vm_dirty_writeback_centisecs);
+    set_vm_dirty_expire_centisecs(s_hardware_baseline.vm_dirty_expire_centisecs);
+    set_vm_laptop_mode(s_hardware_baseline.vm_laptop_mode);
+    s_hardware_baseline.vm_writeback_modified = false;
+    return true;
+}
+
 void MitigationEngine::rollback_all() noexcept {
     WATTCURB_PROFILE_SCOPE("mitig.rollback_all");
     // Implements REF-REQ-031 Sec 3.2, REF-REQ-049 & REF-REQ-055: Restore all mitigated processes faithfully and heal audio stack
@@ -1583,6 +1653,9 @@ void MitigationEngine::rollback_all() noexcept {
     if (m_backlight_capped) {
         restore_display_backlight();
         m_backlight_capped = false;
+    }
+    if (s_hardware_baseline.vm_writeback_modified) {
+        restore_vm_writeback_baseline();
     }
     if (s_hardware_baseline.captured) {
         restore_hardware_baseline();

@@ -89,6 +89,10 @@ public:
         bool drrs_applied{false};
         bool baloo_suspended{false};
         bool wifi_txpower_capped{false};
+        uint32_t vm_dirty_writeback_centisecs{500};
+        uint32_t vm_dirty_expire_centisecs{3000};
+        uint32_t vm_laptop_mode{0};
+        bool vm_writeback_modified{false};
     };
 
     static void capture_hardware_baseline() noexcept;
@@ -114,6 +118,10 @@ public:
     static bool set_baloo_suspended(bool suspend) noexcept;
     static bool set_wifi_txpower_limit(uint32_t mbm) noexcept;
     static bool restore_wifi_txpower() noexcept;
+    static bool set_vm_dirty_writeback_centisecs(uint32_t centisecs) noexcept;
+    static bool set_vm_dirty_expire_centisecs(uint32_t centisecs) noexcept;
+    static bool set_vm_laptop_mode(uint32_t mode) noexcept;
+    static bool restore_vm_writeback_baseline() noexcept;
     static bool apply_power_profile(PowerProfileMode mode) noexcept;
 
     // Process Immunity & Audio Protection (REF-REQ-049, REF-REQ-054)
