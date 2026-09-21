@@ -144,6 +144,7 @@ All documents follow the Ref-ID naming standard:
 | [`REF-RES-025`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-025-ultra-endurance-deep-silicon-and-kernel-power-minimization.md) | UltraEndurance Deep Silicon & Kernel Power Minimization Architecture | 6-dimension deep minimization: DPM low, MCLK 400MHz, timerslack 100ms, VM flush, audio sleep | 2026-09-21 |
 | [`REF-RES-026`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-026-privilege-boundary-audit.md) | Root Daemon Privilege-Boundary Audit | Symlink+0666 local root escalation, iw command injection, dev paths in release binaries, service exposure 9.4 to 6.9 | 2026-09-21 |
 | [`REF-RES-027`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-027-performance-mode-clock-collapse-incident.md) | Performance-Mode Clock Collapse Incident (399 MHz) - CRITICAL, cause unidentified | Open | [`REF-REQ-092`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-092-ultimate-performance-unleash-actuation.md) |
+| [`REF-RES-028`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-028-empirical-power-and-throughput-ab.md) | Empirical Power & Throughput A/B - first measurement of the power-saving claim | Complete | [`REF-RES-027`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-027-performance-mode-clock-collapse-incident.md), [`REF-REQ-107`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-107-performance-mode-throughput-guarantee.md) |
 
 
 
