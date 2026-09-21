@@ -197,7 +197,7 @@ bool DaemonRunner::initialize() {
     feature_manager_.set_override_profile(initial_mode);
     policy::MitigationEngine::apply_power_profile(initial_mode);
     if (shm_state_ != nullptr) {
-        shm_state_->power_profile_mode = local_shared_state_.power_profile_mode;
+        shm_state_->update_profile_mode(local_shared_state_.power_profile_mode);
     }
     last_logged_profile_ = initial_mode;
     last_logged_battery_pct_ = 100;
@@ -709,7 +709,7 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
             local_shared_state_.power_profile_mode = static_cast<uint8_t>(new_mode);
             cached_report_.mitigation_status.current_profile = new_mode;
             if (shm_state_) {
-                shm_state_->power_profile_mode = static_cast<uint8_t>(new_mode);
+                shm_state_->update_profile_mode(static_cast<uint8_t>(new_mode));
             }
 
             // Immediately actuate hardware limits natively via direct sysfs (REF-REQ-055, REF-ARCH-031)

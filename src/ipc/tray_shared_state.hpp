@@ -77,6 +77,14 @@ struct alignas(64) WattCurbSharedState {
         __atomic_store_n(&seq_version, ver + 2, __ATOMIC_RELEASE); // Mark writer stable (even)
     }
 
+    // Seqlock Atomic Profile Mode Update Helper (Daemon Provider - REF-REQ-091, REF-ARCH-068)
+    void update_profile_mode(uint8_t mode) noexcept {
+        uint64_t ver = __atomic_load_n(&seq_version, __ATOMIC_RELAXED);
+        __atomic_store_n(&seq_version, ver + 1, __ATOMIC_RELEASE); // Mark writer busy (odd)
+        power_profile_mode = mode;
+        __atomic_store_n(&seq_version, ver + 2, __ATOMIC_RELEASE); // Mark writer stable (even)
+    }
+
     // Seqlock Atomic Read Helper (Tray Consumer, 0-lock, 0-allocation)
     bool read_atomic(WattCurbSharedState& out) const noexcept {
         uint64_t v1 = 0, v2 = 0;

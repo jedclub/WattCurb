@@ -230,6 +230,7 @@ private:
     const ipc::WattCurbSharedState* shm_state_{nullptr};
     ipc::WattCurbSharedState latest_state_{};
     int local_override_mode_{-1};
+    int prev_profile_mode_{-1};
 
     QTimer* poll_timer_{nullptr};
     bool is_rescanning_{false};

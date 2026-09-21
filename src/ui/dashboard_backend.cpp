@@ -26,7 +26,7 @@ DashboardBackend::DashboardBackend(QObject* parent)
     // Fetch initial sample
     if (shm_state_ && shm_state_->read_atomic(latest_state_)) {
         if (latest_state_.power_profile_mode <= 3) {
-            local_override_mode_ = latest_state_.power_profile_mode;
+            prev_profile_mode_ = latest_state_.power_profile_mode;
         }
     }
     
@@ -98,11 +98,17 @@ void DashboardBackend::onPollTimer() {
         ipc::WattCurbSharedState cur{};
         if (shm_state_->read_atomic(cur)) {
             cur_seq = cur.seq_version;
-            if (cur_seq != prev_seq_version_ || latest_state_.system_drain_mw != cur.system_drain_mw) {
+            if (cur_seq != prev_seq_version_ || latest_state_.system_drain_mw != cur.system_drain_mw || latest_state_.power_profile_mode != cur.power_profile_mode) {
                 state_changed = true;
                 latest_state_ = cur;
+
+                // Coherence Resolution (REF-REQ-091, REF-ARCH-068)
                 if (local_override_mode_ >= 0) {
-                    latest_state_.power_profile_mode = static_cast<uint8_t>(local_override_mode_);
+                    if (cur.power_profile_mode == static_cast<uint8_t>(local_override_mode_)) {
+                        local_override_mode_ = -1; // Daemon acknowledged our UI change
+                    } else if (prev_profile_mode_ >= 0 && cur.power_profile_mode != static_cast<uint8_t>(prev_profile_mode_)) {
+                        local_override_mode_ = -1; // External actor (tray/CLI) changed profile
+                    }
                 }
             }
         }
@@ -154,6 +160,13 @@ void DashboardBackend::onPollTimer() {
             emit telemetryChanged();
             emit processListChanged();
         }
+
+        int eff_profile = powerProfileMode();
+        if (eff_profile != prev_profile_mode_ || prev_seq_version_ == 0) {
+            prev_profile_mode_ = eff_profile;
+            emit profileChanged();
+        }
+
         emit historyChanged();
         emit powerSharesChanged();
     }
@@ -213,6 +226,23 @@ bool DashboardBackend::ingestTelemetryJson(const std::string& resp) noexcept {
         disk_read_mb_s_ = obj.value("disk_read_mb_s").toDouble(0.0);
         disk_write_mb_s_ = obj.value("disk_write_mb_s").toDouble(0.1);
         aspm_policy_ = obj.value("aspm_policy").toString("powersave");
+
+        // Power Profile Mode Coherence (REF-REQ-091, REF-ARCH-068)
+        if (obj.contains("profile_mode")) {
+            int p_mode = obj.value("profile_mode").toInt(-1);
+            if (p_mode >= 0 && p_mode <= 3) {
+                latest_state_.power_profile_mode = static_cast<uint8_t>(p_mode);
+                if (local_override_mode_ >= 0) {
+                    if (p_mode == local_override_mode_ || (prev_profile_mode_ >= 0 && p_mode != prev_profile_mode_)) {
+                        local_override_mode_ = -1;
+                    }
+                }
+                if (p_mode != prev_profile_mode_) {
+                    prev_profile_mode_ = p_mode;
+                    emit profileChanged();
+                }
+            }
+        }
     }
 
     double total_sys_w = obj.value("system_watts").toDouble(systemDrainWatts());
@@ -501,6 +531,7 @@ void DashboardBackend::setProfile(int mode) {
     }
 
     local_override_mode_ = mode;
+    prev_profile_mode_ = mode;
 
     char cmd[32];
     std::snprintf(cmd, sizeof(cmd), "PROFILE %d\n", mode);

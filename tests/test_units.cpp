@@ -3334,6 +3334,106 @@ void test_process_cstate_affinity_and_badges() {
 
     std::cout << " [PASS] test_process_cstate_affinity_and_badges (REF-TEST-054: Heuristic, Table Badges, QML Layout & Hover Diagnostics verified)\n";
 }
+
+void test_bi_directional_power_profile_coherence() {
+    using namespace wattcurb;
+    using namespace wattcurb::ui;
+    using namespace wattcurb::ipc;
+    using namespace wattcurb::core;
+
+    std::cout << "\n--- [REF-TEST-055] Bi-Directional Power Profile Coherence & Seqlock Synchronization (REF-REQ-091, REF-ARCH-068) ---\n";
+
+    // 1. Verify WattCurbSharedState::update_profile_mode Seqlock Semantics
+    WattCurbSharedState test_shm{};
+    test_shm.seq_version = 100;
+    test_shm.power_profile_mode = 1; // Balanced
+
+    test_shm.update_profile_mode(2); // SmartSave
+    assert(test_shm.power_profile_mode == 2 && "Profile mode must be updated to 2");
+    assert(test_shm.seq_version == 102 && "Seqlock version must advance by 2 (odd writer -> even stable)");
+
+    test_shm.update_profile_mode(3); // UltraSave
+    assert(test_shm.power_profile_mode == 3 && "Profile mode must be updated to 3");
+    assert(test_shm.seq_version == 104 && "Seqlock version must advance to 104");
+
+    // 2. Test DashboardBackend Integration & Coherence Resolution
+    int fake_argc = 1;
+    char fake_name[] = "wattcurb_tests";
+    char* fake_argv[] = { fake_name, nullptr };
+    QCoreApplication* app = QCoreApplication::instance();
+    std::unique_ptr<QCoreApplication> own_app;
+    if (!app) {
+        own_app = std::make_unique<QCoreApplication>(fake_argc, fake_argv);
+    }
+
+    DashboardBackend backend;
+
+    // Connect to profileChanged signal to count emissions
+    int signal_count = 0;
+    QObject::connect(&backend, &DashboardBackend::profileChanged, [&signal_count]() {
+        signal_count++;
+    });
+
+    // 3. Verify JSON Telemetry profile_mode Ingestion
+    std::string json_ultra = R"({
+        "system_watts": 7.5,
+        "profile_mode": 3,
+        "processes": []
+    })";
+    bool ok = backend.ingestTelemetryJson(json_ultra);
+    assert(ok && "ingestTelemetryJson must succeed");
+    assert(backend.powerProfileMode() == 3 && "DashboardBackend must reflect UltraSave (3) from JSON");
+    assert(signal_count > 0 && "profileChanged signal must be emitted upon JSON profile change");
+
+    std::string json_perf = R"({
+        "system_watts": 18.0,
+        "profile_mode": 0,
+        "processes": []
+    })";
+    int prev_count = signal_count;
+    backend.ingestTelemetryJson(json_perf);
+    assert(backend.powerProfileMode() == 0 && "DashboardBackend must reflect Performance (0) from JSON");
+    assert(signal_count > prev_count && "profileChanged signal must be emitted again");
+
+    // 4. Test Speculative Override Resolution
+    // Calling setProfile(2) sets local_override_mode_ = 2 and prev_profile_mode_ = 2
+    backend.setProfile(2);
+    assert(backend.powerProfileMode() == 2 && "Speculative local override must show mode 2");
+
+    // External change arrives via JSON with mode 1 (Balanced) -> must clear local override!
+    std::string json_bal = R"({
+        "system_watts": 11.0,
+        "profile_mode": 1,
+        "processes": []
+    })";
+    backend.ingestTelemetryJson(json_bal);
+    assert(backend.powerProfileMode() == 1 && "External profile switch must clear local override and update mode");
+
+    // 5. Oracle Gate Benchmark: 100,000 Seqlock profile updates + read_atomic iterations
+    constexpr size_t BENCH_ITERS = 100000;
+    auto t0 = std::chrono::steady_clock::now();
+    uint64_t tsc0 = hw_isa::read_tsc();
+
+    WattCurbSharedState bench_shm{};
+    WattCurbSharedState read_dst{};
+    for (size_t iter = 0; iter < BENCH_ITERS; ++iter) {
+        bench_shm.update_profile_mode(static_cast<uint8_t>(iter & 3));
+        bool read_ok = bench_shm.read_atomic(read_dst);
+        assert(read_ok && read_dst.power_profile_mode == static_cast<uint8_t>(iter & 3));
+    }
+
+    uint64_t tsc1 = hw_isa::read_tsc();
+    auto t1 = std::chrono::steady_clock::now();
+    double avg_ns = static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count()) / static_cast<double>(BENCH_ITERS);
+    double avg_cycles = static_cast<double>(tsc1 - tsc0) / static_cast<double>(BENCH_ITERS);
+
+    std::cout << " [ORACLE GATE] Seqlock Power Profile Coherence Benchmark (" << BENCH_ITERS << " iters):\n"
+              << "   * Seqlock Update + Read Latency: " << std::fixed << std::setprecision(2) << avg_ns << " ns/op (" << avg_cycles << " cycles/op)\n";
+
+    assert(avg_ns < 50.0 && "Oracle Gate Failed: Seqlock profile mode sync must execute in < 50 ns/op!");
+
+    std::cout << " [PASS] test_bi_directional_power_profile_coherence (REF-TEST-055: Seqlock Versioning, Ingestion & Coherence verified)\n";
+}
 #endif
 
 void test_multilingual_l10n_and_auto_system_locale() {
@@ -3948,6 +4048,7 @@ int main() {
     test::test_dashboard_matrix_profiling_audit();
     test::test_matrix_dashboard_expanded_power_shares_and_typography();
     test::test_process_cstate_affinity_and_badges();
+    test::test_bi_directional_power_profile_coherence();
 #endif
     test::test_multilingual_l10n_and_auto_system_locale();
     test::test_anti_starvation_and_greedy_capping();
