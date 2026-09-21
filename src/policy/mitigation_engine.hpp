@@ -149,6 +149,9 @@ public:
     static void restore_hardware_baseline() noexcept;
     [[nodiscard]] static const HardwareBaselineState& hardware_baseline() noexcept;
 
+    // REF-REQ-109: name of a competing power manager holding the same knobs, or
+    // nullptr. Walks /proc, so callers cache the result.
+    [[nodiscard]] static const char* competing_power_manager() noexcept;
     static bool set_platform_profile(const char* profile) noexcept;
     static bool set_cpu_governor(const char* governor) noexcept;
     static bool set_cpu_boost(bool enable) noexcept;

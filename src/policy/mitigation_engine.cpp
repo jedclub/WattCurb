@@ -748,8 +748,69 @@ const MitigationEngine::HardwareBaselineState& MitigationEngine::hardware_baseli
     return s_hardware_baseline;
 }
 
+const char* MitigationEngine::competing_power_manager() noexcept {
+    // REF-REQ-109: /sys/firmware/acpi/platform_profile has exactly one correct
+    // owner. power-profiles-daemon was found running on the development host,
+    // set to "balanced", writing the same node WattCurb writes with a different
+    // intention. Two writers with different intentions produce a nondeterministic
+    // node, which is indistinguishable from a bug in either one.
+    //
+    // Scanned on demand rather than per cycle: this walks /proc, and the daemon's
+    // evaluation loop runs every 3 s. Callers cache via s_competitor_checked.
+    static const char* const COMPETITORS[] = {
+        "power-profiles-", // comm is truncated to 15 chars by the kernel
+        "tuned",
+        "tlp",
+        "auto-cpufreq",
+    };
+
+    DIR* proc_dir = ::opendir("/proc");
+    if (!proc_dir) return nullptr;
+
+    const char* found = nullptr;
+    struct dirent* entry = nullptr;
+    while ((entry = ::readdir(proc_dir)) != nullptr && found == nullptr) {
+        if (entry->d_name[0] < '0' || entry->d_name[0] > '9') continue;
+
+        char comm_path[64];
+        std::snprintf(comm_path, sizeof(comm_path), "/proc/%s/comm", entry->d_name);
+        char comm[32]{};
+        size_t n = 0;
+        if (!core::fs::read_small_file(comm_path, comm, sizeof(comm), &n) || n == 0) continue;
+        while (n > 0 && (comm[n - 1] == '\n' || comm[n - 1] == '\r')) comm[--n] = '\0';
+
+        for (const char* c : COMPETITORS) {
+            if (std::strcmp(comm, c) == 0) { found = c; break; }
+        }
+    }
+    ::closedir(proc_dir);
+    return found;
+}
+
 bool MitigationEngine::set_platform_profile(const char* profile) noexcept {
     if (!profile) return false;
+
+    // REF-REQ-109: defer rather than fight. The competitor re-asserts its own
+    // value on its own schedule, so writing here produces a node whose content
+    // depends on which daemon wrote last - the machine behaves differently from
+    // one moment to the next for no visible reason. WattCurb declines the write
+    // and says so once; the remedy is a deployment decision, not a race.
+    static bool s_competitor_checked = false;
+    static const char* s_competitor = nullptr;
+    if (!s_competitor_checked) {
+        s_competitor = competing_power_manager();
+        s_competitor_checked = true;
+        if (s_competitor != nullptr) {
+            char detail[192];
+            std::snprintf(detail, sizeof(detail),
+                          "%s owns /sys/firmware/acpi/platform_profile; WattCurb will not write it. "
+                          "Run 'systemctl mask --now %s' to give WattCurb full control.",
+                          s_competitor, s_competitor);
+            core::EventLogger::log_alert("CONFLICT", detail);
+        }
+    }
+    if (s_competitor != nullptr) return false;
+
     int fd = hw_open_write("/sys/firmware/acpi/platform_profile", O_WRONLY | O_CLOEXEC);
     if (fd < 0) return false;
     size_t len = std::strlen(profile);

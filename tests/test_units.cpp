@@ -4256,6 +4256,19 @@ void test_profile_throughput_and_liveness_guarantees() {
     std::cout << "   * Writeback bounded: " << MitigationEngine::ULTRA_DIRTY_WRITEBACK_CS
               << " cs writeback / " << MitigationEngine::ULTRA_DIRTY_EXPIRE_CS << " cs expire\n";
 
+    // 5. REQ-109: a contested knob has one owner. This is conditional on the
+    //    host's actual service state - asserting a fixed answer would make the
+    //    test lie on whichever machine disagrees.
+    const char* competitor = MitigationEngine::competing_power_manager();
+    if (competitor != nullptr) {
+        const bool declined = !MitigationEngine::set_platform_profile("balanced");
+        assert(declined && "REQ-109.1: platform_profile write declined while a competitor runs");
+        std::cout << "   * Competing power manager detected (" << competitor
+                  << "); platform_profile write declined\n";
+    } else {
+        std::cout << "   * No competing power manager on this host; platform_profile owned by WattCurb\n";
+    }
+
     MitigationEngine::set_actuation_sandbox(prev_sandbox);
 
     std::cout << " [PASS] test_profile_throughput_and_liveness_guarantees (REF-TEST-061: no C0 clamp in Performance, playback-independent stall shield, bounded writeback verified)\n";
