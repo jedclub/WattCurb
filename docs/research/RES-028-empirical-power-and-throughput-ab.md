@@ -86,3 +86,56 @@ identified.
   is not a screen-dimming artifact. Run 2 did not record it.
 - Battery state of charge fell across the session; `power_now` is an
   instantaneous reading and was not corrected for that.
+
+
+---
+
+## 5. Correction: The Throughput Cost Was the Affinity Masks, Not the Actuations
+
+Section 2.4 reported Performance mode running 1.4x slower than no daemon. That
+measurement, and every other throughput figure in this document and in
+REF-RES-027, was taken in a shell confined to 8 of 16 logical CPUs by an
+orphaned affinity mask ([`REF-REQ-110`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-110-process-state-repair-on-bootstrap.md)).
+
+After the bootstrap repair sweep restored the machine - `nproc` in the measuring
+shell back to 16, `plasmashell`, `ksecretd`, both login shells and the agent
+process all returned to `0-15` - the same probe was re-run:
+
+| Condition | Runs | Median |
+| :--- | :--- | ---: |
+| Daemon stopped | 1.339 / 1.438 / 1.585 s | 1.438 s |
+| Daemon active, **Balanced** | 1.753 / 1.394 / 1.346 s | 1.394 s |
+| Daemon active, **Performance** | 1.564 / 1.602 / 1.451 / 1.402 s | 1.507 s |
+
+**All three are indistinguishable.** The daemon costs no measurable throughput in
+either profile once no process is masked.
+
+### 5.1 What this retracts
+
+- **Section 2.4's 1.4x Performance penalty is withdrawn.** It was the mask.
+- **REF-RES-027's 12.4x collapse is confirmed as mask accumulation**, not a
+  hardware actuation: the longer the daemon ran the more processes it masked,
+  and the masks outlived it.
+- The single-knob bisection in RES-027 section 6 **stands**, because each knob
+  was measured against a baseline taken under the same mask. The C0 clamp really
+  did cost 1.88x relative to that baseline, and removing it (REQ-107.2) was
+  correct. What is withdrawn is the claim that a residual actuation-level
+  penalty remained after it.
+
+### 5.2 What this does not change
+
+The power figures in section 2.1 were measured with the same mask present in
+every condition, including the control, and the mask does not change the idle
+draw of a desktop that is not compute-bound. The saving - Performance ~16 W and
+UltraEndurance ~13.7 W against a 21-32 W control - is unaffected by this
+correction, and has not been re-measured since, because the machine moved onto AC
+power partway through the session and `power_now` reads zero while charging.
+
+### 5.3 The measurement lesson
+
+Every throughput number in this investigation was wrong in absolute terms for
+about six hours, because the instrument - a shell - was silently degraded by the
+system under test. The comparisons survived only because the degradation applied
+equally to all conditions, which was luck rather than design. A probe should
+assert its own preconditions: this one should have checked `nproc` and its own
+affinity mask before reporting anything.
