@@ -127,6 +127,7 @@ All documents follow the Ref-ID naming standard:
 | [`REF-RES-022`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-022-vram-wifi-fan-bus-hardware-power-isolation.md) | Physical Power Isolation & Telemetry Decomposition for VRAM, Wi-Fi, Fan, and PCIe/Fabric Bus | VRAM DPM mclk/alloc, Wi-Fi RF txpower/duty, Fan RPM^3 cubic aerodynamic law, PCIe ASPM & FCLK | 2026-09-21 |
 | [`REF-RES-023`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-023-vram-gc-dpm-downclocking-and-performance-boost.md) | VRAM Garbage Collection, DPM Clock Downclocking & Maximum Performance Boost | Performance max clock unleash, 3-tier VRAM GC (KWin/Chromium/drop_caches), DPM low/manual downclock | 2026-09-21 |
 | [`REF-RES-024`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-024-deep-power-log-audit-and-drain-analysis.md) | Deep Power Telemetry Log Audit & Full-Spectrum Drain Analysis | 5.5-hour 86.03 Wh telemetry audit, Platform Loss 40.9%, CPU 40.3%, 3 root-cause bottlenecks | 2026-09-21 |
+| [`REF-RES-025`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-025-ultra-endurance-deep-silicon-and-kernel-power-minimization.md) | UltraEndurance Deep Silicon & Kernel Power Minimization Architecture | 6-dimension deep minimization: DPM low, MCLK 400MHz, timerslack 100ms, VM flush, audio sleep | 2026-09-21 |
 
 
 
