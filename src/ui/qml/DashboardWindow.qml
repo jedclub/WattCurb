@@ -6,9 +6,9 @@ ApplicationWindow {
     id: root
     visible: true
     width: 1280
-    height: 840
+    height: 880
     minimumWidth: 1080
-    minimumHeight: 720
+    minimumHeight: 740
     title: "WattCurb btop-Style Power & Hardware Matrix Dashboard"
     color: "#0b0e12"
 
@@ -54,7 +54,7 @@ ApplicationWindow {
         property color textColor: "#e2e8f0"
         property real customRadius: 6
 
-        implicitHeight: 30
+        implicitHeight: 32
         hoverEnabled: true
 
         scale: !enabled ? 1.0 : (down ? 0.95 : (hovered ? 1.03 : 1.0))
@@ -65,7 +65,7 @@ ApplicationWindow {
             anchors.centerIn: parent
             Text {
                 text: tBtn.text
-                font.pixelSize: 11
+                font.pixelSize: 12
                 font.bold: true
                 color: !tBtn.enabled ? "#64748b" : (tBtn.highlighted ? "#ffffff" : (tBtn.hovered ? "#ffffff" : tBtn.textColor))
                 horizontalAlignment: Text.AlignHCenter
@@ -144,7 +144,7 @@ ApplicationWindow {
         // =============================================================
         Rectangle {
             Layout.fillWidth: true
-            height: 46
+            height: 48
             color: root.bgPanel
             border.color: root.borderPanel
             radius: 6
@@ -159,20 +159,20 @@ ApplicationWindow {
                 RowLayout {
                     spacing: 8
                     Rectangle {
-                        width: 26; height: 26; radius: 4; color: "#0284c7"
-                        Text { anchors.centerIn: parent; text: "⚡"; font.pixelSize: 15 }
+                        width: 28; height: 28; radius: 4; color: "#0284c7"
+                        Text { anchors.centerIn: parent; text: "⚡"; font.pixelSize: 16 }
                     }
                     Text {
                         text: "WATTCURB"
                         color: root.colCyan
                         font.bold: true
-                        font.pixelSize: 16
+                        font.pixelSize: 18
                         font.family: "Monospace"
                     }
                     Text {
                         text: "[btop Deep Hardware & Power Matrix]"
                         color: root.textDim
-                        font.pixelSize: 12
+                        font.pixelSize: 13
                     }
                 }
 
@@ -185,20 +185,20 @@ ApplicationWindow {
                         text: backend.tr("TOTAL_DRAIN") + ":"
                         color: root.textDim
                         font.bold: true
-                        font.pixelSize: 12
+                        font.pixelSize: 13
                     }
                     Text {
                         text: backend.systemDrainWatts.toFixed(2) + " W"
                         color: backend.systemDrainWatts > 25.0 ? root.colRed : (backend.systemDrainWatts > 15.0 ? root.colOrange : root.colCyan)
                         font.bold: true
-                        font.pixelSize: 22
+                        font.pixelSize: 24
                         font.family: "Monospace"
                     }
                 }
 
                 // Battery State Indicator
                 Rectangle {
-                    height: 28
+                    height: 30
                     Layout.preferredWidth: batStatusText.implicitWidth + 20
                     radius: 4
                     color: backend.batteryState === 1 ? "#361c0a" : "#0d2b1d"
@@ -217,14 +217,14 @@ ApplicationWindow {
                             text: backend.batteryPercent + "% (" + backend.batteryStateString + ")"
                             color: "#ffffff"
                             font.bold: true
-                            font.pixelSize: 12
+                            font.pixelSize: 13
                         }
                     }
                 }
 
                 // Profile Badge
                 Rectangle {
-                    height: 28
+                    height: 30
                     Layout.preferredWidth: profBadgeText.implicitWidth + 18
                     radius: 4
                     color: "#1e293b"
@@ -236,7 +236,7 @@ ApplicationWindow {
                         text: backend.powerProfileName
                         color: root.colCyan
                         font.bold: true
-                        font.pixelSize: 12
+                        font.pixelSize: 13
                     }
                 }
 
@@ -261,7 +261,7 @@ ApplicationWindow {
                 Text {
                     text: "SYNC " + backend.lastUpdateTime
                     color: root.textMuted
-                    font.pixelSize: 11
+                    font.pixelSize: 12
                     font.family: "Monospace"
                 }
             }
@@ -289,7 +289,7 @@ ApplicationWindow {
                 // CARD 1: CPU & Memory Subsystem (RAPL) + Real-Time Sparkline
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 210
+                    Layout.preferredHeight: 220
                     color: cpuMa.containsMouse ? "#161b24" : root.bgPanel
                     border.color: cpuMa.containsMouse ? root.colCyan : root.borderPanel
                     radius: 6
@@ -324,10 +324,10 @@ ApplicationWindow {
 
                         // Title & Live Watts
                         RowLayout {
-                            Text { text: "💻 " + backend.tr("CPU_MEM"); color: root.colCyan; font.bold: true; font.pixelSize: 13 }
+                            Text { text: "💻 " + backend.tr("CPU_MEM"); color: root.colCyan; font.bold: true; font.pixelSize: 14 }
                             Item { Layout.fillWidth: true }
-                            Text { text: "🔍 " + backend.tr("DETAILS"); color: root.textMuted; font.pixelSize: 11 }
-                            Text { text: backend.cpuDrainWatts.toFixed(2) + " W"; color: root.colCyan; font.bold: true; font.pixelSize: 18; font.family: "Monospace" }
+                            Text { text: "🔍 " + backend.tr("DETAILS"); color: root.textMuted; font.pixelSize: 12 }
+                            Text { text: backend.cpuDrainWatts.toFixed(2) + " W"; color: root.colCyan; font.bold: true; font.pixelSize: 20; font.family: "Monospace" }
                         }
 
                         // Detailed Breakdowns (Pkg, Core, Uncore, DRAM)
@@ -357,7 +357,7 @@ ApplicationWindow {
                         Canvas {
                             id: cpuSparkCanvas
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 32
+                            Layout.preferredHeight: 34
                             antialiasing: true
                             renderStrategy: Canvas.Threaded
                             renderTarget: Canvas.FramebufferObject
@@ -409,9 +409,9 @@ ApplicationWindow {
                             ColumnLayout {
                                 Layout.fillWidth: true; spacing: 2
                                 RowLayout {
-                                    Text { text: "C0 (Active)"; color: root.textDim; font.pixelSize: 11 }
+                                    Text { text: "C0 (Active)"; color: root.textDim; font.pixelSize: 12 }
                                     Item { Layout.fillWidth: true }
-                                    Text { text: backend.cstateC0Percent.toFixed(1) + "%"; color: root.textMain; font.pixelSize: 11; font.family: "Monospace" }
+                                    Text { text: backend.cstateC0Percent.toFixed(1) + "%"; color: root.textMain; font.pixelSize: 12; font.family: "Monospace" }
                                 }
                                 Rectangle {
                                     Layout.fillWidth: true; height: 6; radius: 2; color: "#222a36"
@@ -422,9 +422,9 @@ ApplicationWindow {
                             ColumnLayout {
                                 Layout.fillWidth: true; spacing: 2
                                 RowLayout {
-                                    Text { text: "C1"; color: root.textDim; font.pixelSize: 11 }
+                                    Text { text: "C1"; color: root.textDim; font.pixelSize: 12 }
                                     Item { Layout.fillWidth: true }
-                                    Text { text: backend.cstateC1Percent.toFixed(1) + "%"; color: root.textMain; font.pixelSize: 11; font.family: "Monospace" }
+                                    Text { text: backend.cstateC1Percent.toFixed(1) + "%"; color: root.textMain; font.pixelSize: 12; font.family: "Monospace" }
                                 }
                                 Rectangle {
                                     Layout.fillWidth: true; height: 6; radius: 2; color: "#222a36"
@@ -435,9 +435,9 @@ ApplicationWindow {
                             ColumnLayout {
                                 Layout.fillWidth: true; spacing: 2
                                 RowLayout {
-                                    Text { text: "C2"; color: root.textDim; font.pixelSize: 11 }
+                                    Text { text: "C2"; color: root.textDim; font.pixelSize: 12 }
                                     Item { Layout.fillWidth: true }
-                                    Text { text: backend.cstateC2Percent.toFixed(1) + "%"; color: root.textMain; font.pixelSize: 11; font.family: "Monospace" }
+                                    Text { text: backend.cstateC2Percent.toFixed(1) + "%"; color: root.textMain; font.pixelSize: 12; font.family: "Monospace" }
                                 }
                                 Rectangle {
                                     Layout.fillWidth: true; height: 6; radius: 2; color: "#222a36"
@@ -448,9 +448,9 @@ ApplicationWindow {
                             ColumnLayout {
                                 Layout.fillWidth: true; spacing: 2
                                 RowLayout {
-                                    Text { text: "C3 (Deep Sleep)"; color: root.colGreen; font.pixelSize: 11; font.bold: true }
+                                    Text { text: "C3 (Deep Sleep)"; color: root.colGreen; font.pixelSize: 12; font.bold: true }
                                     Item { Layout.fillWidth: true }
-                                    Text { text: backend.cstateC3Percent.toFixed(1) + "%"; color: root.colGreen; font.pixelSize: 11; font.family: "Monospace"; font.bold: true }
+                                    Text { text: backend.cstateC3Percent.toFixed(1) + "%"; color: root.colGreen; font.pixelSize: 12; font.family: "Monospace"; font.bold: true }
                                 }
                                 Rectangle {
                                     Layout.fillWidth: true; height: 6; radius: 2; color: "#222a36"
@@ -463,7 +463,7 @@ ApplicationWindow {
                         Text {
                             text: "PMU IPC: " + backend.pmuIpc.toFixed(2) + " | Waste Ratio: " + backend.pmuEwr.toFixed(1) + "% | " + backend.wakeupsPerSec + " wakeups/s"
                             color: root.textMuted
-                            font.pixelSize: 11
+                            font.pixelSize: 12
                             font.family: "Monospace"
                             Layout.fillWidth: true
                         }
@@ -473,7 +473,7 @@ ApplicationWindow {
                 // CARD 2: Battery & Electrical Telemetry (BAT0) + Discharge Sparkline
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 180
+                    Layout.preferredHeight: 185
                     color: batMa.containsMouse ? "#161b24" : root.bgPanel
                     border.color: batMa.containsMouse ? root.colGreen : root.borderPanel
                     radius: 6
@@ -507,11 +507,11 @@ ApplicationWindow {
                         spacing: 4
 
                         RowLayout {
-                            Text { text: "🔋 " + backend.tr("BATTERY") + " (BAT0)"; color: root.colGreen; font.bold: true; font.pixelSize: 13 }
+                            Text { text: "🔋 " + backend.tr("BATTERY") + " (BAT0)"; color: root.colGreen; font.bold: true; font.pixelSize: 14 }
                             Item { Layout.fillWidth: true }
 
                             Rectangle {
-                                height: 20
+                                height: 22
                                 Layout.preferredWidth: batReportBtnText.implicitWidth + 14
                                 radius: 3
                                 color: batReportMa.containsMouse ? "#059669" : "#0d2b1d"
@@ -523,7 +523,7 @@ ApplicationWindow {
                                     text: "⚡ 전수 리포트"
                                     color: "#ffffff"
                                     font.bold: true
-                                    font.pixelSize: 10
+                                    font.pixelSize: 11
                                 }
                                 MouseArea {
                                     id: batReportMa
@@ -540,7 +540,7 @@ ApplicationWindow {
                                 }
                             }
 
-                            Text { text: backend.batteryPercent + "%"; color: root.colGreen; font.bold: true; font.pixelSize: 20; font.family: "Monospace" }
+                            Text { text: backend.batteryPercent + "%"; color: root.colGreen; font.bold: true; font.pixelSize: 22; font.family: "Monospace" }
                         }
 
                         // Big Battery Level Bar
@@ -576,7 +576,7 @@ ApplicationWindow {
                         Canvas {
                             id: batSparkCanvas
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 30
+                            Layout.preferredHeight: 32
                             antialiasing: true
                             renderStrategy: Canvas.Threaded
                             renderTarget: Canvas.FramebufferObject
@@ -619,7 +619,7 @@ ApplicationWindow {
                         Text {
                             text: backend.batteryState === 2 ? "AC Hardware Pass-through Active (Zero wear)" : "Adaptive Power Optimization Active (" + backend.batteryModel + ")"
                             color: root.textMuted
-                            font.pixelSize: 11
+                            font.pixelSize: 12
                             elide: Text.ElideRight
                             Layout.fillWidth: true
                         }
@@ -643,18 +643,18 @@ ApplicationWindow {
                         // GPU Header
                         RowLayout {
                             Layout.fillWidth: true
-                            Text { text: "🎮 " + backend.tr("GPU") + ":"; color: root.textMain; font.pixelSize: 13; font.bold: true }
+                            Text { text: "🎮 " + backend.tr("GPU") + ":"; color: root.textMain; font.pixelSize: 14; font.bold: true }
                             Item { Layout.fillWidth: true }
-                            Text { text: backend.gpuDrainWatts.toFixed(2) + " W"; color: root.colGreen; font.pixelSize: 16; font.bold: true; font.family: "Monospace" }
-                            Text { text: "(Load: " + backend.gpuLoadPercent + "%)"; color: root.colGreen; font.bold: true; font.pixelSize: 12 }
+                            Text { text: backend.gpuDrainWatts.toFixed(2) + " W"; color: root.colGreen; font.pixelSize: 17; font.bold: true; font.family: "Monospace" }
+                            Text { text: "(Load: " + backend.gpuLoadPercent + "%)"; color: root.colGreen; font.bold: true; font.pixelSize: 13 }
                         }
-                        Text { text: "AMD Radeon 780M / Dynamic Power-Gating"; color: root.textMuted; font.pixelSize: 11 }
+                        Text { text: "AMD Radeon 780M / Dynamic Power-Gating"; color: root.textMuted; font.pixelSize: 12 }
 
                         // [GRAPH] Real-Time GPU Load Sparkline
                         Canvas {
                             id: gpuSparkCanvas
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 30
+                            Layout.preferredHeight: 32
                             antialiasing: true
                             renderStrategy: Canvas.Threaded
                             renderTarget: Canvas.FramebufferObject
@@ -703,27 +703,27 @@ ApplicationWindow {
                         // Display
                         RowLayout {
                             Layout.fillWidth: true
-                            Text { text: "🖥️ " + backend.tr("DISPLAY") + ":"; color: root.textMain; font.pixelSize: 13; font.bold: true }
+                            Text { text: "🖥️ " + backend.tr("DISPLAY") + ":"; color: root.textMain; font.pixelSize: 14; font.bold: true }
                             Item { Layout.fillWidth: true }
-                            Text { text: backend.displayDrainWatts.toFixed(2) + " W"; color: root.colOrange; font.pixelSize: 14; font.bold: true; font.family: "Monospace" }
-                            Text { text: "(" + backend.displayBrightnessPct + "% bright)"; color: root.textDim; font.pixelSize: 12 }
+                            Text { text: backend.displayDrainWatts.toFixed(2) + " W"; color: root.colOrange; font.pixelSize: 15; font.bold: true; font.family: "Monospace" }
+                            Text { text: "(" + backend.displayBrightnessPct + "% bright)"; color: root.textDim; font.pixelSize: 13 }
                         }
-                        Text { text: "amdgpu_bl1 Adaptive Dynamic Dimming & VRR Ready"; color: root.textMuted; font.pixelSize: 11 }
+                        Text { text: "amdgpu_bl1 Adaptive Dynamic Dimming & VRR Ready"; color: root.textMuted; font.pixelSize: 12 }
 
                         Rectangle { Layout.fillWidth: true; height: 1; color: "#19202a" }
 
                         // Storage
                         RowLayout {
                             Layout.fillWidth: true
-                            Text { text: "💾 " + backend.tr("STORAGE") + ":"; color: root.textMain; font.pixelSize: 13; font.bold: true }
+                            Text { text: "💾 " + backend.tr("STORAGE") + ":"; color: root.textMain; font.pixelSize: 14; font.bold: true }
                             Item { Layout.fillWidth: true }
-                            Text { text: backend.nvmeDrainWatts.toFixed(2) + " W"; color: root.colCyan; font.pixelSize: 14; font.bold: true; font.family: "Monospace" }
+                            Text { text: backend.nvmeDrainWatts.toFixed(2) + " W"; color: root.colCyan; font.pixelSize: 15; font.bold: true; font.family: "Monospace" }
                         }
                         RowLayout {
                             Layout.fillWidth: true
-                            Text { text: "APST L1.2 Ultra-Low Sleep (" + backend.aspmPolicy + ")"; color: root.colGreen; font.pixelSize: 11 }
+                            Text { text: "APST L1.2 Ultra-Low Sleep (" + backend.aspmPolicy + ")"; color: root.colGreen; font.pixelSize: 12 }
                             Item { Layout.fillWidth: true }
-                            Text { text: "R: " + backend.diskReadMbPerSec.toFixed(1) + "M | W: " + backend.diskWriteMbPerSec.toFixed(1) + "MB/s"; color: root.textDim; font.pixelSize: 11; font.family: "Monospace" }
+                            Text { text: "R: " + backend.diskReadMbPerSec.toFixed(1) + "M | W: " + backend.diskWriteMbPerSec.toFixed(1) + "MB/s"; color: root.textDim; font.pixelSize: 12; font.family: "Monospace" }
                         }
                     }
                 }
@@ -737,10 +737,10 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 spacing: 8
 
-                // TOP GRAPH: System Total Power Consumption Timeline (85px)
+                // TOP GRAPH: System Total Power Consumption Timeline (90px)
                 Rectangle {
                     Layout.fillWidth: true
-                    height: 85
+                    height: 90
                     color: root.bgPanel
                     border.color: root.borderPanel
                     radius: 6
@@ -757,14 +757,14 @@ ApplicationWindow {
                                 text: "📈 " + backend.tr("TIMELINE") + " (35s)"
                                 color: root.colCyan
                                 font.bold: true
-                                font.pixelSize: 12
+                                font.pixelSize: 13
                             }
                             Item { Layout.fillWidth: true }
                             Text {
                                 text: "Live: " + backend.systemDrainWatts.toFixed(2) + " W | Peak: " + backend.peakSystemWatts.toFixed(2) + " W"
                                 color: root.colOrange
                                 font.bold: true
-                                font.pixelSize: 12
+                                font.pixelSize: 13
                                 font.family: "Monospace"
                             }
                         }
@@ -853,13 +853,13 @@ ApplicationWindow {
                                 text: "⚡ TOP PROCESS ATTRIBUTION MATRIX (btop Power Profiler)"
                                 color: root.colCyan
                                 font.bold: true
-                                font.pixelSize: 13
+                                font.pixelSize: 14
                             }
                             Item { Layout.fillWidth: true }
                             Text {
                                 text: "💡 마우스를 올리면 전력/스케줄러/메모리 실시간 심층 카드 표시"
                                 color: root.colOrange
-                                font.pixelSize: 11
+                                font.pixelSize: 12
                                 font.bold: true
                             }
                         }
@@ -867,7 +867,7 @@ ApplicationWindow {
                         // Table Column Headers
                         Rectangle {
                             Layout.fillWidth: true
-                            height: 28
+                            height: 30
                             color: root.bgPanelHeader
                             radius: 4
 
@@ -877,13 +877,14 @@ ApplicationWindow {
                                 anchors.rightMargin: 8
                                 spacing: 6
 
-                                Text { text: "PID"; color: root.textDim; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 50; clip: true }
-                                Text { text: "PROGRAM"; color: root.textDim; font.pixelSize: 12; font.bold: true; Layout.preferredWidth: 130; clip: true }
+                                Text { text: "PID"; color: root.textDim; font.pixelSize: 12; font.bold: true; Layout.preferredWidth: 50; clip: true }
+                                Text { text: "PROGRAM"; color: root.textDim; font.pixelSize: 12; font.bold: true; Layout.preferredWidth: 135; clip: true }
                                 Text { text: "TOTAL"; color: root.textDim; font.pixelSize: 12; font.bold: true; Layout.preferredWidth: 70; clip: true }
-                                Text { text: "RATIO"; color: root.textDim; font.pixelSize: 12; font.bold: true; Layout.preferredWidth: 78; clip: true }
-                                Text { text: "CPU/GPU/DRAM"; color: root.textDim; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 115; clip: true }
-                                Text { text: "PSS"; color: root.textDim; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 52; clip: true }
-                                Text { text: "TIER"; color: root.textDim; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 55; clip: true }
+                                Text { text: "RATIO"; color: root.textDim; font.pixelSize: 12; font.bold: true; Layout.preferredWidth: 80; clip: true }
+                                Text { text: "CPU/GPU/DRAM"; color: root.textDim; font.pixelSize: 12; font.bold: true; Layout.preferredWidth: 120; clip: true }
+                                Text { text: "PSS"; color: root.textDim; font.pixelSize: 12; font.bold: true; Layout.preferredWidth: 55; clip: true }
+                                Text { text: "TIER"; color: root.textDim; font.pixelSize: 12; font.bold: true; Layout.preferredWidth: 55; clip: true }
+                                Text { text: "C-STATE"; color: root.textDim; font.pixelSize: 12; font.bold: true; Layout.preferredWidth: 54; clip: true }
                                 Text { text: "PRIMARY HARDWARE MECHANISM"; color: root.textDim; font.pixelSize: 12; font.bold: true; Layout.fillWidth: true; clip: true }
                             }
                         }
@@ -902,7 +903,7 @@ ApplicationWindow {
                             delegate: Rectangle {
                                 id: rowDelegate
                                 width: procListView.width
-                                height: 30
+                                height: 33
                                 radius: 4
                                 color: rowMa.containsMouse ? "#222f42" : (index % 2 === 0 ? root.bgRowAlt : root.bgPanel)
                                 border.color: rowMa.containsMouse ? root.colCyan : "transparent"
@@ -941,7 +942,7 @@ ApplicationWindow {
                                     Text {
                                         text: modelData["pid"] !== undefined ? modelData["pid"] : ""
                                         color: root.textDim
-                                        font.pixelSize: 11
+                                        font.pixelSize: 12
                                         font.family: "Monospace"
                                         Layout.preferredWidth: 50
                                         elide: Text.ElideRight
@@ -953,8 +954,8 @@ ApplicationWindow {
                                         text: modelData["comm"] !== undefined ? modelData["comm"] : ""
                                         color: root.textMain
                                         font.bold: true
-                                        font.pixelSize: 12
-                                        Layout.preferredWidth: 130
+                                        font.pixelSize: 13
+                                        Layout.preferredWidth: 135
                                         elide: Text.ElideRight
                                         clip: true
                                     }
@@ -965,7 +966,7 @@ ApplicationWindow {
                                         text: w >= 1.0 ? (w.toFixed(2) + "W") : ((w * 1000).toFixed(0) + "m")
                                         color: w > 1.5 ? root.colRed : (w > 0.5 ? root.colOrange : root.colCyan)
                                         font.bold: true
-                                        font.pixelSize: 12
+                                        font.pixelSize: 13
                                         font.family: "Monospace"
                                         Layout.preferredWidth: 70
                                         elide: Text.ElideRight
@@ -974,7 +975,7 @@ ApplicationWindow {
 
                                     // Ratio Mini Bar
                                     RowLayout {
-                                        Layout.preferredWidth: 78
+                                        Layout.preferredWidth: 80
                                         spacing: 4
                                         Rectangle {
                                             Layout.fillWidth: true
@@ -990,7 +991,7 @@ ApplicationWindow {
                                             readonly property real r: modelData["ratioPercent"] !== undefined ? modelData["ratioPercent"] : 0.0
                                             text: r.toFixed(0) + "%"
                                             color: root.textDim
-                                            font.pixelSize: 11
+                                            font.pixelSize: 12
                                             font.family: "Monospace"
                                         }
                                     }
@@ -1002,9 +1003,9 @@ ApplicationWindow {
                                         readonly property real d: modelData["dramWatts"] !== undefined ? modelData["dramWatts"] : 0.0
                                         text: (c * 1000).toFixed(0) + "/" + (g * 1000).toFixed(0) + "/" + (d * 1000).toFixed(0)
                                         color: root.textDim
-                                        font.pixelSize: 11
+                                        font.pixelSize: 12
                                         font.family: "Monospace"
-                                        Layout.preferredWidth: 115
+                                        Layout.preferredWidth: 120
                                         elide: Text.ElideRight
                                         clip: true
                                     }
@@ -1013,9 +1014,9 @@ ApplicationWindow {
                                     Text {
                                         text: (modelData["pssMb"] !== undefined ? modelData["pssMb"] : 0) + "M"
                                         color: root.textMain
-                                        font.pixelSize: 11
+                                        font.pixelSize: 12
                                         font.family: "Monospace"
-                                        Layout.preferredWidth: 52
+                                        Layout.preferredWidth: 55
                                         elide: Text.ElideRight
                                         clip: true
                                     }
@@ -1023,7 +1024,7 @@ ApplicationWindow {
                                     // Safety Tier Badge
                                     Rectangle {
                                         Layout.preferredWidth: 55
-                                        height: 20
+                                        height: 22
                                         radius: 3
                                         readonly property int t: modelData["tier"] !== undefined ? modelData["tier"] : 0
                                         color: t === 0 ? "#142921" : (t === 5 ? "#361313" : "#1b222d")
@@ -1032,8 +1033,27 @@ ApplicationWindow {
                                             anchors.centerIn: parent
                                             text: "Tier " + parent.t
                                             color: parent.t === 0 ? root.colGreen : (parent.t === 5 ? root.colRed : root.textDim)
-                                            font.pixelSize: 10
+                                            font.pixelSize: 11
                                             font.bold: true
+                                        }
+                                    }
+
+                                    // C-State Affinity Badge (REF-REQ-090, REF-ARCH-067)
+                                    Rectangle {
+                                        Layout.preferredWidth: 54
+                                        height: 22
+                                        radius: 3
+                                        readonly property string cs: modelData["cstate"] !== undefined ? modelData["cstate"] : "C3"
+                                        color: cs === "C0" ? "#361c0a" : (cs === "C1" ? "#132738" : (cs === "C2" ? "#1f1d38" : "#0d2b1d"))
+                                        border.color: cs === "C0" ? root.colOrange : (cs === "C1" ? root.colCyan : (cs === "C2" ? root.colPurple : root.colGreen))
+                                        border.width: 1
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: parent.cs
+                                            color: parent.cs === "C0" ? root.colOrange : (parent.cs === "C1" ? root.colCyan : (parent.cs === "C2" ? "#c084fc" : root.colGreen))
+                                            font.pixelSize: 11
+                                            font.bold: true
+                                            font.family: "Monospace"
                                         }
                                     }
 
@@ -1059,7 +1079,7 @@ ApplicationWindow {
         // =============================================================
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 155
+            Layout.preferredHeight: 190
             spacing: 8
 
             // CARD A: Hardware Devices Power Share Donut (Aligned with Left Column 460px)
@@ -1085,21 +1105,21 @@ ApplicationWindow {
                             text: "💻 " + backend.tr("DASH_POWER_SHARE_HW")
                             color: root.colCyan
                             font.bold: true
-                            font.pixelSize: 13
+                            font.pixelSize: 14
                         }
                         Item { Layout.fillWidth: true }
                         Text {
                             text: backend.totalDeviceWatts.toFixed(2) + " W"
                             color: root.colCyan
                             font.bold: true
-                            font.pixelSize: 14
+                            font.pixelSize: 16
                             font.family: "Monospace"
                         }
                     }
 
                     Rectangle { Layout.fillWidth: true; height: 1; color: "#19202a" }
 
-                    // Donut + Legend
+                    // Donut + 2-Column Legend Grid (All 9 hardware items fully visible without clipping)
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -1107,7 +1127,7 @@ ApplicationWindow {
 
                         // Donut Canvas
                         Item {
-                            width: 105; height: 105
+                            width: 110; height: 110
                             Canvas {
                                 id: devDonutCanvas
                                 anchors.fill: parent
@@ -1169,38 +1189,40 @@ ApplicationWindow {
                                     text: backend.totalDeviceWatts.toFixed(1) + "W"
                                     color: root.textMain
                                     font.bold: true
-                                    font.pixelSize: 14
+                                    font.pixelSize: 15
                                     font.family: "Monospace"
                                     Layout.alignment: Qt.AlignCenter
                                 }
                                 Text {
                                     text: "DEVICE"
                                     color: root.textMuted
-                                    font.pixelSize: 10
+                                    font.pixelSize: 11
                                     font.bold: true
                                     Layout.alignment: Qt.AlignCenter
                                 }
                             }
                         }
 
-                        // Legend Column
-                        ColumnLayout {
+                        // Legend 2-Column Grid (Eliminates vertical clipping, fits all 9 domains)
+                        GridLayout {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             Layout.alignment: Qt.AlignVCenter
-                            spacing: 2
+                            columns: 2
+                            columnSpacing: 10
+                            rowSpacing: 3
 
                             Repeater {
                                 model: backend.devicePowerShares
                                 delegate: RowLayout {
                                     Layout.fillWidth: true
-                                    spacing: 5
+                                    spacing: 4
 
-                                    Rectangle { width: 7; height: 7; radius: 2; color: modelData.color }
+                                    Rectangle { width: 8; height: 8; radius: 2; color: modelData.color }
                                     Text {
                                         text: modelData.name
                                         color: root.textMain
-                                        font.pixelSize: 11
+                                        font.pixelSize: 12
                                         font.bold: true
                                         Layout.fillWidth: true
                                         elide: Text.ElideRight
@@ -1208,15 +1230,15 @@ ApplicationWindow {
                                     Text {
                                         text: modelData.watts.toFixed(1) + "W"
                                         color: modelData.color
-                                        font.pixelSize: 11
+                                        font.pixelSize: 12
                                         font.family: "Monospace"
                                     }
                                     Text {
                                         text: modelData.pct.toFixed(0) + "%"
                                         color: root.textDim
-                                        font.pixelSize: 11
+                                        font.pixelSize: 12
                                         font.family: "Monospace"
-                                        Layout.preferredWidth: 30
+                                        Layout.preferredWidth: 28
                                         horizontalAlignment: Text.AlignRight
                                     }
                                 }
@@ -1247,21 +1269,21 @@ ApplicationWindow {
                             text: "🚀 " + backend.tr("DASH_POWER_SHARE_PROC")
                             color: root.colOrange
                             font.bold: true
-                            font.pixelSize: 13
+                            font.pixelSize: 14
                         }
                         Item { Layout.fillWidth: true }
                         Text {
                             text: backend.totalProcessWatts.toFixed(2) + " W"
                             color: root.colOrange
                             font.bold: true
-                            font.pixelSize: 14
+                            font.pixelSize: 16
                             font.family: "Monospace"
                         }
                     }
 
                     Rectangle { Layout.fillWidth: true; height: 1; color: "#19202a" }
 
-                    // Donut + 2-Column Legend Grid
+                    // Donut + 2-Column Legend Grid (Top 11 processes + Other = 12 items)
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -1269,7 +1291,7 @@ ApplicationWindow {
 
                         // Donut Canvas
                         Item {
-                            width: 105; height: 105
+                            width: 110; height: 110
                             Canvas {
                                 id: procDonutCanvas
                                 anchors.fill: parent
@@ -1331,28 +1353,28 @@ ApplicationWindow {
                                     text: backend.totalProcessWatts.toFixed(1) + "W"
                                     color: root.textMain
                                     font.bold: true
-                                    font.pixelSize: 14
+                                    font.pixelSize: 15
                                     font.family: "Monospace"
                                     Layout.alignment: Qt.AlignCenter
                                 }
                                 Text {
                                     text: "PROCESS"
                                     color: root.textMuted
-                                    font.pixelSize: 10
+                                    font.pixelSize: 11
                                     font.bold: true
                                     Layout.alignment: Qt.AlignCenter
                                 }
                             }
                         }
 
-                        // Legend 2-Column Grid (Wide horizontal space utilization)
+                        // Legend 2-Column Grid (Wide horizontal space utilization: 2 columns of 6 items)
                         GridLayout {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             Layout.alignment: Qt.AlignVCenter
                             columns: 2
-                            columnSpacing: 14
-                            rowSpacing: 2
+                            columnSpacing: 16
+                            rowSpacing: 3
 
                             Repeater {
                                 model: backend.processPowerShares
@@ -1360,11 +1382,11 @@ ApplicationWindow {
                                     Layout.fillWidth: true
                                     spacing: 5
 
-                                    Rectangle { width: 7; height: 7; radius: 2; color: modelData.color }
+                                    Rectangle { width: 8; height: 8; radius: 2; color: modelData.color }
                                     Text {
                                         text: modelData.name + (modelData.pid > 0 ? (" (" + modelData.pid + ")") : "")
                                         color: root.textMain
-                                        font.pixelSize: 11
+                                        font.pixelSize: 12
                                         font.bold: true
                                         Layout.fillWidth: true
                                         elide: Text.ElideRight
@@ -1372,15 +1394,15 @@ ApplicationWindow {
                                     Text {
                                         text: modelData.watts.toFixed(1) + "W"
                                         color: modelData.color
-                                        font.pixelSize: 11
+                                        font.pixelSize: 12
                                         font.family: "Monospace"
                                     }
                                     Text {
                                         text: modelData.pct.toFixed(0) + "%"
                                         color: root.textDim
-                                        font.pixelSize: 11
+                                        font.pixelSize: 12
                                         font.family: "Monospace"
-                                        Layout.preferredWidth: 30
+                                        Layout.preferredWidth: 28
                                         horizontalAlignment: Text.AlignRight
                                     }
                                 }
@@ -1392,11 +1414,11 @@ ApplicationWindow {
         }
 
         // =============================================================
-        // 4. BOTTOM CONTROL DOCK (42px)
+        // 4. BOTTOM CONTROL DOCK (44px)
         // =============================================================
         Rectangle {
             Layout.fillWidth: true
-            height: 42
+            height: 44
             color: root.bgPanel
             border.color: root.borderPanel
             radius: 6
@@ -1407,9 +1429,8 @@ ApplicationWindow {
                 anchors.rightMargin: 10
                 spacing: 8
 
-                Text { text: "PROFILES:"; color: root.textDim; font.bold: true; font.pixelSize: 11 }
+                Text { text: "PROFILES:"; color: root.textDim; font.bold: true; font.pixelSize: 12 }
 
-                // Performance Mode (REF-REQ-067: Locked out when battery <= 20%)
                 // Performance Mode (REF-REQ-067: Locked out when battery <= 20%)
                 TactileButton {
                     id: btnPerf
@@ -1474,7 +1495,7 @@ ApplicationWindow {
                 // Close Button
                 TactileButton {
                     implicitWidth: 32
-                    implicitHeight: 30
+                    implicitHeight: 32
                     text: "✕"
                     accentColor: root.colRed
                     baseColor: "#24181b"
@@ -1555,6 +1576,23 @@ ApplicationWindow {
                     }
                 }
 
+                // C-State Affinity Badge in Hover Card
+                Rectangle {
+                    width: 32; height: 28; radius: 4
+                    readonly property string cs: root.hoverData && root.hoverData["cstate"] ? root.hoverData["cstate"] : "C3"
+                    color: cs === "C0" ? "#361c0a" : (cs === "C1" ? "#132738" : (cs === "C2" ? "#1f1d38" : "#0d2b1d"))
+                    border.color: cs === "C0" ? root.colOrange : (cs === "C1" ? root.colCyan : (cs === "C2" ? root.colPurple : root.colGreen))
+                    border.width: 1.5
+                    Text {
+                        anchors.centerIn: parent
+                        text: parent.cs
+                        color: parent.cs === "C0" ? root.colOrange : (parent.cs === "C1" ? root.colCyan : (parent.cs === "C2" ? "#c084fc" : root.colGreen))
+                        font.bold: true
+                        font.pixelSize: 12
+                        font.family: "Monospace"
+                    }
+                }
+
                 ColumnLayout {
                     spacing: 1
                     Text {
@@ -1565,7 +1603,9 @@ ApplicationWindow {
                         font.family: "Monospace"
                     }
                     Text {
-                        text: root.hoverData ? ("안전 등급: Tier " + root.hoverData["tier"] + " | WDI 피로 지수: " + (root.hoverData["wdiScore"] ? root.hoverData["wdiScore"].toFixed(1) : "0.0")) : ""
+                        readonly property string cs: root.hoverData && root.hoverData["cstate"] ? root.hoverData["cstate"] : "C3"
+                        readonly property string csDesc: cs === "C0" ? "C0(코어 활성 실행)" : (cs === "C1" ? "C1(얕은 유휴/웨이크업)" : (cs === "C2" ? "C2(중간 대기 유휴)" : "C3(심층 절전 유지)"))
+                        text: root.hoverData ? ("안전: Tier " + root.hoverData["tier"] + " | 상태: " + csDesc + " | WDI: " + (root.hoverData["wdiScore"] ? root.hoverData["wdiScore"].toFixed(1) : "0.0")) : ""
                         color: root.textDim
                         font.pixelSize: 11
                     }

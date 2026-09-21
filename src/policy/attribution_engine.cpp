@@ -625,6 +625,17 @@ AnalysisReportData AttributionEngine::compute_attribution(
             pap.hardware_mechanism = "Background Poll (" + std::to_string(pap.wakeups_per_sec) + " w/s)";
         }
 
+        // Determine Process-Level CPU C-State Affinity & Residency (REF-REQ-090, REF-ARCH-067)
+        if (pap.cpu_watts >= 0.25 || d.delta_cpu_ticks > 15) {
+            pap.cstate_affinity = "C0"; // Active Core Execution
+        } else if (pap.wakeups_per_sec >= 30 || pap.wakeup_tax_watts >= 0.15 || pap.timerslack_ns < 50000) {
+            pap.cstate_affinity = "C1"; // Light Idle / Wakeup Storm
+        } else if (pap.wakeups_per_sec >= 5 || pap.io_watts >= 0.05) {
+            pap.cstate_affinity = "C2"; // Moderate Idle / I/O Wait
+        } else {
+            pap.cstate_affinity = "C3"; // Deep Sleep Retention
+        }
+
         // Process Safety Classification & Recommended Action (REF-REQ-019, REF-RES-008, REF-REQ-049 & REF-REQ-051)
         auto classification = ProcessClassifierDB::classify(pap.comm.c_str());
         pap.safety_tier = static_cast<uint8_t>(classification.tier);

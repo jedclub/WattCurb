@@ -645,7 +645,7 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
         ss << "  \"wakeups_per_sec\": " << cached_report_.total_system_wakeups_per_sec << ",\n";
         ss << "  \"processes\": [\n";
 
-        size_t n = std::min(size_t{12}, cached_report_.top_processes.size());
+        size_t n = std::min(size_t{25}, cached_report_.top_processes.size());
         for (size_t i = 0; i < n; ++i) {
             const auto& p = cached_report_.top_processes[i];
             ss << "    {\n";
@@ -664,6 +664,7 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
             ss << "      \"wdi_score\": " << p.wdi_score << ",\n";
             ss << "      \"pss_mb\": " << (p.pss_kib / 1024) << ",\n";
             ss << "      \"tier\": " << static_cast<int>(p.safety_tier) << ",\n";
+            ss << "      \"cstate\": \"" << (p.cstate_affinity.empty() ? "C3" : p.cstate_affinity.c_str()) << "\",\n";
             ss << "      \"cpu_core\": " << p.cpu_core << ",\n";
             ss << "      \"threads\": " << p.num_threads << ",\n";
             ss << "      \"cross_ccx\": " << (p.cross_ccx_migration ? 1 : 0) << ",\n";

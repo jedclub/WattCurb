@@ -251,8 +251,26 @@ bool DashboardBackend::ingestTelemetryJson(const std::string& resp) noexcept {
             map[QStringLiteral("fanWatts")] = p.value("fan_w").toDouble();
             map[QStringLiteral("wifiWatts")] = p.value("wifi_w").toDouble();
             map[QStringLiteral("wdiScore")] = p.value("wdi_score").toDouble();
-            map[QStringLiteral("pssMb")] = p.value("pss_mb").toInt();
             map[QStringLiteral("tier")] = p.value("tier").toInt();
+
+            // Process-Level CPU C-State Affinity (REF-REQ-090, REF-ARCH-067)
+            QString cstate = p.value("cstate").toString();
+            if (cstate.isEmpty()) {
+                double cpu_w = map[QStringLiteral("cpuWatts")].toDouble();
+                qint64 wakeups = p.value("wakeups_sec").toInteger(0);
+                double wake_tax = map[QStringLiteral("wakeTaxWatts")].toDouble();
+                if (cpu_w >= 0.25) {
+                    cstate = QStringLiteral("C0");
+                } else if (wakeups >= 30 || wake_tax >= 0.15) {
+                    cstate = QStringLiteral("C1");
+                } else if (wakeups >= 5) {
+                    cstate = QStringLiteral("C2");
+                } else {
+                    cstate = QStringLiteral("C3");
+                }
+            }
+            map[QStringLiteral("cstate")] = cstate;
+
             map[QStringLiteral("cpuCore")] = p.value("cpu_core").toInt();
             map[QStringLiteral("threads")] = p.value("threads").toInt(1);
             map[QStringLiteral("crossCcx")] = p.value("cross_ccx").toInt(0);
@@ -303,6 +321,8 @@ bool DashboardBackend::ingestTelemetryJson(const std::string& resp) noexcept {
         }
     }
 
+    update_power_shares();
+
     return true;
 }
 
@@ -347,6 +367,7 @@ void DashboardBackend::updateFallbackTelemetry() noexcept {
                 m["ioWakeWatts"] = w * 0.1;
                 m["pssMb"] = 120 + i * 80;
                 m["tier"] = latest_state_.culprits[i].tier;
+                m["cstate"] = (w >= 0.25) ? QStringLiteral("C0") : QStringLiteral("C1");
                 m["domain"] = QStringLiteral("CPU Compute");
                 m["mechanism"] = QStringLiteral("Background Active Execution");
                 m["ratioPercent"] = (total_w > 0.0) ? (w / total_w * 100.0) : 5.0;
@@ -571,15 +592,16 @@ void DashboardBackend::update_power_shares() {
                 wifi_w = rem - vrm_w - dram_w;
             }
 
-            add_dev(QStringLiteral("DRAM Memory"), dram_w, QStringLiteral("#38bdf8"));     // Light blue
-            add_dev(QStringLiteral("VRM Power Loss"), vrm_w, QStringLiteral("#f43f5e"));   // Rose red
-            add_dev(QStringLiteral("Wireless (Wi-Fi)"), wifi_w, QStringLiteral("#818cf8")); // Indigo
-            add_dev(QStringLiteral("Motherboard & IO"), mb_w, QStringLiteral("#94a3b8"));  // Slate
+            bool is_ko = (core::l10n::get_active_language() == core::l10n::Language::KO);
+            add_dev(is_ko ? QStringLiteral("DRAM 메모리") : QStringLiteral("DRAM Memory"), dram_w, QStringLiteral("#38bdf8"));     // Light blue
+            add_dev(is_ko ? QStringLiteral("VRM 전력 손실") : QStringLiteral("VRM Power Loss"), vrm_w, QStringLiteral("#f43f5e"));   // Rose red
+            add_dev(is_ko ? QStringLiteral("Wi-Fi 무선 통신") : QStringLiteral("Wireless (Wi-Fi)"), wifi_w, QStringLiteral("#818cf8")); // Indigo
+            add_dev(is_ko ? QStringLiteral("메인보드 & I/O") : QStringLiteral("Motherboard & IO"), mb_w, QStringLiteral("#94a3b8"));  // Slate
         }
         device_power_shares_ = dev_list;
     }
 
-    // 2. Compute Process Power Shares - ZERO-COPY from cached_proc_summaries_ (REF-REQ-074, REF-ARCH-051)
+    // 2. Compute Process Power Shares - ZERO-COPY from cached_proc_summaries_ (REF-REQ-074, REF-ARCH-051, REF-REQ-089)
     {
         WATTCURB_PROFILE_SCOPE("dashboard.power_shares.process");
         QVariantList proc_list;
@@ -597,19 +619,24 @@ void DashboardBackend::update_power_shares() {
         double total_proc_w = std::max(proc_sum, 0.1);
         total_process_w_ = total_proc_w;
 
+        // Expanded 11-Process Vibrant Cyber Palette (REF-REQ-089)
         const QString proc_colors[] = {
             QStringLiteral("#ef4444"), // Red (Top 1)
-            QStringLiteral("#f59e0b"), // Amber (Top 2)
-            QStringLiteral("#00d2ff"), // Cyan (Top 3)
-            QStringLiteral("#a855f7"), // Purple (Top 4)
+            QStringLiteral("#f97316"), // Orange (Top 2)
+            QStringLiteral("#f59e0b"), // Amber (Top 3)
+            QStringLiteral("#eab308"), // Yellow (Top 4)
             QStringLiteral("#10b981"), // Emerald (Top 5)
-            QStringLiteral("#ec4899"), // Pink (Top 6)
-            QStringLiteral("#3b82f6")  // Blue (Top 7)
+            QStringLiteral("#14b8a6"), // Teal (Top 6)
+            QStringLiteral("#00d2ff"), // Cyan (Top 7)
+            QStringLiteral("#3b82f6"), // Blue (Top 8)
+            QStringLiteral("#6366f1"), // Indigo (Top 9)
+            QStringLiteral("#a855f7"), // Purple (Top 10)
+            QStringLiteral("#ec4899")  // Pink (Top 11)
         };
 
         double top_sum = 0.0;
         if (!cached_proc_summaries_.empty()) {
-            size_t count = std::min<size_t>(7, cached_proc_summaries_.size());
+            size_t count = std::min<size_t>(11, cached_proc_summaries_.size());
             for (size_t i = 0; i < count; ++i) {
                 const auto& p = cached_proc_summaries_[i];
                 double w = p.total_watts;
@@ -641,12 +668,13 @@ void DashboardBackend::update_power_shares() {
 
         double other_w = std::max(0.0, proc_sum - top_sum);
         if (other_w > 0.01) {
+            bool is_ko = (core::l10n::get_active_language() == core::l10n::Language::KO);
             QVariantMap m;
-            m[QStringLiteral("name")] = QStringLiteral("기타 150+ 프로세스 (Other)");
+            m[QStringLiteral("name")] = is_ko ? QStringLiteral("기타 프로세스 (Other)") : QStringLiteral("Other Processes");
             m[QStringLiteral("pid")] = 0;
             m[QStringLiteral("watts")] = other_w;
             m[QStringLiteral("pct")] = std::min(100.0, (other_w / total_proc_w) * 100.0);
-            m[QStringLiteral("color")] = QStringLiteral("#64748b"); // Slate gray
+            m[QStringLiteral("color")] = QStringLiteral("#6b7280"); // Neutral gray
             proc_list.append(m);
         }
         process_power_shares_ = proc_list;

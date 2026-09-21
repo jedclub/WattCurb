@@ -413,6 +413,7 @@ struct ProcessAttributedPower {
     double wifi_attributed_watts{0.0};
     double dram_attributed_watts{0.0};
 
+    core::FixedString<4> cstate_affinity{"C3"}; // e.g. "C0", "C1", "C2", "C3" (REF-REQ-090, REF-ARCH-067)
     core::FixedString<32> primary_hw_domain;  // e.g. "GPU Silicon", "CPU C-State Wakeup", "CPU Compute", "NVMe Storage"
     core::FixedString<96> hardware_mechanism; // e.g. "AMDGPU GFX Engine (455MB VRAM, 98% GPU)"
     uint8_t safety_tier{5};                  // ProcessSafetyTier (Tier 0-5)
