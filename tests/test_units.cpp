@@ -2528,6 +2528,15 @@ void test_circular_power_share_visualization() {
 void test_ultra_endurance_extensions() {
     using namespace wattcurb::policy;
 
+    // REF-REQ-092 (Host Isolation): this test used to call apply_power_profile()
+    // against the live machine. Running the suite therefore dropped the
+    // developer's panel to 48 Hz, suspended KWin effects and stopped Baloo, and
+    // the latency gate below was measuring fork+exec of kscreen-doctor, qdbus6
+    // and balooctl6 rather than the engine. It exceeded 500 ms whenever those
+    // helpers were slow, which made the gate a flake rather than a check.
+    const bool prev_sandbox_ue = MitigationEngine::actuation_sandboxed();
+    MitigationEngine::set_actuation_sandbox(true);
+
     // 1. Capture baseline
     MitigationEngine::capture_hardware_baseline();
     const auto& b = MitigationEngine::hardware_baseline();
@@ -2547,6 +2556,8 @@ void test_ultra_endurance_extensions() {
     double elapsed_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
     std::cout << " [ORACLE GATE] UltraEndurance Profile Actuation & 100% Roundtrip: " << elapsed_ms << " ms\n";
     assert(elapsed_ms < 500.0 && "Profile actuation roundtrip latency must be sub-500ms");
+
+    MitigationEngine::set_actuation_sandbox(prev_sandbox_ue);
 
     std::cout << " [PASS] test_ultra_endurance_extensions (REF-TEST-028: SMT, Bluetooth, Backlight Cap, DRRS, KWin Effects & Baloo verified)\n";
 }
@@ -4190,6 +4201,66 @@ void test_system_liveness_invariant() {
     std::cout << " [PASS] test_system_liveness_invariant (REF-TEST-060: runtime PM allowlist, compositor/input shielding, frequency floor, no cache purge verified)\n";
 }
 
+// Implements REF-TEST-061 & REF-REQ-107, REF-REQ-108:
+// Performance throughput guarantee and UltraEndurance liveness guarantee.
+void test_profile_throughput_and_liveness_guarantees() {
+    using namespace wattcurb;
+    using namespace wattcurb::policy;
+
+    std::cout << "\n--- [REF-TEST-061] Performance Throughput & UltraEndurance Liveness (REF-REQ-107, REF-REQ-108) ---\n";
+
+    const bool prev_sandbox = MitigationEngine::actuation_sandboxed();
+    MitigationEngine::set_actuation_sandbox(true);
+
+    // 1. REQ-107.2: entering Performance must not leave a C0 clamp held. The
+    //    clamp measured 1.88x SLOWER on Zen, so its absence is the requirement.
+    MitigationEngine::set_performance_pm_qos(false);
+    MitigationEngine::apply_power_profile(PowerProfileMode::Performance);
+    assert(!MitigationEngine::performance_pm_qos_held() && "REQ-107.2: Performance holds no /dev/cpu_dma_latency clamp");
+    std::cout << "   * Performance leaves no C0 clamp held\n";
+
+    // 2. REQ-107.2: the audio floor is a separate descriptor and is unaffected by
+    //    the Performance path. Its constant must still exclude C3 (350 us here)
+    //    while leaving C2 (18 us) reachable.
+    assert(MitigationEngine::AUDIO_DMA_LATENCY_US > 18 && MitigationEngine::AUDIO_DMA_LATENCY_US < 350 && "REQ-107.2: audio floor still sits between C2 and C3");
+    std::cout << "   * Audio latency floor independent of the Performance path ("
+              << MitigationEngine::AUDIO_DMA_LATENCY_US << " us)\n";
+
+    // 3. REQ-108.1: the stall shield must NOT depend on playback state. This is
+    //    the whole point - the previous shield only held while a PCM stream ran.
+    //    Rename this process to a Tier 0..3 name so the result is deterministic
+    //    rather than dependent on whatever happens to be running.
+    char original_comm[32]{};
+    (void)::prctl(PR_GET_NAME, original_comm);
+
+    (void)::prctl(PR_SET_NAME, "kwin_wayland");
+    const int32_t self = static_cast<int32_t>(::getpid());
+    const bool shielded_quiet = MitigationEngine::is_stall_shielded(self);
+    assert(shielded_quiet && "REQ-108.1: Tier 0..3 shielded with no audio playing");
+    std::cout << "   * Tier 0..3 shielded with no stream running\n";
+
+    // A Tier 4/5 name must remain throttleable, or the profile would stop saving.
+    (void)::prctl(PR_SET_NAME, "baloo_file");
+    const bool shielded_bg = MitigationEngine::is_stall_shielded(self);
+    assert(!shielded_bg && "REQ-108.1: Tier 4/5 background workers remain throttleable");
+    std::cout << "   * Tier 4/5 background workers still throttleable\n";
+
+    (void)::prctl(PR_SET_NAME, original_comm);
+
+    // 4. REQ-108.2: writeback coalescing is bounded. A 60 s window discharges a
+    //    minute of dirty pages in one burst and widens the power-cut loss window
+    //    to match.
+    assert(MitigationEngine::ULTRA_DIRTY_WRITEBACK_CS <= 1500 && "REQ-108.2: dirty_writeback_centisecs bounded at 15 s or less");
+    assert(MitigationEngine::ULTRA_DIRTY_EXPIRE_CS <= 3000 && "REQ-108.2: dirty_expire_centisecs bounded at 30 s or less");
+    assert(MitigationEngine::ULTRA_DIRTY_EXPIRE_CS >= MitigationEngine::ULTRA_DIRTY_WRITEBACK_CS && "REQ-108.2: expire is not shorter than the writeback interval");
+    std::cout << "   * Writeback bounded: " << MitigationEngine::ULTRA_DIRTY_WRITEBACK_CS
+              << " cs writeback / " << MitigationEngine::ULTRA_DIRTY_EXPIRE_CS << " cs expire\n";
+
+    MitigationEngine::set_actuation_sandbox(prev_sandbox);
+
+    std::cout << " [PASS] test_profile_throughput_and_liveness_guarantees (REF-TEST-061: no C0 clamp in Performance, playback-independent stall shield, bounded writeback verified)\n";
+}
+
 void test_multilingual_l10n_and_auto_system_locale() {
     std::cout << "--- [REF-TEST-041] Multilingual L10n & Auto System Locale Verification ---\n";
 
@@ -4829,6 +4900,7 @@ int main() {
     test::test_watt_reactive_tray_icon();
     test::test_audio_continuity_guarantee();
     test::test_system_liveness_invariant();
+    test::test_profile_throughput_and_liveness_guarantees();
     test::test_multilingual_l10n_and_auto_system_locale();
     test::test_anti_starvation_and_greedy_capping();
     test::test_adaptive_c1_c2_cluster_dispersion();

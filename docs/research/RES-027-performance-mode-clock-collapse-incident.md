@@ -133,9 +133,9 @@ the main cause.
 The measured knobs compose to roughly 2.5x. The daemon produces 12.4x. The
 residual is unexplained and is the open question. Untested candidates:
 
-- the mitigation ladder acting on the measured process itself - `nice +15` was
-  observed on 19 processes **while in Performance mode**, contradicting
-  REQ-092.2's requirement that Performance bypass all throttling;
+- ~~the mitigation ladder acting on the measured process itself - `nice +15` on
+  19 processes~~ **RETRACTED, see section 9**: that was `ananicy-cpp`, not
+  WattCurb;
 - CPU affinity masking (`HeadroomMask` / cluster dispersion) confining work to a
   subset of cores;
 - `SCHED_IDLE` demotion;
@@ -180,3 +180,65 @@ rather than a theoretical one.
    replaces it.
 7. **Re-examine the nice +15 application in Performance** against REQ-092.2.
 8. Only then re-enable and restart the daemon on this host.
+
+---
+
+## 9. Corrections to This Document
+
+Two claims made earlier in this investigation were wrong and are retracted here
+rather than quietly edited away.
+
+### 9.1 The `nice +15` was not WattCurb
+
+Section 6.4 originally attributed `nice +15` on 19 processes to WattCurb's
+mitigation ladder running in Performance mode, and called it a REQ-092.2
+violation. A control measurement with **wattcurb.service stopped** showed spin
+processes still receiving `nice 10`, `nice 15`, `nice -4` and `SCHED_BATCH`:
+
+```
+pid=2278844 nice=10 cls=B
+pid=2278850 nice=15 cls=B
+pid=2278852 nice=-4 cls=B
+```
+
+The source is `ananicy-cpp.service`, which is active on this host and applies
+per-process nice, scheduling class and ionice by its own rules. WattCurb's
+`actuate_anti_starvation_cap()` does return without acting in Performance mode,
+as REQ-104 requires. The attribution was made without a control.
+
+### 9.2 The environment has three power managers, which invalidated earlier measurements
+
+Also running throughout, and not accounted for in sections 3-6:
+
+| Service | What it touches |
+| :--- | :--- |
+| `power-profiles-daemon` | set to `balanced`, drives `/sys/firmware/acpi/platform_profile` - the same node WattCurb writes |
+| `ananicy-cpp` | per-process `nice`, scheduling class, ionice |
+| `upower` | battery state only; no actuation |
+
+`power-profiles-daemon` and WattCurb write the same knob with different
+intentions. Re-measured with both competitors stopped:
+
+| Condition | Fixed-work (3 runs) |
+| :--- | :--- |
+| as-is, wattcurb stopped | 1.386 / 1.375 / 1.351 s |
+| competitors stopped, wattcurb stopped | 1.397 / 1.575 / 1.645 s |
+| **competitors stopped, wattcurb Performance** | **2.042 / 1.920 / 2.085 s** |
+| competitors restored, wattcurb stopped | 1.395 / 1.478 / 1.461 s |
+
+WattCurb's own steady-state cost in Performance is therefore about **1.4x**, not
+12x. **The 12.4x collapse was not reproduced by a fresh 14-second daemon run.**
+It is real - it was measured three times at 16-19 s against a 1.5 s baseline -
+but it requires something a short run does not produce: most likely accumulated
+mitigation state from the ~20 minutes the daemon had been running, or contention
+with `power-profiles-daemon` over `platform_profile`. **The 12x case remains
+unexplained and unreproduced.**
+
+### 9.3 `sched_migration_cost_ns`
+
+Section 6.2 stated the engine "records a baseline and sets its `*_modified`
+flag" for this absent knob. The flag part is wrong: `set_sched_migration_cost()`
+sets the flag only inside the `fd >= 0` branch, so a failed open leaves it clear
+and `restore_hardware_baseline()` will not write it back. The knob is still a
+silent no-op on this kernel, and the failure is still discarded without a log
+entry.

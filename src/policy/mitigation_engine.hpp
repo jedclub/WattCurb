@@ -217,6 +217,15 @@ public:
     // enough to shut C3 out.
     // ---------------------------------------------------------------------
     static constexpr int32_t AUDIO_DMA_LATENCY_US = 100;
+
+    // REF-REQ-108.2: bounded writeback coalescing for UltraEndurance. Named
+    // constants so REF-TEST-061 asserts the same values the actuator writes.
+    static constexpr uint32_t ULTRA_DIRTY_WRITEBACK_CS = 1500; // 15 s
+    static constexpr uint32_t ULTRA_DIRTY_EXPIRE_CS    = 3000; // 30 s
+
+    // REF-REQ-107.2: true while the Performance path holds a C0 clamp. It must
+    // never be true after apply_power_profile(Performance).
+    [[nodiscard]] static bool performance_pm_qos_held() noexcept;
     static constexpr size_t MAX_AUDIO_OWNERS = 8;
 
     struct AudioStreamState {
@@ -236,6 +245,10 @@ public:
     // refilling its buffer just as surely. Genuine background workers (Tier 4/5)
     // stay throttleable, so playback does not suspend power saving wholesale.
     [[nodiscard]] static bool is_audio_shielded(int32_t pid) noexcept;
+    // REF-REQ-108: Tier 0..3 are never demoted to the idle class, in any profile
+    // and whether or not audio is playing. UltraEndurance may be slow; it may not
+    // stop responding.
+    [[nodiscard]] static bool is_stall_shielded(int32_t pid) noexcept;
 
     // REF-REQ-098: LIVENESS INVARIANT.
     // Input handling and window management must keep a working share of the

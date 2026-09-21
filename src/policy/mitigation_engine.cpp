@@ -902,6 +902,10 @@ bool MitigationEngine::set_gpu_dpm_level(const char* level) noexcept {
     return false;
 }
 
+bool MitigationEngine::performance_pm_qos_held() noexcept {
+    return s_hardware_baseline.performance_pm_qos_fd >= 0;
+}
+
 void MitigationEngine::set_performance_pm_qos(bool enable) noexcept {
     if (enable) {
         if (s_hardware_baseline.performance_pm_qos_fd < 0) {
@@ -1066,6 +1070,11 @@ void MitigationEngine::release_performance_unleash() noexcept {
 }
 
 bool MitigationEngine::set_sched_migration_cost(uint64_t cost_ns) noexcept {
+    // REF-REQ-107: this tunable does not exist on every scheduler. It is absent
+    // on BORE/EEVDF kernels (verified missing on 7.2.5-1-cachyos), where this
+    // actuator is a no-op. The false return is the caller's signal that the knob
+    // was not applied; the *_modified flag below is only set on a real write, so
+    // restore_hardware_baseline() will not write a value the daemon never set.
     int fd = hw_open_write("/proc/sys/kernel/sched_migration_cost_ns", O_WRONLY | O_CLOEXEC);
     if (fd >= 0) {
         char buf[32];
@@ -1138,7 +1147,16 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_gpu_dpm_level("high");
 
         // Ultimate Performance Unleash Full-Silicon Actuations (REF-REQ-092, REF-ARCH-069)
-        set_performance_pm_qos(true);                 // System-wide C0 clamp (0us DMA latency)
+        //
+        // REF-REQ-107: the C0 clamp is NOT applied. Holding /dev/cpu_dma_latency
+        // at 0 us was measured on this platform (Ryzen 7 PRO 4750U) to make a
+        // fixed-work benchmark 1.88x SLOWER - 2.674 s against a 1.424 s baseline.
+        // Zen's opportunistic boost is governed by accumulated power budget;
+        // keeping every core in C0 spends that budget continuously instead of
+        // letting idle cores return headroom, so the boost algorithm has less to
+        // work with, not more. REQ-092.1 asserted the opposite without measuring
+        // it. Any descriptor from a previous actuation is released here.
+        set_performance_pm_qos(false);
         set_gpu_power_profile_mode(1);                // 3D_FULL_SCREEN peak compute/VRAM profile
         set_nvme_apst_max_latency(0);                 // Zero APST disk transition latency
         set_nvme_power_control("on");                 // Hold NVMe controllers runtime-active
@@ -1241,9 +1259,16 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_baloo_suspended(true);
         set_wifi_txpower_limit(1200); // REF-REQ-064: Cap Wi-Fi Tx to 12.00 dBm (16mW RF)
         // REF-REQ-087 & REF-ARCH-064 Dimension 3: Kernel VM Writeback & Laptop Mode Coalescing
-        set_vm_dirty_writeback_centisecs(6000); // 60 seconds
-        set_vm_dirty_expire_centisecs(12000);   // 120 seconds
-        set_vm_laptop_mode(5);                  // Batch flushing mode
+        // REF-REQ-108: writeback coalescing is bounded so the flush cannot become a
+        // stall. A 60 s window lets a whole minute of dirty pages accumulate and
+        // discharge in one burst, which blocks every fsync behind it and widens the
+        // data-loss window on power cut to the same 60 s. The original 60 s/120 s
+        // pairing was chosen to let a spinning disk stay parked; the only block
+        // device on this class of machine is NVMe, which has no spin-up to amortise,
+        // so the long window buys little and costs responsiveness.
+        set_vm_dirty_writeback_centisecs(ULTRA_DIRTY_WRITEBACK_CS); // 15 seconds
+        set_vm_dirty_expire_centisecs(ULTRA_DIRTY_EXPIRE_CS);       // 30 seconds
+        set_vm_laptop_mode(2);                  // Batch flushing, bounded
         s_hardware_baseline.vm_writeback_modified = true;
         // REF-REQ-088 Dimension 4: PCIe & USB Runtime PM auto
         apply_pcie_runtime_pm_auto();
@@ -2004,6 +2029,34 @@ bool MitigationEngine::is_audio_shielded(int32_t pid) noexcept {
     return cls.tier <= ProcessSafetyTier::UserInteractive;
 }
 
+bool MitigationEngine::is_stall_shielded(int32_t pid) noexcept {
+    // REF-REQ-108: the audio-playback shield (is_audio_shielded) protects Tier 0..3
+    // only while a PCM stream is RUNNING. Outside playback the same processes were
+    // demotable to SCHED_IDLE with 100 ms timer slack, which is what a stall looks
+    // like from the keyboard. UltraEndurance is allowed to be SLOW - that is the
+    // contract of a 1.4 GHz ceiling - but it is not allowed to stop responding.
+    //
+    // This shield is profile-independent and playback-independent: Tier 0..3 are
+    // never moved to the idle class in any profile. Tier 4/5 background workers
+    // (baloo, updatedb, runaway scripts) remain fully throttleable, so the saving
+    // is not abandoned - it is confined to work nobody is waiting on.
+    if (pid <= 1) return false;
+
+    char comm_path[64];
+    std::snprintf(comm_path, sizeof(comm_path), "/proc/%d/comm", pid);
+    char comm_buf[64]{};
+    size_t n = 0;
+    if (!core::fs::read_small_file(comm_path, comm_buf, sizeof(comm_buf), &n) || n == 0) {
+        return false;
+    }
+    while (n > 0 && (comm_buf[n - 1] == '\n' || comm_buf[n - 1] == '\r' || comm_buf[n - 1] == ' ')) {
+        comm_buf[--n] = '\0';
+    }
+
+    const auto cls = ProcessClassifierDB::classify(std::string_view(comm_buf, n));
+    return cls.tier <= ProcessSafetyTier::UserInteractive;
+}
+
 void MitigationEngine::set_audio_latency_floor(bool engage) noexcept {
     if (engage) {
         if (s_hardware_baseline.audio_pm_qos_fd < 0) {
@@ -2171,6 +2224,9 @@ bool MitigationEngine::apply_sched_idle(int32_t pid) noexcept {
     // to SCHED_IDLE while a stream is running.
     if (is_audio_shielded(pid)) return false;
 
+    // REF-REQ-108: and Tier 0..3 are shielded whether or not audio is playing.
+    if (is_stall_shielded(pid)) return false;
+
     // REF-REQ-098: Input and window management keep a working share in every
     // profile - a compositor that cannot be scheduled looks like a hung machine.
     if (is_liveness_critical(pid)) return false;
@@ -2298,6 +2354,9 @@ bool MitigationEngine::apply_cgroup_freeze(int32_t pid, bool freeze) noexcept {
     // REF-REQ-096.6: Freezing a media-pipeline process mid-playback guarantees a
     // dropout, so it is refused outright while a stream is running.
     if (freeze && is_audio_shielded(pid)) return false;
+
+    // REF-REQ-108: Tier 0..3 are shielded whether or not audio is playing.
+    if (freeze && is_stall_shielded(pid)) return false;
 
     // REF-REQ-098: Freezing the compositor or the desktop shell hangs the session.
     if (freeze && is_liveness_critical(pid)) return false;
