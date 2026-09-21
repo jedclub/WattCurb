@@ -1,0 +1,34 @@
+// WattCurb development workflow - passwordless scope (REF-REQ-106.5)
+// Chosen deliberately by the repository owner. Read the trade-off note below.
+//
+// TRADE-OFF: /usr/local/libexec/wattcurb-deploy installs binaries built from
+// /home/jedclub/Develop/WattCurb/output/ into /usr/local/bin and starts them as
+// root. Anything able to write that directory can therefore obtain root without
+// a password. This is accepted for a single-user development machine; it must
+// not be copied to a shared or production host.
+polkit.addRule(function(action, subject) {
+    if (subject.user !== "jedclub") return polkit.Result.NOT_HANDLED;
+
+    // start / stop / restart, limited to this one unit.
+    if (action.id === "org.freedesktop.systemd1.manage-units") {
+        if (action.lookup("unit") === "wattcurb.service") return polkit.Result.YES;
+        return polkit.Result.NOT_HANDLED;
+    }
+
+    // enable / disable. Falls through to a password prompt if this systemd
+    // build does not report which unit is being acted on.
+    if (action.id === "org.freedesktop.systemd1.manage-unit-files") {
+        if (action.lookup("unit") === "wattcurb.service") return polkit.Result.YES;
+        return polkit.Result.NOT_HANDLED;
+    }
+
+    if (action.id === "org.freedesktop.systemd1.reload-daemon") return polkit.Result.YES;
+
+    // pkexec, restricted to the one root-owned deploy helper.
+    if (action.id === "org.freedesktop.policykit.exec") {
+        if (action.lookup("program") === "/usr/local/libexec/wattcurb-deploy") return polkit.Result.YES;
+        return polkit.Result.NOT_HANDLED;
+    }
+
+    return polkit.Result.NOT_HANDLED;
+});

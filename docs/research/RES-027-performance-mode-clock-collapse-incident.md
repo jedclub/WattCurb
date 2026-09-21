@@ -3,7 +3,9 @@
 **Date**: 2026-09-22
 **Severity**: Critical - the daemon made the machine ~9x slower than running no
 power manager at all, while displaying "Performance".
-**Status**: Cause **NOT yet identified**. Daemon left stopped.
+**Status**: Collapse **confirmed real** by fixed-work timing. Single dominant
+cause still **NOT identified** - the individually-tested knobs account for only a
+fraction of it. Daemon left stopped and `disabled`.
 
 ---
 
@@ -72,42 +74,73 @@ which means the constraint is at the SMU / EC / MSR level, not in `cpufreq`.
 - **cgroup freeze** - `cgroup.freeze = 0`; the load processes were in state `S`
   and `ps` showed them at 83-92% CPU.
 
-## 5. Hypothesis Tested and **Rejected**
+## 5. Confirmation: The Collapse Is Real, Not a Reporting Artifact
 
-`platform_profile=performance` (ThinkPad DYTC) was the leading suspect, since
-the daemon writes it in `apply_power_profile()` and DYTC drives STAPM/PPT on
-ThinkPads. Isolated test with the daemon stopped, on battery:
+`scaling_cur_freq` and `/proc/cpuinfo` both derive from aperf/mperf averaged
+since the previous read, and the daemon polls those nodes every 3 s, so 399 MHz
+could in principle have been an artifact of the daemon's own sampling. It is
+not. A fixed-work probe - wall-clock time for a deterministic 8,000,000-iteration
+integer loop, independent of every frequency interface - gives:
 
-```
-[baseline]      platform=balanced     clock=2495 MHz
-[performance]   platform=performance  clock=2495 MHz
-[performance+3s]                      clock=2495 MHz
-[reverted]      platform=balanced     clock=2495 MHz
-```
+| Condition | Run 1 | Run 2 | Run 3 |
+| :--- | ---: | ---: | ---: |
+| Daemon **stopped** | 1.802 s | 1.754 s | 1.546 s |
+| Daemon **active**, Performance | **17.737 s** | **16.267 s** | **19.508 s** |
+| Daemon stopped again | 1.632 s | - | - |
 
-No effect observed. **Caveat**: the metric did not move by a single MHz across
-the whole test, so the test's sensitivity is unproven - a stuck reading and a
-null result are indistinguishable here. This hypothesis is rejected only
-provisionally and the measurement method must be validated before relying on it.
+**The machine performs roughly 10x less work per second with the daemon running
+in Performance mode than with no power manager running at all.**
 
-## 6. Not Yet Established
+## 6. Knob-Level Bisection
 
-**Which write causes the collapse is unknown.** `apply_power_profile(Performance)`
-performs at least twelve actuations
-(`src/policy/mitigation_engine.cpp:1126` onward), any of which could be
-responsible, including the six added under
-[`REF-REQ-092`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-092-ultimate-performance-unleash-actuation.md)
-in commit `4c0751a`. It is also not established whether this is a regression
-from that commit or pre-existing behaviour that was simply never observed,
-because the daemon had not been running - `wattcurb.service` was `inactive`
-before this deployment, so Performance mode had not actuated on this host in
-that window.
+Each actuation applied alone, daemon stopped, on battery, same probe:
 
-Note also that in Performance mode the engine applied `nice +15` to ordinary
-background processes (19 processes at nice 15, 2 at nice 10 were observed),
-which contradicts REQ-092.2's "the periodic mitigation engine must bypass all
-throttling actions" in Performance. Whether this is related to the clock
-collapse is unknown; it is a separate defect either way.
+| Knob | Wall time | Factor |
+| :--- | ---: | ---: |
+| baseline, nothing applied | 1.424 s | 1.00x |
+| `platform_profile=performance` | 1.815 s | 1.27x |
+| **`/dev/cpu_dma_latency` held at 0** | **2.674 s** | **1.88x** |
+| GPU `power_dpm_force_performance_level=high` + `pp_power_profile_mode=1` | 1.470 s | 1.03x |
+| `sched_migration_cost_ns=5000000` | - | **node does not exist** |
+| *(all of them, via the daemon)* | *17.7 s* | *12.4x* |
+
+### 6.1 `/dev/cpu_dma_latency = 0` is the largest single contributor, and its premise is wrong
+
+REQ-092.1 holds `/dev/cpu_dma_latency` at 0 us to "eliminate CPU idle transition
+latency and pipeline wakeup stalls". On this silicon it makes the machine
+**1.9x slower**. Zen's opportunistic boost is governed by accumulated power and
+thermal budget; pinning every core in C0 spends that budget continuously, leaving
+the boost algorithm less headroom, not more. The requirement asserts a benefit
+that was never measured - REF-TEST-056 only checks that the descriptor is held.
+
+### 6.2 REQ-092.6 is a silent no-op on this kernel
+
+`/proc/sys/kernel/sched_migration_cost_ns` does not exist on `7.2.5-1-cachyos`
+(BORE/EEVDF scheduler). `set_sched_migration_cost()` writes to a path that cannot
+be opened and discards the failure, so the daemon records a baseline and a
+`*_modified` flag for a knob it never changed.
+
+### 6.3 `platform_profile=performance` is a real but minor contributor
+
+An earlier isolation attempt reported no effect, but the metric used
+(`/proc/cpuinfo` MHz) did not move by a single MHz during that test and was
+unreliable. Re-measured with the fixed-work probe it costs 1.27x. Writing DYTC
+`performance` while on **battery** does make this ThinkPad slower, but it is not
+the main cause.
+
+### 6.4 The bisection does not add up
+
+The measured knobs compose to roughly 2.5x. The daemon produces 12.4x. The
+residual is unexplained and is the open question. Untested candidates:
+
+- the mitigation ladder acting on the measured process itself - `nice +15` was
+  observed on 19 processes **while in Performance mode**, contradicting
+  REQ-092.2's requirement that Performance bypass all throttling;
+- CPU affinity masking (`HeadroomMask` / cluster dispersion) confining work to a
+  subset of cores;
+- `SCHED_IDLE` demotion;
+- an actuation outside the tested set - PCIe ASPM, panel power savings, NVMe
+  APST, Wi-Fi power save, SMT control.
 
 ## 7. Provenance
 
@@ -130,14 +163,20 @@ rather than a theoretical one.
 
 ## 8. Required Next Steps
 
-1. **Validate the measurement method** before any further bisection: establish a
-   clock reading that demonstrably tracks real work (e.g. fixed-work timing -
-   wall time for a known instruction count - rather than a sysfs average).
-2. **Bisect the actuation list** by applying each write from
-   `apply_power_profile(Performance)` individually with the daemon stopped, on
-   battery, measuring after each.
-3. **Add an Oracle Gate that reads back a physical consequence**: no profile may
+1. ~~Validate the measurement method~~ - done, section 5.
+2. ~~Bisect the actuation list~~ - partially done, section 6. **Continue** with
+   the untested actuations in 6.4 and with the mitigation ladder itself.
+3. **Drop or gate `/dev/cpu_dma_latency = 0`.** It costs 1.9x on this silicon.
+   If a latency clamp is wanted at all it must be justified by a measurement, not
+   by the assumption that shallower idle means faster.
+4. **Make failed actuations observable.** REQ-092.6 wrote to a non-existent path
+   and reported success. Any actuator whose write fails must not set its
+   `*_modified` flag, and the failure must reach the event log.
+5. **Gate `platform_profile=performance` on AC.** It is a measured regression on
+   battery.
+6. **Add an Oracle Gate that reads back a physical consequence**: no profile may
    leave measured throughput below the profile-less baseline. This is the gate
-   whose absence let the defect ship.
-4. **Re-examine the nice +15 application in Performance** against REQ-092.2.
-5. Only then restart the daemon on this host.
+   whose absence let the defect ship, and no amount of sandboxed assertion
+   replaces it.
+7. **Re-examine the nice +15 application in Performance** against REQ-092.2.
+8. Only then re-enable and restart the daemon on this host.

@@ -1,0 +1,12 @@
+#!/bin/bash
+# WattCurb release deployment helper (REF-REQ-106).
+# Root-owned, not writable by non-root, so pkexec will accept it.
+set -euo pipefail
+SRC=/home/jedclub/Develop/WattCurb
+[ -f "$SRC/output/wattcurb" ] || { echo "no staged release in $SRC/output"; exit 1; }
+install -m 755 "$SRC/output/wattcurb"       /usr/local/bin/wattcurb
+install -m 755 "$SRC/output/wattcurb-tray"  /usr/local/bin/wattcurb-tray
+[ -f "$SRC/output/wattcurb-dashboard" ] && install -m 755 "$SRC/output/wattcurb-dashboard" /usr/local/bin/wattcurb-dashboard
+install -m 644 "$SRC/scripts/wattcurb.service" /etc/systemd/system/wattcurb.service
+systemctl daemon-reload
+echo "deployed: $(md5sum /usr/local/bin/wattcurb | cut -c1-32)"

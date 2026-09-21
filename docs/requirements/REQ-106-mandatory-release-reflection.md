@@ -51,6 +51,22 @@ error.
 The agent has no TTY, so `sudo` cannot read a password on this host. Root steps
 are performed with `pkexec` against an absolute path.
 
+Repeated prompts are eliminated by two version-controlled files, installed once:
+
+| File | Installed to | Purpose |
+| :--- | :--- | :--- |
+| `scripts/49-wattcurb-dev.rules` | `/etc/polkit-1/rules.d/` | grants `jedclub` passwordless `manage-units` / `manage-unit-files` **for `wattcurb.service` only**, `reload-daemon`, and `pkexec` **for the deploy helper only** |
+| `scripts/wattcurb-deploy` | `/usr/local/libexec/` | root-owned; stages `output/` into `/usr/local/bin` and installs the unit |
+
+Every other action still authenticates. The rule is scoped so that a stray
+`pkexec` of an arbitrary command is not covered.
+
+**Accepted trade-off, stated explicitly**: the helper installs binaries built
+from a user-writable directory and systemd then runs them as root, so write
+access to `~/Develop/WattCurb/output` is equivalent to passwordless root on this
+machine. This was chosen knowingly for a single-user development host and must
+not be replicated on a shared or production system.
+
 ### REQ-106.6: The reflection is verified, not assumed
 After restart the following are checked and reported: `systemctl is-active`,
 the installed binaries' `mtime` against the freshly staged `output/`, a live
