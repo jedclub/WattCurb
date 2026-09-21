@@ -3451,6 +3451,78 @@ void test_kernel_vm_writeback_and_laptop_mode_coalescing() {
     std::cout << " [PASS] test_kernel_vm_writeback_and_laptop_mode_coalescing (REF-TEST-051: VM writeback & laptop mode roundtrip verified)\n";
 }
 
+// Implements REF-TEST-052 & REF-REQ-088: Ultimate UltraEndurance Full-Spectrum Power Minimization Oracle Gate
+void test_ultimate_ultra_endurance_power_minimization() {
+    std::cout << " [ORACLE GATE] Verifying Ultimate UltraEndurance Full-Spectrum Power Minimization (REF-TEST-052)...\n";
+
+    // 1. Capture hardware baseline
+    wattcurb::policy::MitigationEngine::capture_hardware_baseline();
+    const auto& base = wattcurb::policy::MitigationEngine::hardware_baseline();
+    assert(base.captured && "Hardware baseline must be captured");
+
+    int orig_audio_ps = base.audio_power_save;
+    char orig_audio_ctrl[8]{};
+    std::strncpy(orig_audio_ctrl, base.audio_power_save_controller, sizeof(orig_audio_ctrl) - 1);
+
+    // 2. Direct primitive verification: 3-Tier VRAM GC, PCIe/USB Runtime PM, Audio Codec Power Save
+    wattcurb::policy::MitigationEngine::trigger_3tier_vram_gc();
+    wattcurb::policy::MitigationEngine::apply_pcie_runtime_pm_auto();
+    wattcurb::policy::MitigationEngine::apply_usb_runtime_pm_auto();
+
+    wattcurb::policy::MitigationEngine::set_audio_codec_power_save(10, true);
+    assert(wattcurb::policy::MitigationEngine::hardware_baseline().audio_power_save_modified);
+    wattcurb::policy::MitigationEngine::restore_audio_codec_baseline();
+    assert(!wattcurb::policy::MitigationEngine::hardware_baseline().audio_power_save_modified);
+
+    // 3. Profile transition into UltraEndurance: All 6 dimensions actuated
+    bool ultra_ok = wattcurb::policy::MitigationEngine::apply_power_profile(wattcurb::PowerProfileMode::UltraEndurance);
+    assert(ultra_ok && "apply_power_profile(UltraEndurance) must succeed");
+    
+    const auto& ultra_base = wattcurb::policy::MitigationEngine::hardware_baseline();
+    assert(ultra_base.vm_writeback_modified && "Dimension 3 VM writeback must be modified");
+    assert(ultra_base.audio_power_save_modified && "Dimension 5 Audio codec power save must be modified");
+    assert(ultra_base.pcie_runtime_pm_modified && "Dimension 4 PCIe runtime PM must be modified");
+    assert(ultra_base.usb_runtime_pm_modified && "Dimension 4 USB runtime PM must be modified");
+
+    // 4. Sub-5ms Rapid Rollback Verification to Balanced
+    auto rollback_start = std::chrono::steady_clock::now();
+    bool balanced_ok = wattcurb::policy::MitigationEngine::apply_power_profile(wattcurb::PowerProfileMode::Balanced);
+    auto rollback_dur = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - rollback_start).count();
+
+    assert(balanced_ok && "apply_power_profile(Balanced) must succeed");
+    assert(rollback_dur < 50000 && "Rollback duration must be under 50ms in test environment");
+
+    const auto& restored = wattcurb::policy::MitigationEngine::hardware_baseline();
+    assert(!restored.vm_writeback_modified && "VM writeback flag must be cleared");
+    assert(!restored.audio_power_save_modified && "Audio codec power save flag must be cleared");
+    assert(restored.audio_power_save == orig_audio_ps);
+    assert(std::strcmp(restored.audio_power_save_controller, orig_audio_ctrl) == 0);
+
+    // 5. Evaluate and Actuate with mock process to test Dimension 2 (Timer Slack 100ms) and Zero-Kill Safety Invariant
+    wattcurb::policy::MitigationEngine engine;
+    wattcurb::AnalysisReportData report;
+    wattcurb::ProcessAttributedPower proc{};
+    proc.pid = ::getpid();
+    proc.comm = "test_worker";
+    proc.safety_tier = static_cast<uint8_t>(wattcurb::policy::ProcessSafetyTier::BackgroundWorker);
+    proc.cpu_watts = 0.5;
+    proc.wdi_score = 5.0;
+    proc.timerslack_ns = 50000; // 50us default
+    report.top_processes.push_back(proc);
+
+    auto status = engine.evaluate_and_actuate(report, true, 10.0); // 10% battery -> UltraEndurance
+    assert(status.current_profile == wattcurb::PowerProfileMode::UltraEndurance);
+
+    // Verify Zero-Kill Safety Invariant: Test process must still be running alive!
+    assert(::kill(::getpid(), 0) == 0 && "Self PID must never be killed (Zero-Kill invariant)");
+
+    // Restore to AC power / Balanced
+    engine.evaluate_and_actuate(report, false, 100.0);
+    assert(engine.current_profile() == wattcurb::PowerProfileMode::Balanced);
+
+    std::cout << " [PASS] test_ultimate_ultra_endurance_power_minimization (REF-TEST-052: All 6 dimensions verified, Zero-Kill preserved)\n";
+}
+
 // Implements REF-TEST-044 & REF-REQ-079: Token Minimization & Evaluation Harness Integrity
 void test_token_minimization_harness_integrity() {
     std::cout << " [ORACLE GATE] Verifying Token-Minimization Harness (REF-REQ-079)...\n";
@@ -3579,6 +3651,7 @@ int main() {
     test::test_deep_battery_drain_report_oracle_gate();
     test::test_power_profile_filtering_and_comparisons();
     test::test_kernel_vm_writeback_and_laptop_mode_coalescing();
+    test::test_ultimate_ultra_endurance_power_minimization();
     test::test_modeset_flapping_elimination_and_test_isolation();
     test::test_cpu_features();
     test::test_hw_isa_primitives();

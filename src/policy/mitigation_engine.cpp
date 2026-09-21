@@ -214,6 +214,20 @@ void MitigationEngine::capture_hardware_baseline() noexcept {
         s_hardware_baseline.vm_laptop_mode = static_cast<uint32_t>(std::strtoul(buf, nullptr, 10));
     }
 
+    n = 0;
+    char audio_buf[16];
+    if (core::fs::read_small_file("/sys/module/snd_hda_intel/parameters/power_save", audio_buf, sizeof(audio_buf) - 1, &n) && n > 0) {
+        audio_buf[n] = '\0';
+        s_hardware_baseline.audio_power_save = std::atoi(audio_buf);
+    }
+    n = 0;
+    if (core::fs::read_small_file("/sys/module/snd_hda_intel/parameters/power_save_controller", s_hardware_baseline.audio_power_save_controller, sizeof(s_hardware_baseline.audio_power_save_controller) - 1, &n) && n > 0) {
+        s_hardware_baseline.audio_power_save_controller[n] = '\0';
+        if (n > 0 && (s_hardware_baseline.audio_power_save_controller[n - 1] == '\n' || s_hardware_baseline.audio_power_save_controller[n - 1] == '\r')) {
+            s_hardware_baseline.audio_power_save_controller[n - 1] = '\0';
+        }
+    }
+
     s_hardware_baseline.captured = true;
 }
 
@@ -249,6 +263,9 @@ void MitigationEngine::restore_hardware_baseline() noexcept {
     restore_wifi_txpower();
     if (s_hardware_baseline.vm_writeback_modified) {
         restore_vm_writeback_baseline();
+    }
+    if (s_hardware_baseline.audio_power_save_modified) {
+        restore_audio_codec_baseline();
     }
 }
 
@@ -471,6 +488,7 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         if (s_hardware_baseline.baloo_suspended) set_baloo_suspended(false);
         restore_wifi_txpower();
         if (s_hardware_baseline.vm_writeback_modified) restore_vm_writeback_baseline();
+        if (s_hardware_baseline.audio_power_save_modified) restore_audio_codec_baseline();
         return true;
 
     case PowerProfileMode::Balanced:
@@ -494,6 +512,7 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         if (s_hardware_baseline.baloo_suspended) set_baloo_suspended(false);
         restore_wifi_txpower();
         if (s_hardware_baseline.vm_writeback_modified) restore_vm_writeback_baseline();
+        if (s_hardware_baseline.audio_power_save_modified) restore_audio_codec_baseline();
         return true;
 
     case PowerProfileMode::PowerSaver:
@@ -515,6 +534,7 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         if (s_hardware_baseline.baloo_suspended) set_baloo_suspended(false);
         restore_wifi_txpower();
         if (s_hardware_baseline.vm_writeback_modified) restore_vm_writeback_baseline();
+        if (s_hardware_baseline.audio_power_save_modified) restore_audio_codec_baseline();
         return true;
 
     case PowerProfileMode::UltraEndurance:
@@ -528,6 +548,9 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_panel_power_savings(2);
         set_cpu_epp_policy("power");
         set_gpu_max_clock(640); // 40% GPU clock cap (640MHz of 1600MHz)
+        // REF-REQ-088 Dimension 1: GPU DPM low & 3-Tier VRAM GC
+        set_gpu_dpm_level("low");
+        trigger_3tier_vram_gc();
         // REF-REQ-063, REF-REQ-064, REF-REQ-065: Ultra-low power hardware & desktop extensions
         set_smt_control("off");
         set_bluetooth_blocked(false); // REF-REQ-065: Bluetooth Always-On Invariant
@@ -536,11 +559,18 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_kwin_effects_suspended(true);
         set_baloo_suspended(true);
         set_wifi_txpower_limit(1200); // REF-REQ-064: Cap Wi-Fi Tx to 12.00 dBm (16mW RF)
-        // REF-REQ-087 & REF-ARCH-064: Kernel VM Writeback & Laptop Mode Coalescing
+        // REF-REQ-087 & REF-ARCH-064 Dimension 3: Kernel VM Writeback & Laptop Mode Coalescing
         set_vm_dirty_writeback_centisecs(6000); // 60 seconds
         set_vm_dirty_expire_centisecs(12000);   // 120 seconds
         set_vm_laptop_mode(5);                  // Batch flushing mode
         s_hardware_baseline.vm_writeback_modified = true;
+        // REF-REQ-088 Dimension 4: PCIe & USB Runtime PM auto
+        apply_pcie_runtime_pm_auto();
+        apply_usb_runtime_pm_auto();
+        s_hardware_baseline.pcie_runtime_pm_modified = true;
+        s_hardware_baseline.usb_runtime_pm_modified = true;
+        // REF-REQ-088 Dimension 5: Audio Codec Autosuspend
+        set_audio_codec_power_save(10, true);
         return true;
     }
     return false;
@@ -1620,6 +1650,192 @@ bool MitigationEngine::restore_vm_writeback_baseline() noexcept {
     set_vm_dirty_expire_centisecs(s_hardware_baseline.vm_dirty_expire_centisecs);
     set_vm_laptop_mode(s_hardware_baseline.vm_laptop_mode);
     s_hardware_baseline.vm_writeback_modified = false;
+    return true;
+}
+
+void MitigationEngine::trigger_3tier_vram_gc() noexcept {
+    WATTCURB_PROFILE_SCOPE("mitig.3tier_vram_gc");
+    // Tier 1: Unload KWin blur shader effects (releases ~100MB-250MB VRAM)
+    set_kwin_effects_suspended(true);
+
+    // Tier 2: Chromium/Electron GPU discardable memory cache eviction via memory.reclaim
+    DIR* proc_dir = ::opendir("/proc");
+    if (proc_dir) {
+        struct dirent* entry = nullptr;
+        while ((entry = ::readdir(proc_dir)) != nullptr) {
+            if (entry->d_type != DT_DIR && entry->d_type != DT_UNKNOWN) continue;
+            if (entry->d_name[0] < '0' || entry->d_name[0] > '9') continue;
+            int32_t pid = std::atoi(entry->d_name);
+            if (pid <= 1) continue;
+
+            char comm_path[64];
+            std::snprintf(comm_path, sizeof(comm_path), "/proc/%d/comm", pid);
+            int fd = ::open(comm_path, O_RDONLY | O_CLOEXEC);
+            if (fd >= 0) {
+                char comm_buf[32];
+                ssize_t n = ::read(fd, comm_buf, sizeof(comm_buf) - 1);
+                ::close(fd);
+                if (n > 0) {
+                    if (comm_buf[n - 1] == '\n') --n;
+                    comm_buf[n] = '\0';
+                    std::string_view comm(comm_buf, static_cast<size_t>(n));
+                    if (comm == "chrome" || comm == "chromium" || comm == "msedge" ||
+                        comm == "code" || comm == "slack" || comm == "discord" ||
+                        comm == "chatgpt" || comm == "electron") {
+                        // Request 100MB cgroups v2 memory reclaim
+                        apply_memory_reclaim(pid, 100ULL * 1024 * 1024);
+                    }
+                }
+            }
+        }
+        ::closedir(proc_dir);
+    }
+
+    // Tier 3: Trigger kernel page cache, dentries and inodes reclamation
+    int drop_fd = ::open("/proc/sys/vm/drop_caches", O_WRONLY | O_CLOEXEC);
+    if (drop_fd >= 0) {
+        (void)::write(drop_fd, "3\n", 2);
+        ::close(drop_fd);
+    }
+}
+
+void MitigationEngine::apply_pcie_runtime_pm_auto() noexcept {
+    WATTCURB_PROFILE_SCOPE("mitig.pcie_runtime_pm");
+    DIR* dir = ::opendir("/sys/bus/pci/devices");
+    if (!dir) return;
+
+    struct dirent* entry = nullptr;
+    while ((entry = ::readdir(dir)) != nullptr) {
+        if (entry->d_name[0] == '.') continue;
+        char ctrl_path[256];
+        std::snprintf(ctrl_path, sizeof(ctrl_path), "/sys/bus/pci/devices/%s/power/control", entry->d_name);
+        int fd = ::open(ctrl_path, O_WRONLY | O_CLOEXEC);
+        if (fd >= 0) {
+            (void)::write(fd, "auto\n", 5);
+            ::close(fd);
+        }
+    }
+    ::closedir(dir);
+}
+
+void MitigationEngine::apply_usb_runtime_pm_auto() noexcept {
+    WATTCURB_PROFILE_SCOPE("mitig.usb_runtime_pm");
+    DIR* dir = ::opendir("/sys/bus/usb/devices");
+    if (!dir) return;
+
+    struct dirent* entry = nullptr;
+    while ((entry = ::readdir(dir)) != nullptr) {
+        if (entry->d_name[0] == '.') continue;
+
+        // Skip usb interface child directories (e.g. 1-1:1.0), only target USB devices
+        if (std::strchr(entry->d_name, ':') != nullptr) {
+            continue;
+        }
+
+        char dev_path[256];
+        std::snprintf(dev_path, sizeof(dev_path), "/sys/bus/usb/devices/%s", entry->d_name);
+
+        // Check if device is HID (03) or Bluetooth (e0) to preserve responsiveness and Bluetooth invariant (REF-REQ-065)
+        char class_path[320];
+        std::snprintf(class_path, sizeof(class_path), "%s/bDeviceClass", dev_path);
+        char class_buf[16];
+        size_t n = 0;
+        bool is_immune = false;
+        if (core::fs::read_small_file(class_path, class_buf, sizeof(class_buf) - 1, &n) && n > 0) {
+            class_buf[n] = '\0';
+            if (std::strstr(class_buf, "03") || std::strstr(class_buf, "e0")) {
+                is_immune = true;
+            }
+        }
+
+        // Also inspect interface subdirectories for HID (03) or Bluetooth (e0)
+        if (!is_immune) {
+            DIR* sub_dir = ::opendir(dev_path);
+            if (sub_dir) {
+                struct dirent* sub_entry = nullptr;
+                while ((sub_entry = ::readdir(sub_dir)) != nullptr) {
+                    if (std::strchr(sub_entry->d_name, ':') != nullptr) {
+                        char if_class_path[384];
+                        std::snprintf(if_class_path, sizeof(if_class_path), "%s/%s/bInterfaceClass", dev_path, sub_entry->d_name);
+                        char if_buf[16];
+                        size_t if_n = 0;
+                        if (core::fs::read_small_file(if_class_path, if_buf, sizeof(if_buf) - 1, &if_n) && if_n > 0) {
+                            if_buf[if_n] = '\0';
+                            if (std::strstr(if_buf, "03") || std::strstr(if_buf, "e0")) {
+                                is_immune = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                ::closedir(sub_dir);
+            }
+        }
+
+        if (is_immune) {
+            continue; // Skip HID input and Bluetooth devices
+        }
+
+        char ctrl_path[320];
+        std::snprintf(ctrl_path, sizeof(ctrl_path), "%s/power/control", dev_path);
+        int fd = ::open(ctrl_path, O_WRONLY | O_CLOEXEC);
+        if (fd >= 0) {
+            (void)::write(fd, "auto\n", 5);
+            ::close(fd);
+        }
+    }
+    ::closedir(dir);
+}
+
+bool MitigationEngine::set_audio_codec_power_save(int seconds, bool controller) noexcept {
+    WATTCURB_PROFILE_SCOPE("mitig.audio_codec_power_save");
+    bool ok = false;
+    int fd = ::open("/sys/module/snd_hda_intel/parameters/power_save", O_WRONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        char buf[16];
+        int len = std::snprintf(buf, sizeof(buf), "%d\n", seconds);
+        if (::write(fd, buf, static_cast<size_t>(len)) > 0) {
+            ok = true;
+        }
+        ::close(fd);
+    }
+
+    int c_fd = ::open("/sys/module/snd_hda_intel/parameters/power_save_controller", O_WRONLY | O_CLOEXEC);
+    if (c_fd >= 0) {
+        const char* val = controller ? "Y\n" : "N\n";
+        (void)::write(c_fd, val, 2);
+        ::close(c_fd);
+    }
+
+    s_hardware_baseline.audio_power_save_modified = true;
+    return ok;
+}
+
+bool MitigationEngine::restore_audio_codec_baseline() noexcept {
+    WATTCURB_PROFILE_SCOPE("mitig.restore_audio_codec");
+    if (!s_hardware_baseline.audio_power_save_modified) return true;
+
+    if (s_hardware_baseline.audio_power_save >= 0) {
+        int fd = ::open("/sys/module/snd_hda_intel/parameters/power_save", O_WRONLY | O_CLOEXEC);
+        if (fd >= 0) {
+            char buf[16];
+            int len = std::snprintf(buf, sizeof(buf), "%d\n", s_hardware_baseline.audio_power_save);
+            (void)::write(fd, buf, static_cast<size_t>(len));
+            ::close(fd);
+        }
+    }
+
+    if (s_hardware_baseline.audio_power_save_controller[0] != '\0') {
+        int c_fd = ::open("/sys/module/snd_hda_intel/parameters/power_save_controller", O_WRONLY | O_CLOEXEC);
+        if (c_fd >= 0) {
+            char buf[16];
+            int len = std::snprintf(buf, sizeof(buf), "%s\n", s_hardware_baseline.audio_power_save_controller);
+            (void)::write(c_fd, buf, static_cast<size_t>(len));
+            ::close(c_fd);
+        }
+    }
+
+    s_hardware_baseline.audio_power_save_modified = false;
     return true;
 }
 

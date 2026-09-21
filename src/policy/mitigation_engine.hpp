@@ -93,6 +93,11 @@ public:
         uint32_t vm_dirty_expire_centisecs{3000};
         uint32_t vm_laptop_mode{0};
         bool vm_writeback_modified{false};
+        int audio_power_save{-1};
+        char audio_power_save_controller[8]{"N"};
+        bool audio_power_save_modified{false};
+        bool pcie_runtime_pm_modified{false};
+        bool usb_runtime_pm_modified{false};
     };
 
     static void capture_hardware_baseline() noexcept;
@@ -122,6 +127,12 @@ public:
     static bool set_vm_dirty_expire_centisecs(uint32_t centisecs) noexcept;
     static bool set_vm_laptop_mode(uint32_t mode) noexcept;
     static bool restore_vm_writeback_baseline() noexcept;
+    // Ultimate UltraEndurance Full-Spectrum Power Minimization (REF-REQ-088, REF-ARCH-065)
+    static void trigger_3tier_vram_gc() noexcept;
+    static void apply_pcie_runtime_pm_auto() noexcept;
+    static void apply_usb_runtime_pm_auto() noexcept;
+    static bool set_audio_codec_power_save(int seconds, bool controller = true) noexcept;
+    static bool restore_audio_codec_baseline() noexcept;
     static bool apply_power_profile(PowerProfileMode mode) noexcept;
 
     // Process Immunity & Audio Protection (REF-REQ-049, REF-REQ-054)
