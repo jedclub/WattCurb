@@ -242,3 +242,55 @@ sets the flag only inside the `fd >= 0` branch, so a failed open leaves it clear
 and `restore_hardware_baseline()` will not write it back. The knob is still a
 silent no-op on this kernel, and the failure is still discarded without a log
 entry.
+
+---
+
+## 10. Root Cause Found: Orphaned Affinity Masks (2026-09-22, later)
+
+The unexplained residual is explained, and it invalidates the measurement
+method used throughout sections 5-9.
+
+`sched_setaffinity` writes **process** state. `restore_hardware_baseline()`
+restores sysfs and `/dev` knobs and touches none of it, so a mask WattCurb
+applied outlives the daemon, outlives a restart, and is inherited by every child.
+With **no daemon running**, the host showed:
+
+```
+foot(1724)        0-15      <- terminal, unmasked
+fish(1726)        0-7       <- masked AFTER creation, by an external agent
+claude(2242744)   0-7       <- inherited
+zsh(2310662)      0-7       <- inherited
+plasmashell(1262) 0-7
+ksecretd(1045)    8-14:2    <- CPUs 8,10,12,14, the C2-dispersion pattern
+ksystemstats(1463) 8-15
++ ~15 further KDE session services at 0-7
+```
+
+WattCurb is the only component on this host that calls `sched_setaffinity` on
+other processes, and the strided `8-14:2` set matches the pattern named in the
+REQ-104 code comment.
+
+### 10.1 Every throughput figure in this document was measured on half a machine
+
+The fixed-work probe ran in a shell descended from `fish(1726)`, which was
+masked to 8 of 16 logical CPUs for the entire session. **The baselines, the
+bisection in section 6 and the A/B in REF-RES-028 were all taken under that
+mask.** Because the mask applied equally to every condition the *comparisons*
+remain meaningful, but no absolute figure in this document is a figure for this
+machine, and any ratio involving a multi-threaded workload is unreliable.
+
+### 10.2 It also explains the drift
+
+Section 5's 12.4x was measured after the daemon had run ~20 minutes; section 9's
+1.4x after 14 seconds; the soak showed 2.458 -> 2.254 -> 3.217 s climbing over
+4.5 minutes. A daemon that masks more processes the longer it runs, and never
+restores them, produces exactly that: a slowdown that deepens with uptime,
+survives a restart, and cannot be reproduced by a short run. **The 12.4x is no
+longer unexplained.**
+
+### 10.3 Fixed
+
+[`REF-REQ-110`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-110-process-state-repair-on-bootstrap.md)
+adds `repair_orphaned_affinity_masks()`, run once at bootstrap before any
+actuation. `heal_over_throttled_processes()` could not catch this: it gates on
+`SCHED_IDLE` for cost, and a masked process sits in a normal scheduling class.

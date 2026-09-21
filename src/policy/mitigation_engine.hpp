@@ -301,6 +301,10 @@ public:
     // could otherwise never be released, and the reported case was exactly that -
     // a desktop application left with 338 threads at SCHED_IDLE.
     static void heal_over_throttled_processes() noexcept;
+    // REF-REQ-110: affinity is process state and outlives the daemon. Restores
+    // shielded processes left masked by a previous run. Walks /proc - bootstrap
+    // only, never per cycle.
+    static void repair_orphaned_affinity_masks() noexcept;
 
     // Fast resolution of cgroup v2 path for a given pid without heap allocations
     static bool resolve_cgroup_path(int32_t pid, char* out_buf, size_t out_cap) noexcept;

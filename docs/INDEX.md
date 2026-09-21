@@ -109,6 +109,7 @@ All documents follow the Ref-ID naming standard:
 | [`REF-REQ-107`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-107-performance-mode-throughput-guarantee.md) | Performance Mode Throughput Guarantee | Approved | [`REF-RES-027`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-027-performance-mode-clock-collapse-incident.md), [`REF-TEST-061`](file:///home/jedclub/Develop/WattCurb/tests/test_units.cpp) |
 | [`REF-REQ-108`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-108-ultra-endurance-liveness-guarantee.md) | UltraEndurance Liveness Guarantee (slow is allowed, stalling is not) | Approved | [`REF-REQ-096`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-096-audio-continuity-guarantee.md), [`REF-TEST-061`](file:///home/jedclub/Develop/WattCurb/tests/test_units.cpp) |
 | [`REF-REQ-109`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-109-single-owner-for-contested-knobs.md) | Single Owner for Contested Hardware Knobs (power-profiles-daemon conflict) | Approved | [`REF-RES-027`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-027-performance-mode-clock-collapse-incident.md), [`REF-TEST-061`](file:///home/jedclub/Develop/WattCurb/tests/test_units.cpp) |
+| [`REF-REQ-110`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-110-process-state-repair-on-bootstrap.md) | Process-State Repair on Bootstrap (orphaned affinity masks) | Approved | [`REF-RES-027`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-027-performance-mode-clock-collapse-incident.md) |
 
 
 

@@ -256,6 +256,12 @@ bool DaemonRunner::initialize() {
         local_shared_state_.power_profile_mode = 1;
     }
     feature_manager_.set_override_profile(initial_mode);
+
+    // REF-REQ-110: before actuating anything, undo affinity masks a previous run
+    // left behind. These survive daemon exit because they are process state, and
+    // every child inherits them, so the damage compounds across sessions.
+    policy::MitigationEngine::repair_orphaned_affinity_masks();
+
     policy::MitigationEngine::apply_power_profile(initial_mode);
     if (shm_state_ != nullptr) {
         shm_state_->update_profile_mode(local_shared_state_.power_profile_mode);

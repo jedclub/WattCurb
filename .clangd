@@ -1,0 +1,6 @@
+CompileFlags:
+  Remove:
+    - -fprofile-*
+    - -fprofile-instr-*
+    - -flto*
+    - -fno-fat-lto-objects

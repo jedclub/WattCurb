@@ -2172,6 +2172,68 @@ void MitigationEngine::heal_over_throttled_processes() noexcept {
     ::closedir(proc_dir);
 }
 
+void MitigationEngine::repair_orphaned_affinity_masks() noexcept {
+    WATTCURB_PROFILE_SCOPE("mitig.repair_affinity");
+
+    // REF-REQ-110: An affinity mask is PROCESS state. Stopping the daemon
+    // restores hardware knobs and nothing else, so a mask applied by a previous
+    // run outlives the daemon, outlives a restart, and is inherited by every
+    // child - a shell masked to half the machine hands that half to everything
+    // launched from it, for the rest of the session.
+    //
+    // This was found on the development host: plasmashell, ksecretd (pinned to
+    // the strided set 8,10,12,14), several KDE services and two login shells were
+    // all confined to 8 of 16 logical CPUs with no daemon running.
+    //
+    // heal_over_throttled_processes() cannot catch this: it gates on
+    // SCHED_IDLE for cost reasons, and a masked process sits in a normal
+    // scheduling class. The repair therefore runs once at bootstrap.
+    //
+    // Scope is deliberately narrow. A mask WattCurb would never have applied -
+    // one on a process it does not shield - may be a deliberate taskset by the
+    // user, and is left alone.
+    const int32_t online = get_total_online_cpus();
+    if (online <= 1) return;
+
+    cpu_set_t all_cores = get_all_cores_cpuset();
+
+    DIR* proc_dir = ::opendir("/proc");
+    if (!proc_dir) return;
+
+    int32_t repaired = 0;
+    struct dirent* entry = nullptr;
+    while ((entry = ::readdir(proc_dir)) != nullptr) {
+        if (entry->d_name[0] < '0' || entry->d_name[0] > '9') continue;
+
+        const int32_t pid = std::atoi(entry->d_name);
+        if (pid <= 1) continue;
+
+        cpu_set_t mask;
+        CPU_ZERO(&mask);
+        if (::sched_getaffinity(pid, sizeof(cpu_set_t), &mask) != 0) continue;
+        if (CPU_COUNT(&mask) >= online) continue; // already has the whole machine
+
+        const bool ours = is_liveness_critical(pid)
+                       || is_graphical_session_process(pid)
+                       || is_stall_shielded(pid)
+                       || is_immune_process(pid);
+        if (!ours) continue;
+
+        if (hw_sched_setaffinity(pid, sizeof(cpu_set_t), &all_cores) == 0) {
+            ++repaired;
+        }
+    }
+    ::closedir(proc_dir);
+
+    if (repaired > 0) {
+        char detail[128];
+        std::snprintf(detail, sizeof(detail),
+                      "Restored full CPU affinity to %d shielded process(es) left masked by a previous run",
+                      repaired);
+        core::EventLogger::log_alert("REPAIR", detail);
+    }
+}
+
 void MitigationEngine::audit_and_heal_audio_stack() noexcept {
     WATTCURB_PROFILE_SCOPE("mitig.audit_heal_audio");
 
