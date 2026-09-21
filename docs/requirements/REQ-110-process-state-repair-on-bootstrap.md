@@ -59,12 +59,23 @@ being in the idle class. Affinity damage on its own was healed by nothing.
 bootstrap, before `apply_power_profile()`. It restores full-machine affinity to
 any process whose mask covers fewer than the online CPU count.
 
-### REQ-110.2: Repair only what WattCurb would have masked
-The sweep acts only on processes that are `is_liveness_critical`,
-`is_graphical_session_process`, `is_stall_shielded` or `is_immune_process`. A
-mask on anything else may be a deliberate `taskset` by the user and is left
-alone. This deliberately leaves some WattCurb damage unrepaired rather than
-overriding a user's explicit choice.
+### REQ-110.2: Repair by mask pattern, not by process class
+The sweep restores a process only when its mask is **exactly one of the masks
+this engine can apply**: the C1 cluster, the C2 cluster, the interactive shield
+set, or the headroom set of any of the four profiles
+(`mask_matches_engine_pattern()`).
+
+The first implementation scoped the repair by process class instead
+(`is_liveness_critical`, `is_graphical_session_process`, `is_stall_shielded`,
+`is_immune_process`). Run on the host that motivated this requirement it
+repaired 66 processes but **missed `ksecretd`** - still pinned to the strided set
+8,10,12,14 afterwards - and missed the agent's own shell, because neither
+classifies into those buckets. The classifier's opinion of a process has nothing
+to do with whether WattCurb masked it.
+
+Matching the mask keeps the property the class scope was there to provide: a
+deliberate `taskset -c 3` by the user is not a mask this engine produces, so it
+is still left alone.
 
 ### REQ-110.3: Bootstrap only
 The sweep walks `/proc` and reads every process's affinity. It must not run on
@@ -80,13 +91,19 @@ papered over.
   also outlive the daemon. This requirement repairs affinity only, because that
   is the one measured to have caused harm. The others are recorded here as a
   known gap.
-- A process masked while the daemon was not running - or masked by something
-  else - is indistinguishable from WattCurb's own damage.
+- Another agent that happens to apply an identical cluster mask is
+  indistinguishable from WattCurb, and its mask would be repaired too.
 - Repair cannot help a process that has already exited, nor un-inherit a mask
   from children already spawned.
 
 ## 5. Verification
-Verified by inspection of the bootstrap path. Not covered by the sandboxed
-suite: the defect is a property of live process state, and asserting it would
-require the test to mask a real process on the host, which REQ-092's Host
-Isolation clause forbids.
+[`REF-TEST-061`](file:///home/jedclub/Develop/WattCurb/tests/test_units.cpp)
+asserts that the C1 and C2 cluster masks are recognised as engine-applied and
+that a single-CPU pin is not.
+
+The sweep's effect on live processes is not asserted by the suite: it is a
+property of host process state, and reproducing it would require the test to
+mask a real process, which REQ-092's Host Isolation clause forbids. Measured on
+the host instead - the first run reported
+`Restored full CPU affinity to 66 shielded process(es) left masked by a previous
+run`, and `plasmashell` went from `0-7` to `0-15`.

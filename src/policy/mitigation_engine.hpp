@@ -305,6 +305,9 @@ public:
     // shielded processes left masked by a previous run. Walks /proc - bootstrap
     // only, never per cycle.
     static void repair_orphaned_affinity_masks() noexcept;
+    // REF-REQ-110.2: true when this mask is exactly one the engine can apply.
+    // Used to tell WattCurb's own damage from a deliberate taskset by the user.
+    [[nodiscard]] static bool mask_matches_engine_pattern(const cpu_set_t& mask) noexcept;
 
     // Fast resolution of cgroup v2 path for a given pid without heap allocations
     static bool resolve_cgroup_path(int32_t pid, char* out_buf, size_t out_cap) noexcept;

@@ -757,11 +757,16 @@ const char* MitigationEngine::competing_power_manager() noexcept {
     //
     // Scanned on demand rather than per cycle: this walks /proc, and the daemon's
     // evaluation loop runs every 3 s. Callers cache via s_competitor_checked.
-    static const char* const COMPETITORS[] = {
-        "power-profiles-", // comm is truncated to 15 chars by the kernel
-        "tuned",
-        "tlp",
-        "auto-cpufreq",
+    // The kernel truncates comm to 15 characters, so the process name and the
+    // systemd unit are not the same string. Reporting the comm produced
+    // "systemctl mask --now power-profiles-", which is not a unit and does not
+    // work - the remedy in the alert has to be copy-pasteable.
+    struct Competitor { const char* comm; const char* unit; };
+    static const Competitor COMPETITORS[] = {
+        { "power-profiles-", "power-profiles-daemon" },
+        { "tuned",           "tuned"                },
+        { "tlp",             "tlp"                  },
+        { "auto-cpufreq",    "auto-cpufreq"         },
     };
 
     DIR* proc_dir = ::opendir("/proc");
@@ -779,8 +784,8 @@ const char* MitigationEngine::competing_power_manager() noexcept {
         if (!core::fs::read_small_file(comm_path, comm, sizeof(comm), &n) || n == 0) continue;
         while (n > 0 && (comm[n - 1] == '\n' || comm[n - 1] == '\r')) comm[--n] = '\0';
 
-        for (const char* c : COMPETITORS) {
-            if (std::strcmp(comm, c) == 0) { found = c; break; }
+        for (const auto& c : COMPETITORS) {
+            if (std::strcmp(comm, c.comm) == 0) { found = c.unit; break; }
         }
     }
     ::closedir(proc_dir);
@@ -2172,6 +2177,29 @@ void MitigationEngine::heal_over_throttled_processes() noexcept {
     ::closedir(proc_dir);
 }
 
+namespace {
+
+inline bool cpuset_equal(const cpu_set_t& a, const cpu_set_t& b) noexcept {
+    return CPU_EQUAL(&a, &b);
+}
+
+} // namespace
+
+bool MitigationEngine::mask_matches_engine_pattern(const cpu_set_t& mask) noexcept {
+    // Every mask this engine is capable of applying to another process.
+    const auto& topo = get_cluster_topology();
+    if (cpuset_equal(mask, topo.c1_cpuset)) return true;
+    if (cpuset_equal(mask, topo.c2_cpuset)) return true;
+    if (cpuset_equal(mask, topo.interactive_shield_cpuset)) return true;
+
+    for (const auto m : { PowerProfileMode::Performance, PowerProfileMode::Balanced,
+                          PowerProfileMode::PowerSaver, PowerProfileMode::UltraEndurance }) {
+        const cpu_set_t headroom = get_headroom_allowed_cpuset(m);
+        if (cpuset_equal(mask, headroom)) return true;
+    }
+    return false;
+}
+
 void MitigationEngine::repair_orphaned_affinity_masks() noexcept {
     WATTCURB_PROFILE_SCOPE("mitig.repair_affinity");
 
@@ -2213,11 +2241,19 @@ void MitigationEngine::repair_orphaned_affinity_masks() noexcept {
         if (::sched_getaffinity(pid, sizeof(cpu_set_t), &mask) != 0) continue;
         if (CPU_COUNT(&mask) >= online) continue; // already has the whole machine
 
-        const bool ours = is_liveness_critical(pid)
-                       || is_graphical_session_process(pid)
-                       || is_stall_shielded(pid)
-                       || is_immune_process(pid);
-        if (!ours) continue;
+        // REF-REQ-110.2 (revised): match the MASK, not the process.
+        //
+        // The first version scoped the repair by process class - liveness
+        // critical, graphical session, stall shielded, immune. On the host that
+        // motivated this it repaired 66 processes but missed ksecretd (pinned to
+        // 8,10,12,14) and the agent's own shell, because neither classifies into
+        // those buckets. The classifier's opinion of a process has nothing to do
+        // with whether WattCurb masked it.
+        //
+        // A mask that is exactly one of the masks this engine can produce is
+        // WattCurb's work. A deliberate `taskset -c 3` by the user is not one of
+        // them and is still left alone, which is what the scope limit was for.
+        if (!mask_matches_engine_pattern(mask)) continue;
 
         if (hw_sched_setaffinity(pid, sizeof(cpu_set_t), &all_cores) == 0) {
             ++repaired;

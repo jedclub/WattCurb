@@ -38,10 +38,16 @@ On first detection the daemon logs a `CONFLICT` alert naming the competitor and
 the exact command that resolves it:
 
 ```
-power-profiles- owns /sys/firmware/acpi/platform_profile; WattCurb will not
-write it. Run 'systemctl mask --now power-profiles-daemon' to give WattCurb
+power-profiles-daemon owns /sys/firmware/acpi/platform_profile; WattCurb will
+not write it. Run 'systemctl mask --now power-profiles-daemon' to give WattCurb
 full control.
 ```
+
+The unit name, not the process name: the kernel truncates `comm` to 15
+characters, and the first implementation emitted
+`systemctl mask --now power-profiles-`, which is not a unit and fails. A remedy
+printed in an alert has to be copy-pasteable, so detection matches on the
+truncated `comm` and reports the real unit.
 
 Silence would leave the user with a profile switch that appears to do nothing.
 

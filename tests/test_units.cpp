@@ -4269,6 +4269,25 @@ void test_profile_throughput_and_liveness_guarantees() {
         std::cout << "   * No competing power manager on this host; platform_profile owned by WattCurb\n";
     }
 
+    // 6. REQ-110.2: the repair sweep tells WattCurb's own masks from a user's
+    //    deliberate taskset by matching the MASK, not by classifying the process.
+    {
+        const cpu_set_t c1 = MitigationEngine::get_c1_cpuset();
+        const cpu_set_t c2 = MitigationEngine::get_c2_cpuset();
+        assert(MitigationEngine::mask_matches_engine_pattern(c1) &&
+               "REQ-110.2: the C1 cluster mask is recognised as engine-applied");
+        assert(MitigationEngine::mask_matches_engine_pattern(c2) &&
+               "REQ-110.2: the C2 cluster mask is recognised as engine-applied");
+
+        // A single-CPU pin is something only a user does; it must be left alone.
+        cpu_set_t deliberate;
+        CPU_ZERO(&deliberate);
+        CPU_SET(3, &deliberate);
+        assert(!MitigationEngine::mask_matches_engine_pattern(deliberate) &&
+               "REQ-110.2: a deliberate single-CPU taskset is not repaired");
+        std::cout << "   * Affinity repair matches engine masks, spares a deliberate taskset\n";
+    }
+
     MitigationEngine::set_actuation_sandbox(prev_sandbox);
 
     std::cout << " [PASS] test_profile_throughput_and_liveness_guarantees (REF-TEST-061: no C0 clamp in Performance, playback-independent stall shield, bounded writeback verified)\n";
