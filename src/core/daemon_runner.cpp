@@ -36,13 +36,72 @@ namespace {
 // privilege escalation (CWE-59 + CWE-732).
 //
 // The live profile handoff from the tray/dashboard already travels over the
-// authenticated Unix command socket ("PROFILE <n>"), so this file only ever
+// authorized Unix command socket ("PROFILE <n>", REF-REQ-111), so this file only ever
 // needed to be the daemon's OWN restart persistence. It now lives in the
 // daemon's root-owned state directory, is created 0644, and is opened with
 // O_NOFOLLOW. The daemon no longer reads or writes anything under /home.
 // ---------------------------------------------------------------------------
 constexpr const char* PROFILE_STATE_DIR  = "/var/lib/wattcurb";
 constexpr const char* PROFILE_STATE_PATH = "/var/lib/wattcurb/power_profile_mode";
+
+// ---------------------------------------------------------------------------
+// REF-REQ-111 (DEF-4): the command socket is AUTHORIZED, not merely attributed.
+//
+// REF-REQ-093 added SO_PASSCRED so a profile change could be logged with the
+// requesting comm, pid and uid. That value was formatted into a log line and
+// never consulted. Any local process could therefore drive the root daemon: a
+// throwaway script sent sixteen PROFILE datagrams during the REF-RES-029 audit
+// and the daemon answered OK to every one, cycling the machine through all four
+// profiles including UltraEndurance's 1.4 GHz ceiling.
+//
+// A uid check alone does not fix it - the stray script ran as the desktop user,
+// the same uid the tray runs as. What distinguishes a real client is the
+// executable behind it, so the peer's /proc/<pid>/exe must resolve to one of the
+// installed client binaries, and that file must be root-owned and not writable
+// by anyone else. A user-writable copy is not trustworthy for commanding a root
+// daemon, so a build run out of ~/.local/bin is refused; the installed binary in
+// /usr/local/bin is the one that may command.
+//
+// TOCTOU is inherent here: the kernel captures the credentials at send time, so
+// by the time /proc is read the sender may have exited and its pid been reused.
+// The window is one datagram wide and the consequence is bounded - the worst
+// outcome is a refusal, or a profile change attributed to the wrong client.
+// ---------------------------------------------------------------------------
+bool peer_is_authorized_client(const struct ucred& cred) noexcept {
+    if (cred.pid <= 0) return false;
+    if (cred.uid == 0) return true; // root already owns every knob this touches
+
+    static const char* const ALLOWED_CLIENTS[] = {
+        "/usr/local/bin/wattcurb",
+        "/usr/local/bin/wattcurb-tray",
+        "/usr/local/bin/wattcurb-dashboard",
+        "/usr/bin/wattcurb",
+        "/usr/bin/wattcurb-tray",
+        "/usr/bin/wattcurb-dashboard",
+    };
+
+    char exe_link[64];
+    std::snprintf(exe_link, sizeof(exe_link), "/proc/%d/exe", cred.pid);
+    char exe[256];
+    const ssize_t n = ::readlink(exe_link, exe, sizeof(exe) - 1);
+    if (n <= 0) return false;
+    exe[n] = '\0';
+
+    bool listed = false;
+    for (const char* c : ALLOWED_CLIENTS) {
+        if (std::strcmp(exe, c) == 0) { listed = true; break; }
+    }
+    if (!listed) return false;
+
+    // The path being right is not enough; the file behind it must not be
+    // writable by the account that is asking.
+    struct stat st{};
+    if (::stat(exe, &st) != 0) return false;
+    if (st.st_uid != 0) return false;
+    if ((st.st_mode & (S_IWGRP | S_IWOTH)) != 0) return false;
+
+    return true;
+}
 
 void persist_profile_mode(const char* mode) noexcept {
     if (!mode) return;
@@ -86,6 +145,22 @@ DaemonRunner::DaemonRunner(double period_sec, double window_sec, std::string_vie
 
 DaemonRunner::~DaemonRunner() {
     stop();
+
+    // REF-REQ-111 (DEF-1): release PROCESS state before hardware state.
+    //
+    // This call was absent. restore_hardware_baseline() puts sysfs and /dev back,
+    // and WindowAwareGovernor releases its own on destruction, but every nice,
+    // scheduling class, CPU affinity mask, timer slack and cgroup quota the
+    // feature layer applied simply survived daemon exit. Affinity and nice are
+    // process state: they outlive the daemon, outlive a restart, and are
+    // inherited by every child, which is how a login shell ended up handing half
+    // the machine to everything launched from it (REF-RES-027).
+    //
+    // FeatureManager now also releases in its own destructor, so an exit path
+    // that does not run this one is still covered; the call here is explicit so
+    // the ordering against the hardware restore is stated rather than implied.
+    feature_manager_.rollback_all_tracked();
+
     window_governor_.rollback_all();
     policy::MitigationEngine::restore_hardware_baseline();
     cleanup_descriptors();
@@ -618,6 +693,10 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
 
     // Who asked. Empty when the kernel supplied no credentials.
     char requester[64] = "unknown";
+    // REF-REQ-111 (DEF-4): mutating commands require an authorized peer. Absent
+    // credentials means an unauthorized peer, not a trusted one.
+    bool peer_authorized = false;
+    bool have_creds = false;
     for (struct cmsghdr* c = CMSG_FIRSTHDR(&msg); c != nullptr; c = CMSG_NXTHDR(&msg, c)) {
         if (c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_CREDENTIALS) continue;
         struct ucred cred{};
@@ -634,6 +713,8 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
             std::snprintf(comm, sizeof(comm), "?");
         }
         std::snprintf(requester, sizeof(requester), "%s[%d] uid=%d", comm, cred.pid, cred.uid);
+        peer_authorized = peer_is_authorized_client(cred);
+        have_creds = true;
         break;
     }
 
@@ -758,6 +839,21 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
         ::sendto(fd, resp.data(), resp.size(), 0,
                  reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
     } else if (req.rfind("PROFILE ", 0) == 0 && bytes >= 9) {
+        // REF-REQ-111 (DEF-4): PROFILE mutates the machine's power state, so it
+        // is the one command that has to prove who is asking. Read-only queries
+        // above stay open.
+        if (!have_creds || !peer_authorized) {
+            const char deny[] = "ERROR: not an authorized WattCurb client (REF-REQ-111)\n";
+            ::sendto(fd, deny, sizeof(deny) - 1, 0,
+                     reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+            char detail[160];
+            std::snprintf(detail, sizeof(detail),
+                          "Rejected PROFILE command from %s - not an installed WattCurb client binary",
+                          requester);
+            EventLogger::log_alert("DENY", detail);
+            return;
+        }
+
         // Parse "PROFILE <mode>" (0=Performance, 1=Balanced, 2=PowerSaver, 3=UltraEndurance)
         int mode_val = req[8] - '0';
         if (mode_val >= 0 && mode_val <= 3) {

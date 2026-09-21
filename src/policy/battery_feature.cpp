@@ -1,4 +1,5 @@
 #include "policy/battery_feature.hpp"
+#include "core/posix_fs.hpp"
 #include "policy/mitigation_engine.hpp"
 #include "core/event_logger.hpp"
 
@@ -188,6 +189,46 @@ bool FeatureManager::actuate_ccx_affinity(int32_t pid, int32_t target_core) noex
     return (::sched_setaffinity(pid, sizeof(cpu_set_t), &cpuset) == 0);
 }
 
+namespace {
+
+// REF-REQ-111 (DEF-3): field 22 of /proc/<pid>/stat, the process start time in
+// clock ticks since boot. Parsed from after the ')' that closes comm, because
+// comm itself may contain spaces and parentheses.
+uint64_t read_proc_start_ticks(int32_t pid) noexcept {
+    if (pid <= 0) return 0;
+    char path[64];
+    std::snprintf(path, sizeof(path), "/proc/%d/stat", pid);
+    char buf[512];
+    size_t n = 0;
+    if (!core::fs::read_small_file(path, buf, sizeof(buf), &n) || n == 0) return 0;
+    buf[n < sizeof(buf) ? n : sizeof(buf) - 1] = '\0';
+
+    const char* p = std::strrchr(buf, ')');
+    if (p == nullptr) return 0;
+    ++p; // now at the space before state
+
+    // Fields after comm: state(3) ppid(4) ... starttime(22). Skip 19 tokens.
+    int to_skip = 19;
+    while (to_skip-- > 0) {
+        while (*p == ' ') ++p;
+        if (*p == '\0') return 0;
+        while (*p != ' ' && *p != '\0') ++p;
+    }
+    while (*p == ' ') ++p;
+    if (*p == '\0') return 0;
+    return std::strtoull(p, nullptr, 10);
+}
+
+// True when this pid still refers to the same process the mitigation was applied
+// to. A zero recorded value means the start time could not be read when the
+// mitigation was taken; such an entry is not trusted for restore.
+bool same_process(int32_t pid, uint64_t recorded_ticks) noexcept {
+    if (pid <= 1 || recorded_ticks == 0) return false;
+    return read_proc_start_ticks(pid) == recorded_ticks;
+}
+
+} // namespace
+
 bool FeatureManager::actuate_anti_starvation_cap(int32_t pid, PowerProfileMode mode, const char* comm) noexcept {
     // REF-REQ-104: Performance mode applies NO process throttling at all.
     //
@@ -234,6 +275,11 @@ bool FeatureManager::actuate_anti_starvation_restore(int32_t pid, const cpu_set_
 void FeatureManager::rollback_all_tracked() noexcept {
     for (auto& tm : m_tracked) {
         if (tm.pid <= 1) continue;
+
+        // REF-REQ-111 (DEF-3): the pid may have been recycled since the
+        // mitigation was applied. Writing the saved nice, policy and affinity
+        // onto a different process is worse than leaving the original throttled.
+        if (!same_process(tm.pid, tm.start_time_ticks)) continue;
 
         // Thaw first: a frozen task cannot be re-scheduled.
         actuate_cgroup_freeze(tm.pid, false);
@@ -513,6 +559,17 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
                     }
                 }
 
+                // REF-REQ-111 (DEF-2): capacity is checked BEFORE acting, not after.
+                // Previously the cap was applied and only then recorded
+                // 'if (m_tracked.size() < MAX_TRACKED_MITIGATIONS)', so past the
+                // 128th concurrent mitigation a process was masked and reniced
+                // with no record - leaving no path by which it could ever be
+                // restored, in any profile, while status.throttled_count still
+                // counted it. An un-undoable mitigation is not worth its saving.
+                if (!already_tracked && m_tracked.size() >= MAX_TRACKED_MITIGATIONS) {
+                    already_tracked = true; // suppress the actuation entirely
+                }
+
                 if (!already_tracked) {
                     int orig_nice = ::getpriority(PRIO_PROCESS, static_cast<id_t>(proc.pid));
                     int orig_sched = ::sched_getscheduler(proc.pid);
@@ -528,6 +585,7 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
                         if (m.targeted_pid_count < m.targeted_pids.size()) {
                             m.targeted_pids[m.targeted_pid_count++] = proc.pid;
                         }
+                        // Guaranteed by the capacity check above; kept as a bound.
                         if (m_tracked.size() < MAX_TRACKED_MITIGATIONS) {
                             TrackedMitigation tm{};
                             tm.pid = proc.pid;
@@ -538,6 +596,7 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
                             tm.original_sched_policy = (orig_sched >= 0) ? orig_sched : SCHED_OTHER;
                             tm.original_timerslack_ns = proc.timerslack_ns;
                             tm.original_affinity = orig_aff;
+                            tm.start_time_ticks = read_proc_start_ticks(proc.pid);
                             m_tracked.push_back(tm);
                         }
                         ++status.throttled_count;
@@ -573,7 +632,12 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
                 }
             }
             if (!still_greedy) {
-                actuate_anti_starvation_restore(m_tracked[i].pid, &m_tracked[i].original_affinity, m_tracked[i].original_sched_policy, m_tracked[i].original_nice, m_tracked[i].comm);
+                // REF-REQ-111 (DEF-3): same identity check as the bulk rollback.
+                // This path fires on a 15 s grace timer, so it is the one most
+                // likely to reach a pid that has since been recycled.
+                if (same_process(m_tracked[i].pid, m_tracked[i].start_time_ticks)) {
+                    actuate_anti_starvation_restore(m_tracked[i].pid, &m_tracked[i].original_affinity, m_tracked[i].original_sched_policy, m_tracked[i].original_nice, m_tracked[i].comm);
+                }
                 m_tracked[i] = m_tracked.back();
                 m_tracked.pop_back();
                 continue;

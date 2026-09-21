@@ -84,12 +84,25 @@ public:
     // before it was applied.
     void rollback_all_tracked() noexcept;
 
+    // REF-REQ-111 (DEF-1): process state outlives the daemon. WindowAwareGovernor
+    // has always released its own on destruction; this one never did, so every
+    // nice, scheduling class, affinity mask, timer slack and cgroup quota the
+    // feature layer applied survived daemon exit and was inherited by children.
+    ~FeatureManager() noexcept { rollback_all_tracked(); }
+
 private:
     std::array<FeatureMetrics, static_cast<size_t>(FeatureId::Count)> m_metrics{};
 
     static constexpr size_t MAX_TRACKED_MITIGATIONS = 128;
     struct TrackedMitigation {
         int32_t pid{0};
+        // REF-REQ-111 (DEF-3): a bare pid is not an identity. Linux recycles
+        // pids, and every restore path here writes scheduling policy, nice and a
+        // CPU affinity mask - applying a dead process's saved state to whatever
+        // now holds its number. Field 22 of /proc/<pid>/stat is the process start
+        // time in clock ticks since boot; together with the pid it identifies the
+        // process for as long as it lives.
+        uint64_t start_time_ticks{0};
         char comm[16]{0};
         FeatureId applied_feature{FeatureId::SchedIdleThrottle};
         uint64_t timestamp_sec{0};
