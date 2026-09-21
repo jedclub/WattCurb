@@ -105,6 +105,7 @@ All documents follow the Ref-ID naming standard:
 | [`REF-REQ-094`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-094-deterministic-profile-demotion.md) | Deterministic Battery-Threshold Profile Demotion | Approved | [`REF-ARCH-071`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-071-watt-reactive-icon-and-profile-authority.md), [`REF-TEST-057`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-094-deterministic-profile-demotion.md#3-verification) |
 | [`REF-REQ-095`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-095-watt-reactive-tray-icon.md) | Watt-Reactive Procedural Tray Icon Specification | Approved | [`REF-ARCH-071`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-071-watt-reactive-icon-and-profile-authority.md), [`REF-TEST-058`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-095-watt-reactive-tray-icon.md#4-verification) |
 | [`REF-REQ-096`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-096-audio-continuity-guarantee.md) | Audio Continuity Guarantee | Approved | [`REF-ARCH-071`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-071-watt-reactive-icon-and-profile-authority.md), [`REF-TEST-059`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-096-audio-continuity-guarantee.md#3-verification) |
+| [`REF-REQ-106`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-106-mandatory-release-reflection.md) | Mandatory Release Reflection After Every Source Modification | Approved | [`REF-REQ-093`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-093-daemon-privilege-boundary-hardening.md), [`REF-REQ-006`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-003-pgo-pmu-optimization.md) |
 
 
 
@@ -140,6 +141,7 @@ All documents follow the Ref-ID naming standard:
 | [`REF-RES-024`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-024-deep-power-log-audit-and-drain-analysis.md) | Deep Power Telemetry Log Audit & Full-Spectrum Drain Analysis | 5.5-hour 86.03 Wh telemetry audit, Platform Loss 40.9%, CPU 40.3%, 3 root-cause bottlenecks | 2026-09-21 |
 | [`REF-RES-025`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-025-ultra-endurance-deep-silicon-and-kernel-power-minimization.md) | UltraEndurance Deep Silicon & Kernel Power Minimization Architecture | 6-dimension deep minimization: DPM low, MCLK 400MHz, timerslack 100ms, VM flush, audio sleep | 2026-09-21 |
 | [`REF-RES-026`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-026-privilege-boundary-audit.md) | Root Daemon Privilege-Boundary Audit | Symlink+0666 local root escalation, iw command injection, dev paths in release binaries, service exposure 9.4 to 6.9 | 2026-09-21 |
+| [`REF-RES-027`](file:///home/jedclub/Develop/WattCurb/docs/research/RES-027-performance-mode-clock-collapse-incident.md) | Performance-Mode Clock Collapse Incident (399 MHz) - CRITICAL, cause unidentified | Open | [`REF-REQ-092`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-092-ultimate-performance-unleash-actuation.md) |
 
 
 

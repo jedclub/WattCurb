@@ -47,23 +47,14 @@ fi
 
 # 3. Install Systemd Root Service
 echo "[2/4] Installing root background service..."
-${SUDO} tee /etc/systemd/system/wattcurb.service > /dev/null << 'EOF'
-[Unit]
-Description=WattCurb Ultra-Low-Overhead Power Profiling & Mitigation Daemon
-Documentation=https://github.com/jedclub/WattCurb
-After=multi-user.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/wattcurb --daemon --period 10.0
-Restart=on-failure
-RestartSec=3
-KillMode=mixed
-TimeoutStopSec=2
-
-[Install]
-WantedBy=multi-user.target
-EOF
+# REF-REQ-106.4: install the repository unit verbatim. An inline copy here
+# silently reverts the REF-REQ-093 service hardening on every install.
+UNIT_SRC="${SCRIPT_DIR}/scripts/wattcurb.service"
+if [ ! -f "${UNIT_SRC}" ]; then
+    echo "[!] Error: ${UNIT_SRC} not found; refusing to install an unhardened unit."
+    exit 1
+fi
+${SUDO} install -m 644 "${UNIT_SRC}" /etc/systemd/system/wattcurb.service
 
 ${SUDO} systemctl daemon-reload
 ${SUDO} systemctl enable --now wattcurb.service
