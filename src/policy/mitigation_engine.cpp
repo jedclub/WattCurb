@@ -9,10 +9,16 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <dirent.h>
+#include <sys/stat.h>
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
+#include <sys/socket.h>
+#include <net/if.h>
+#include <linux/netlink.h>
+#include <linux/genetlink.h>
+#include <linux/nl80211.h>
 
 namespace wattcurb::policy {
 
@@ -36,6 +42,435 @@ namespace {
 
 // REF-REQ-055: Hardware baseline state recorded at bootstrap
 static MitigationEngine::HardwareBaselineState s_hardware_baseline{};
+
+// ---------------------------------------------------------------------------
+// Hardware Actuation Sandbox (REF-REQ-092, REF-ARCH-069)
+//
+// Every actuator that mutates live kernel, sysfs or process state funnels
+// through the wrappers below. When the sandbox is engaged they perform no
+// syscall and report failure, which is exactly how they already behave for an
+// unprivileged caller. The Oracle Gate engages it so the suite can exercise
+// policy logic without clamping the host CPU to C0, rewriting NVMe APST, or
+// renicing the developer's audio daemon.
+//
+// Production default is OFF; the branch is a single predictable load on a
+// syscall-bound path, never on the monitoring hot loop.
+// ---------------------------------------------------------------------------
+static bool s_actuation_sandbox = false;
+
+// REF-REQ-096: Last observed PCM playback state, refreshed once per cycle.
+static MitigationEngine::AudioStreamState s_audio_state{};
+
+// REF-REQ-099: Profile in force, published each cycle by the policy driver.
+static PowerProfileMode s_effective_profile = PowerProfileMode::Balanced;
+
+[[nodiscard]] inline int hw_open_write(const char* path, int flags) noexcept {
+    if (s_actuation_sandbox) return -1;
+    return ::open(path, flags);
+}
+
+inline int hw_setpriority(int which, id_t who, int prio) noexcept {
+    if (s_actuation_sandbox) return -1;
+    return ::setpriority(which, who, prio);
+}
+
+inline int hw_sched_setaffinity(pid_t pid, size_t size, const cpu_set_t* set) noexcept {
+    if (s_actuation_sandbox) return -1;
+    return ::sched_setaffinity(pid, size, set);
+}
+
+inline int hw_sched_setscheduler(pid_t pid, int policy, const struct sched_param* param) noexcept {
+    if (s_actuation_sandbox) return -1;
+    return ::sched_setscheduler(pid, policy, param);
+}
+
+inline int hw_ioprio_set(int which, int who, int prio) noexcept {
+    if (s_actuation_sandbox) return -1;
+    return static_cast<int>(::syscall(SYS_ioprio_set, which, who, prio));
+}
+
+// Returns 0 (the shell's own result for the backgrounded "... &" commands used
+// here) so callers observe the same outcome they would in production, while no
+// process is created. Matches the existing WATTCURB_TEST_MOCK_DESKTOP idiom in
+// execute_user_desktop_cmd(), which likewise reports success.
+inline int hw_system(const char* cmd) noexcept {
+    if (s_actuation_sandbox) return 0;
+    return ::system(cmd);
+}
+
+
+// ---------------------------------------------------------------------------
+// REF-REQ-092 & REF-ARCH-069: Zero-fork wireless control primitives.
+//
+// The Wi-Fi power-save actuator previously shelled out to `iw` via ::system(),
+// measured at ~4.2 ms per call (fork + exec of /bin/sh). A single call consumed
+// 84% of the < 5 ms unified rapid-rollback Oracle Gate budget (REF-TEST-020)
+// and violated the zero-allocation / zero-fork daemon doctrine (AGENTS.md Sec 9).
+// It is replaced below by direct generic-netlink (nl80211) transactions issued
+// from stack buffers: no heap, no fork, ~50 us per round trip.
+// ---------------------------------------------------------------------------
+
+constexpr size_t NL_MSG_CAPACITY = 512;
+constexpr size_t NL_REPLY_CAPACITY = 2048;
+
+// Local 4-byte alignment helper. The kernel NLA_ALIGN/NLA_HDRLEN/NLMSG_ALIGN
+// macros fold a signed ~(NLA_ALIGNTO - 1) into size_t arithmetic and trip
+// -Wsign-conversion, so the daemon computes netlink alignment itself.
+[[nodiscard]] constexpr size_t nl_align(size_t len) noexcept {
+    return (len + 3u) & ~static_cast<size_t>(3u);
+}
+
+constexpr size_t NL_ATTR_HDRLEN = nl_align(sizeof(nlattr));
+
+// Locate the first wireless interface under /sys/class/net. Shared by the
+// power-save and TX-power actuators so hosts whose interface is not literally
+// named "wlan0" (wlp1s0, wlp2s0, wlp3s0, ...) are handled uniformly, as
+// REQ-092.5 specifies with `iw dev <iface>`.
+[[nodiscard]] bool detect_wireless_ifname(char* out, size_t cap) noexcept {
+    if (!out || cap == 0) return false;
+    out[0] = '\0';
+
+    DIR* dir = ::opendir("/sys/class/net");
+    if (!dir) return false;
+
+    bool found = false;
+    struct dirent* entry = nullptr;
+    while ((entry = ::readdir(dir)) != nullptr) {
+        if (entry->d_name[0] == '.') continue;
+        char wire_path[128];
+        std::snprintf(wire_path, sizeof(wire_path), "/sys/class/net/%s/wireless", entry->d_name);
+        if (::access(wire_path, F_OK) == 0) {
+            std::strncpy(out, entry->d_name, cap - 1);
+            out[cap - 1] = '\0';
+            found = true;
+            break;
+        }
+    }
+    ::closedir(dir);
+    return found;
+}
+
+// Append one attribute to an in-progress netlink message held on the stack.
+[[nodiscard]] bool nl_append_attr(nlmsghdr* nlh, size_t cap, uint16_t type,
+                                  const void* data, uint16_t payload_len) noexcept {
+    const size_t offset = nl_align(nlh->nlmsg_len);
+    const size_t attr_len = static_cast<size_t>(NL_ATTR_HDRLEN) + payload_len;
+    if (offset + nl_align(attr_len) > cap) return false;
+
+    char* base = reinterpret_cast<char*>(nlh) + offset;
+    nlattr attr{};
+    attr.nla_type = type;
+    attr.nla_len = static_cast<uint16_t>(attr_len);
+    std::memcpy(base, &attr, sizeof(attr));
+    std::memcpy(base + NL_ATTR_HDRLEN, data, payload_len);
+
+    const size_t pad = nl_align(attr_len) - attr_len;
+    if (pad > 0) std::memset(base + attr_len, 0, pad);
+
+    nlh->nlmsg_len = static_cast<uint32_t>(offset + nl_align(attr_len));
+    return true;
+}
+
+// Walk a generic-netlink payload and copy out one fixed-width attribute value.
+[[nodiscard]] bool nl_find_attr(const char* payload, const char* end, uint16_t type,
+                                void* out, size_t out_len) noexcept {
+    const char* p = payload;
+    while (p + NL_ATTR_HDRLEN <= end) {
+        nlattr attr{};
+        std::memcpy(&attr, p, sizeof(attr));
+        if (static_cast<size_t>(attr.nla_len) < NL_ATTR_HDRLEN) break;
+        if (p + attr.nla_len > end) break;
+        if (attr.nla_type == type &&
+            static_cast<size_t>(attr.nla_len) >= static_cast<size_t>(NL_ATTR_HDRLEN) + out_len) {
+            std::memcpy(out, p + NL_ATTR_HDRLEN, out_len);
+            return true;
+        }
+        p += nl_align(static_cast<size_t>(attr.nla_len));
+    }
+    return false;
+}
+
+// Generic-netlink socket with a bounded receive timeout, so a wedged kernel
+// socket can never stall the rapid-rollback path.
+[[nodiscard]] int nl_open_generic() noexcept {
+    int fd = ::socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_GENERIC);
+    if (fd < 0) return -1;
+
+    sockaddr_nl local{};
+    local.nl_family = AF_NETLINK;
+    if (::bind(fd, reinterpret_cast<sockaddr*>(&local), static_cast<socklen_t>(sizeof(local))) < 0) {
+        ::close(fd);
+        return -1;
+    }
+
+    timeval tv{};
+    tv.tv_usec = 100000; // 100 ms hard ceiling; the kernel answers in microseconds
+    (void)::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, static_cast<socklen_t>(sizeof(tv)));
+    return fd;
+}
+
+// Send one request, read the first reply datagram. Returns bytes read, or -1.
+[[nodiscard]] ssize_t nl_transact(int fd, nlmsghdr* req, char* reply, size_t reply_cap) noexcept {
+    sockaddr_nl kernel{};
+    kernel.nl_family = AF_NETLINK;
+
+    iovec tx_iov{req, req->nlmsg_len};
+    msghdr tx{};
+    tx.msg_name = &kernel;
+    tx.msg_namelen = static_cast<socklen_t>(sizeof(kernel));
+    tx.msg_iov = &tx_iov;
+    tx.msg_iovlen = 1;
+    if (::sendmsg(fd, &tx, 0) < 0) return -1;
+
+    iovec rx_iov{reply, reply_cap};
+    msghdr rx{};
+    rx.msg_name = &kernel;
+    rx.msg_namelen = static_cast<socklen_t>(sizeof(kernel));
+    rx.msg_iov = &rx_iov;
+    rx.msg_iovlen = 1;
+    return ::recvmsg(fd, &rx, 0);
+}
+
+// Resolve (and cache) the dynamically assigned nl80211 family id.
+[[nodiscard]] uint16_t nl80211_family_id(int fd) noexcept {
+    static uint16_t s_family = 0;
+    if (s_family != 0) return s_family;
+
+    alignas(4) char buf[NL_MSG_CAPACITY]{};
+    auto* nlh = reinterpret_cast<nlmsghdr*>(buf);
+    nlh->nlmsg_len = static_cast<uint32_t>(NLMSG_LENGTH(GENL_HDRLEN));
+    nlh->nlmsg_type = static_cast<uint16_t>(GENL_ID_CTRL);
+    nlh->nlmsg_flags = static_cast<uint16_t>(NLM_F_REQUEST);
+    nlh->nlmsg_seq = 1;
+
+    auto* genl = static_cast<genlmsghdr*>(NLMSG_DATA(nlh));
+    genl->cmd = CTRL_CMD_GETFAMILY;
+    genl->version = 1;
+
+    const auto name_len = static_cast<uint16_t>(std::strlen(NL80211_GENL_NAME) + 1);
+    if (!nl_append_attr(nlh, sizeof(buf), static_cast<uint16_t>(CTRL_ATTR_FAMILY_NAME),
+                        NL80211_GENL_NAME, name_len)) {
+        return 0;
+    }
+
+    alignas(4) char reply[NL_REPLY_CAPACITY];
+    const ssize_t rlen = nl_transact(fd, nlh, reply, sizeof(reply));
+    if (rlen < static_cast<ssize_t>(NLMSG_HDRLEN)) return 0;
+
+    auto* rh = reinterpret_cast<nlmsghdr*>(reply);
+    if (rh->nlmsg_type == NLMSG_ERROR) return 0;
+    if (rh->nlmsg_len > static_cast<uint32_t>(rlen)) return 0;
+
+    const char* payload = static_cast<const char*>(NLMSG_DATA(rh)) + GENL_HDRLEN;
+    const char* end = reply + rh->nlmsg_len;
+
+    uint16_t id = 0;
+    if (!nl_find_attr(payload, end, static_cast<uint16_t>(CTRL_ATTR_FAMILY_ID), &id, sizeof(id))) {
+        return 0;
+    }
+    s_family = id;
+    return id;
+}
+
+// Fill the shared nl80211 request preamble (genl header + NL80211_ATTR_IFINDEX).
+[[nodiscard]] bool nl80211_build(nlmsghdr* nlh, size_t cap, uint16_t family, uint8_t cmd,
+                                 uint16_t extra_flags, uint32_t ifindex) noexcept {
+    nlh->nlmsg_len = static_cast<uint32_t>(NLMSG_LENGTH(GENL_HDRLEN));
+    nlh->nlmsg_type = family;
+    nlh->nlmsg_flags = static_cast<uint16_t>(static_cast<unsigned>(NLM_F_REQUEST) | extra_flags);
+    nlh->nlmsg_seq = 2;
+
+    auto* genl = static_cast<genlmsghdr*>(NLMSG_DATA(nlh));
+    genl->cmd = cmd;
+    genl->version = 0;
+
+    return nl_append_attr(nlh, cap, static_cast<uint16_t>(NL80211_ATTR_IFINDEX),
+                          &ifindex, sizeof(ifindex));
+}
+
+// REF-REQ-092.5: NL80211_CMD_SET_POWER_SAVE. Replaces `iw dev <iface> set power_save`.
+[[nodiscard]] bool nl80211_set_power_save(const char* ifname, bool enable) noexcept {
+    if (s_actuation_sandbox) return false;
+    const unsigned int ifindex = ::if_nametoindex(ifname);
+    if (ifindex == 0) return false;
+
+    const int fd = nl_open_generic();
+    if (fd < 0) return false;
+
+    const uint16_t family = nl80211_family_id(fd);
+    if (family == 0) {
+        ::close(fd);
+        return false;
+    }
+
+    alignas(4) char buf[NL_MSG_CAPACITY]{};
+    auto* nlh = reinterpret_cast<nlmsghdr*>(buf);
+    if (!nl80211_build(nlh, sizeof(buf), family,
+                       static_cast<uint8_t>(NL80211_CMD_SET_POWER_SAVE),
+                       static_cast<uint16_t>(NLM_F_ACK), ifindex)) {
+        ::close(fd);
+        return false;
+    }
+
+    const uint32_t ps_state = enable ? static_cast<uint32_t>(NL80211_PS_ENABLED)
+                                     : static_cast<uint32_t>(NL80211_PS_DISABLED);
+    if (!nl_append_attr(nlh, sizeof(buf), static_cast<uint16_t>(NL80211_ATTR_PS_STATE),
+                        &ps_state, sizeof(ps_state))) {
+        ::close(fd);
+        return false;
+    }
+
+    alignas(4) char reply[NL_REPLY_CAPACITY];
+    const ssize_t rlen = nl_transact(fd, nlh, reply, sizeof(reply));
+    ::close(fd);
+    if (rlen < static_cast<ssize_t>(NLMSG_HDRLEN)) return false;
+
+    // An ACK is delivered as NLMSG_ERROR carrying error == 0.
+    auto* rh = reinterpret_cast<nlmsghdr*>(reply);
+    if (rh->nlmsg_type != NLMSG_ERROR) return false;
+    if (rh->nlmsg_len < static_cast<uint32_t>(NLMSG_HDRLEN) + sizeof(nlmsgerr)) return false;
+
+    nlmsgerr err{};
+    std::memcpy(&err, NLMSG_DATA(rh), sizeof(err));
+    return err.error == 0;
+}
+
+// REF-REQ-063: NL80211_CMD_SET_WIPHY transmit-power control.
+//
+// Replaces `iw dev <ifname> set txpower ...` routed through ::system(). That
+// construction was a command-injection primitive: ifname comes from a readdir()
+// of /sys/class/net, and the kernel's dev_valid_name() rejects only whitespace
+// and '/', so ';', '$()', '`', '|', '&' and '>' are all legal interface-name
+// characters. An interface named e.g. "wlan0;cmd" yielded
+//   iw dev wlan0;cmd set txpower limit 1200 >/dev/null 2>&1 &
+// executed by /bin/sh as root. Naming an interface needs CAP_NET_ADMIN, so this
+// was defence-in-depth rather than a live escalation - but a root daemon must
+// not build shell commands out of names it read off the filesystem at all.
+[[nodiscard]] bool nl80211_set_tx_power(const char* ifname, bool automatic, uint32_t mbm) noexcept {
+    const unsigned int ifindex = ::if_nametoindex(ifname);
+    if (ifindex == 0) return false;
+
+    const int fd = nl_open_generic();
+    if (fd < 0) return false;
+
+    const uint16_t family = nl80211_family_id(fd);
+    if (family == 0) {
+        ::close(fd);
+        return false;
+    }
+
+    alignas(4) char buf[NL_MSG_CAPACITY]{};
+    auto* nlh = reinterpret_cast<nlmsghdr*>(buf);
+    if (!nl80211_build(nlh, sizeof(buf), family,
+                       static_cast<uint8_t>(NL80211_CMD_SET_WIPHY),
+                       static_cast<uint16_t>(NLM_F_ACK), ifindex)) {
+        ::close(fd);
+        return false;
+    }
+
+    const uint32_t setting = automatic ? static_cast<uint32_t>(NL80211_TX_POWER_AUTOMATIC)
+                                       : static_cast<uint32_t>(NL80211_TX_POWER_LIMITED);
+    bool built = nl_append_attr(nlh, sizeof(buf),
+                                static_cast<uint16_t>(NL80211_ATTR_WIPHY_TX_POWER_SETTING),
+                                &setting, sizeof(setting));
+    if (built && !automatic) {
+        built = nl_append_attr(nlh, sizeof(buf),
+                               static_cast<uint16_t>(NL80211_ATTR_WIPHY_TX_POWER_LEVEL),
+                               &mbm, sizeof(mbm));
+    }
+    if (!built) {
+        ::close(fd);
+        return false;
+    }
+
+    alignas(4) char reply[NL_REPLY_CAPACITY];
+    const ssize_t rlen = nl_transact(fd, nlh, reply, sizeof(reply));
+    ::close(fd);
+    if (rlen < static_cast<ssize_t>(NLMSG_HDRLEN)) return false;
+
+    auto* rh = reinterpret_cast<nlmsghdr*>(reply);
+    if (rh->nlmsg_type != NLMSG_ERROR) return false;
+    if (rh->nlmsg_len < static_cast<uint32_t>(NLMSG_HDRLEN) + sizeof(nlmsgerr)) return false;
+
+    nlmsgerr err{};
+    std::memcpy(&err, NLMSG_DATA(rh), sizeof(err));
+    return err.error == 0;
+}
+
+// REF-REQ-092.5: NL80211_CMD_GET_POWER_SAVE (permitted to unprivileged callers).
+// Captures the pre-actuation power-save state so demotion restores what the user
+// actually had, rather than blindly forcing power save back on.
+[[nodiscard]] bool nl80211_get_power_save(const char* ifname, bool* out_enabled) noexcept {
+    if (!out_enabled) return false;
+
+    const unsigned int ifindex = ::if_nametoindex(ifname);
+    if (ifindex == 0) return false;
+
+    const int fd = nl_open_generic();
+    if (fd < 0) return false;
+
+    const uint16_t family = nl80211_family_id(fd);
+    if (family == 0) {
+        ::close(fd);
+        return false;
+    }
+
+    alignas(4) char buf[NL_MSG_CAPACITY]{};
+    auto* nlh = reinterpret_cast<nlmsghdr*>(buf);
+    if (!nl80211_build(nlh, sizeof(buf), family,
+                       static_cast<uint8_t>(NL80211_CMD_GET_POWER_SAVE), 0, ifindex)) {
+        ::close(fd);
+        return false;
+    }
+
+    alignas(4) char reply[NL_REPLY_CAPACITY];
+    const ssize_t rlen = nl_transact(fd, nlh, reply, sizeof(reply));
+    ::close(fd);
+    if (rlen < static_cast<ssize_t>(NLMSG_HDRLEN)) return false;
+
+    auto* rh = reinterpret_cast<nlmsghdr*>(reply);
+    if (rh->nlmsg_type == NLMSG_ERROR) return false;
+    if (rh->nlmsg_len > static_cast<uint32_t>(rlen)) return false;
+
+    const char* payload = static_cast<const char*>(NLMSG_DATA(rh)) + GENL_HDRLEN;
+    const char* end = reply + rh->nlmsg_len;
+
+    uint32_t ps_state = 0;
+    if (!nl_find_attr(payload, end, static_cast<uint16_t>(NL80211_ATTR_PS_STATE),
+                      &ps_state, sizeof(ps_state))) {
+        return false;
+    }
+    *out_enabled = (ps_state == static_cast<uint32_t>(NL80211_PS_ENABLED));
+    return true;
+}
+
+// REF-REQ-092.3: Parse the active ("*"-marked) row of the amdgpu
+// pp_power_profile_mode table, so demotion can restore the real pre-actuation
+// mode instead of a hardcoded 0.
+[[nodiscard]] int read_gpu_power_profile_mode() noexcept {
+    static const char* const paths[] = {
+        "/sys/class/drm/card1/device/pp_power_profile_mode",
+        "/sys/class/drm/card0/device/pp_power_profile_mode"
+    };
+
+    char buf[4096];
+    for (const char* path : paths) {
+        size_t n = 0;
+        if (!core::fs::read_small_file(path, buf, sizeof(buf), &n) || n == 0) continue;
+
+        // Rows look like "  1   3D_FULL_SCREEN*:" - '*' marks the active mode.
+        const char* line = buf;
+        while (line && *line) {
+            const char* nl = std::strchr(line, '\n');
+            const size_t len = nl ? static_cast<size_t>(nl - line) : std::strlen(line);
+            if (std::memchr(line, '*', len) != nullptr) {
+                return static_cast<int>(std::strtol(line, nullptr, 10));
+            }
+            line = nl ? nl + 1 : nullptr;
+        }
+    }
+    return -1;
+}
 
 } // anonymous namespace
 
@@ -228,6 +663,39 @@ void MitigationEngine::capture_hardware_baseline() noexcept {
         }
     }
 
+    // 12. NVMe APST, Kernel CFS Migration Cost, GPU Power Profile & Wi-Fi Power
+    //     Save Baselines (REF-REQ-092, REF-ARCH-069)
+    n = 0;
+    if (core::fs::read_small_file("/sys/module/nvme_core/parameters/default_ps_max_latency_us", buf, sizeof(buf) - 1, &n) && n > 0) {
+        buf[n] = '\0';
+        s_hardware_baseline.nvme_apst_latency_baseline_us = static_cast<uint32_t>(std::strtoul(buf, nullptr, 10));
+    }
+    n = 0;
+    if (core::fs::read_small_file("/proc/sys/kernel/sched_migration_cost_ns", buf, sizeof(buf) - 1, &n) && n > 0) {
+        buf[n] = '\0';
+        s_hardware_baseline.sched_migration_cost_baseline_ns = std::strtoull(buf, nullptr, 10);
+    }
+
+    s_hardware_baseline.gpu_power_profile_mode_baseline = read_gpu_power_profile_mode();
+
+    for (size_t i = 0; i < HardwareBaselineState::MAX_NVME_CONTROLLERS; ++i) {
+        char ctrl_path[64];
+        std::snprintf(ctrl_path, sizeof(ctrl_path), "/sys/class/nvme/nvme%zu/power/control", i);
+        size_t cn = 0;
+        if (!core::fs::read_small_file(ctrl_path, buf, sizeof(buf) - 1, &cn) || cn == 0) continue;
+        while (cn > 0 && (buf[cn - 1] == '\n' || buf[cn - 1] == '\r' || buf[cn - 1] == ' ')) --cn;
+        buf[cn] = '\0';
+        std::strncpy(s_hardware_baseline.nvme_power_control_baseline[i], buf,
+                     sizeof(s_hardware_baseline.nvme_power_control_baseline[i]) - 1);
+    }
+
+    char wifi_ifname[32];
+    bool ps_enabled = true;
+    if (detect_wireless_ifname(wifi_ifname, sizeof(wifi_ifname)) &&
+        nl80211_get_power_save(wifi_ifname, &ps_enabled)) {
+        s_hardware_baseline.wifi_power_save_baseline = ps_enabled;
+    }
+
     s_hardware_baseline.captured = true;
 }
 
@@ -267,6 +735,13 @@ void MitigationEngine::restore_hardware_baseline() noexcept {
     if (s_hardware_baseline.audio_power_save_modified) {
         restore_audio_codec_baseline();
     }
+
+    // Restore Ultimate Performance Unleash modifications (REF-REQ-092, REF-ARCH-069)
+    release_performance_unleash();
+    set_audio_latency_floor(false);
+    if (s_hardware_baseline.audio_codec_power_save_suspended >= 0) {
+        s_hardware_baseline.audio_codec_power_save_suspended = -1;
+    }
 }
 
 const MitigationEngine::HardwareBaselineState& MitigationEngine::hardware_baseline() noexcept {
@@ -275,7 +750,7 @@ const MitigationEngine::HardwareBaselineState& MitigationEngine::hardware_baseli
 
 bool MitigationEngine::set_platform_profile(const char* profile) noexcept {
     if (!profile) return false;
-    int fd = ::open("/sys/firmware/acpi/platform_profile", O_WRONLY | O_CLOEXEC);
+    int fd = hw_open_write("/sys/firmware/acpi/platform_profile", O_WRONLY | O_CLOEXEC);
     if (fd < 0) return false;
     size_t len = std::strlen(profile);
     ssize_t w = ::write(fd, profile, len);
@@ -293,7 +768,7 @@ bool MitigationEngine::set_cpu_governor(const char* governor) noexcept {
     for (int i = 0; i < total_cpus; ++i) {
         char path[128];
         std::snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_governor", i);
-        int fd = ::open(path, O_WRONLY | O_CLOEXEC);
+        int fd = hw_open_write(path, O_WRONLY | O_CLOEXEC);
         if (fd >= 0) {
             if (::write(fd, governor, glen) > 0) {
                 any_success = true;
@@ -305,7 +780,7 @@ bool MitigationEngine::set_cpu_governor(const char* governor) noexcept {
 }
 
 bool MitigationEngine::set_cpu_boost(bool enable) noexcept {
-    int fd = ::open("/sys/devices/system/cpu/cpufreq/boost", O_WRONLY | O_CLOEXEC);
+    int fd = hw_open_write("/sys/devices/system/cpu/cpufreq/boost", O_WRONLY | O_CLOEXEC);
     if (fd < 0) return false;
     const char* val = enable ? "1\n" : "0\n";
     ssize_t w = ::write(fd, val, 2);
@@ -314,6 +789,18 @@ bool MitigationEngine::set_cpu_boost(bool enable) noexcept {
 }
 
 bool MitigationEngine::set_cpu_scaling_max_freq(uint32_t khz) noexcept {
+    // REF-REQ-098: A ceiling below the driver's own minimum leaves the governor
+    // with no valid operating point and the desktop crawling.
+    {
+        char buf[32];
+        size_t n = 0;
+        if (core::fs::read_small_file("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq",
+                                      buf, sizeof(buf), &n) && n > 0) {
+            buf[n] = '\0';
+            const auto hw_min = static_cast<uint32_t>(std::strtoul(buf, nullptr, 10));
+            if (hw_min > 0 && khz < hw_min) khz = hw_min;
+        }
+    }
     if (khz == 0) return false;
 
     // Detect hardware min freq to prevent kernel -EINVAL when requested freq is below hardware floor
@@ -334,7 +821,7 @@ bool MitigationEngine::set_cpu_scaling_max_freq(uint32_t khz) noexcept {
     for (int i = 0; i < total_cpus; ++i) {
         char path[128];
         std::snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_max_freq", i);
-        int fd = ::open(path, O_WRONLY | O_CLOEXEC);
+        int fd = hw_open_write(path, O_WRONLY | O_CLOEXEC);
         if (fd >= 0) {
             if (::write(fd, freq_buf, static_cast<size_t>(flen)) > 0) {
                 any_success = true;
@@ -353,7 +840,7 @@ bool MitigationEngine::set_panel_power_savings(uint32_t level) noexcept {
         "/sys/class/drm/card0-eDP-1/amdgpu/panel_power_savings"
     };
     for (const char* p : paths) {
-        int fd = ::open(p, O_WRONLY | O_CLOEXEC);
+        int fd = hw_open_write(p, O_WRONLY | O_CLOEXEC);
         if (fd >= 0) {
             ssize_t w = ::write(fd, lvl_buf, static_cast<size_t>(len));
             ::close(fd);
@@ -363,81 +850,35 @@ bool MitigationEngine::set_panel_power_savings(uint32_t level) noexcept {
     return false;
 }
 
+// REF-REQ-105: GPU clock control never touches the overdrive table.
+//
+// Both of these used to write pp_od_clk_voltage. The kernel only accepts that
+// node while power_dpm_force_performance_level is "manual", and every profile
+// application called restore_gpu_max_clock() with the level at auto/low/high.
+// The kernel rejected each write:
+//
+//   amdgpu: pp_od_clk_voltage is not accessible if
+//           power_dpm_force_performance_level is not in manual mode!
+//
+// 1706 rejected SMU transactions accumulated on the development machine and left
+// the SMU unresponsive ("amdgpu: failed to write reg ..."), with the DPM table
+// stuck reporting a 0 MHz active state. That destabilises DRM, and a Chromium
+// GPU process cannot survive it - which is how an Electron application ended up
+// hung with no way to recover short of a restart.
+//
+// The overdrive table is an overclocking interface: ASIC-specific, only valid in
+// one mode, and capable of wedging the SMU when driven wrongly. Clock ceilings
+// are now expressed solely through power_dpm_force_performance_level, which is
+// mode-independent and is the supported mechanism. "low" already delivers the
+// reduction UltraEndurance wanted from a 640 MHz overdrive cap.
 bool MitigationEngine::set_gpu_max_clock(uint32_t mhz) noexcept {
-    const char* const gpu_dirs[] = {
-        "/sys/class/drm/card1/device",
-        "/sys/class/drm/card0/device"
-    };
-
-    for (const char* dir : gpu_dirs) {
-        char dpm_path[128];
-        char od_path[128];
-        std::snprintf(dpm_path, sizeof(dpm_path), "%s/power_dpm_force_performance_level", dir);
-        std::snprintf(od_path, sizeof(od_path), "%s/pp_od_clk_voltage", dir);
-
-        if (::access(dpm_path, W_OK) == 0 && ::access(od_path, W_OK) == 0) {
-            // Set performance level to manual
-            int dpm_fd = ::open(dpm_path, O_WRONLY | O_CLOEXEC);
-            if (dpm_fd >= 0) {
-                (void)::write(dpm_fd, "manual\n", 7);
-                ::close(dpm_fd);
-            }
-
-            // Set overdrive SCLK max to target mhz (s 1 <mhz>)
-            int od_fd = ::open(od_path, O_WRONLY | O_CLOEXEC);
-            if (od_fd >= 0) {
-                char cmd[32];
-                int n = std::snprintf(cmd, sizeof(cmd), "s 1 %u\n", mhz);
-                (void)::write(od_fd, cmd, static_cast<size_t>(n));
-                (void)::write(od_fd, "c\n", 2);
-                ::close(od_fd);
-            }
-            return true;
-        }
-    }
-    return false;
+    (void)mhz;
+    return set_gpu_dpm_level("low");
 }
 
 bool MitigationEngine::restore_gpu_max_clock() noexcept {
-    const char* const gpu_dirs[] = {
-        "/sys/class/drm/card1/device",
-        "/sys/class/drm/card0/device"
-    };
-
-    for (const char* dir : gpu_dirs) {
-        char dpm_path[128];
-        char od_path[128];
-        char sclk_path[128];
-        std::snprintf(dpm_path, sizeof(dpm_path), "%s/power_dpm_force_performance_level", dir);
-        std::snprintf(od_path, sizeof(od_path), "%s/pp_od_clk_voltage", dir);
-        std::snprintf(sclk_path, sizeof(sclk_path), "%s/pp_dpm_sclk", dir);
-
-        if (::access(od_path, W_OK) == 0) {
-            int od_fd = ::open(od_path, O_WRONLY | O_CLOEXEC);
-            if (od_fd >= 0) {
-                (void)::write(od_fd, "r\n", 2); // reset table
-                (void)::write(od_fd, "c\n", 2); // commit reset
-                ::close(od_fd);
-            }
-        }
-
-        if (::access(sclk_path, W_OK) == 0) {
-            int sclk_fd = ::open(sclk_path, O_WRONLY | O_CLOEXEC);
-            if (sclk_fd >= 0) {
-                (void)::write(sclk_fd, "0 1 2\n", 6); // re-enable all states
-                ::close(sclk_fd);
-            }
-        }
-
-        if (::access(dpm_path, W_OK) == 0) {
-            int dpm_fd = ::open(dpm_path, O_WRONLY | O_CLOEXEC);
-            if (dpm_fd >= 0) {
-                (void)::write(dpm_fd, "auto\n", 5);
-                ::close(dpm_fd);
-            }
-        }
-    }
-    return true;
+    const char* baseline = s_hardware_baseline.gpu_dpm_level;
+    return set_gpu_dpm_level((baseline[0] != '\0') ? baseline : "auto");
 }
 
 bool MitigationEngine::set_gpu_dpm_level(const char* level) noexcept {
@@ -450,7 +891,7 @@ bool MitigationEngine::set_gpu_dpm_level(const char* level) noexcept {
     for (const char* dir : gpu_dirs) {
         char dpm_path[128];
         std::snprintf(dpm_path, sizeof(dpm_path), "%s/power_dpm_force_performance_level", dir);
-        int fd = ::open(dpm_path, O_WRONLY | O_CLOEXEC);
+        int fd = hw_open_write(dpm_path, O_WRONLY | O_CLOEXEC);
         if (fd >= 0) {
             (void)::write(fd, level, std::strlen(level));
             (void)::write(fd, "\n", 1);
@@ -461,10 +902,226 @@ bool MitigationEngine::set_gpu_dpm_level(const char* level) noexcept {
     return false;
 }
 
+void MitigationEngine::set_performance_pm_qos(bool enable) noexcept {
+    if (enable) {
+        if (s_hardware_baseline.performance_pm_qos_fd < 0) {
+            int fd = hw_open_write("/dev/cpu_dma_latency", O_RDWR | O_CLOEXEC);
+            if (fd >= 0) {
+                int32_t latency = 0; // 0 us target latency -> clamp to C0
+                if (::write(fd, &latency, sizeof(latency)) == sizeof(latency)) {
+                    s_hardware_baseline.performance_pm_qos_fd = fd;
+                    s_hardware_baseline.performance_pm_qos_active = true;
+                } else {
+                    ::close(fd);
+                }
+            }
+        }
+    } else {
+        if (s_hardware_baseline.performance_pm_qos_fd >= 0) {
+            ::close(s_hardware_baseline.performance_pm_qos_fd);
+            s_hardware_baseline.performance_pm_qos_fd = -1;
+            s_hardware_baseline.performance_pm_qos_active = false;
+        }
+    }
+}
+
+bool MitigationEngine::set_gpu_power_profile_mode(int mode_id) noexcept {
+    const char* const paths[] = {
+        "/sys/class/drm/card1/device/pp_power_profile_mode",
+        "/sys/class/drm/card0/device/pp_power_profile_mode"
+    };
+    for (const char* path : paths) {
+        int fd = hw_open_write(path, O_WRONLY | O_CLOEXEC);
+        if (fd >= 0) {
+            char buf[16];
+            int len = std::snprintf(buf, sizeof(buf), "%d\n", mode_id);
+            (void)::write(fd, buf, static_cast<size_t>(len));
+            ::close(fd);
+            s_hardware_baseline.gpu_power_profile_mode_modified = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool MitigationEngine::restore_gpu_power_profile_mode_baseline() noexcept {
+    if (!s_hardware_baseline.gpu_power_profile_mode_modified) return true;
+    // Fall back to 0 (BOOTUP_DEFAULT) only when the active row could not be read.
+    const int baseline = s_hardware_baseline.gpu_power_profile_mode_baseline;
+    set_gpu_power_profile_mode(baseline >= 0 ? baseline : 0);
+    s_hardware_baseline.gpu_power_profile_mode_modified = false;
+    return true;
+}
+
+bool MitigationEngine::set_nvme_apst_max_latency(uint32_t max_latency_us) noexcept {
+    int fd = hw_open_write("/sys/module/nvme_core/parameters/default_ps_max_latency_us", O_WRONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        char buf[32];
+        int len = std::snprintf(buf, sizeof(buf), "%u\n", max_latency_us);
+        (void)::write(fd, buf, static_cast<size_t>(len));
+        ::close(fd);
+        s_hardware_baseline.nvme_apst_modified = true;
+    }
+    return fd >= 0;
+}
+
+bool MitigationEngine::set_nvme_power_control(const char* value) noexcept {
+    if (!value || value[0] == '\0') return false;
+
+    bool actuated = false;
+    for (size_t i = 0; i < HardwareBaselineState::MAX_NVME_CONTROLLERS; ++i) {
+        char ctrl_path[64];
+        std::snprintf(ctrl_path, sizeof(ctrl_path), "/sys/class/nvme/nvme%zu/power/control", i);
+        int fd = hw_open_write(ctrl_path, O_WRONLY | O_CLOEXEC);
+        if (fd < 0) continue;
+
+        char out[16];
+        int len = std::snprintf(out, sizeof(out), "%s\n", value);
+        actuated = (::write(fd, out, static_cast<size_t>(len)) > 0) || actuated;
+        ::close(fd);
+    }
+    if (actuated) s_hardware_baseline.nvme_power_control_modified = true;
+    return actuated;
+}
+
+bool MitigationEngine::restore_nvme_power_control_baseline() noexcept {
+    if (!s_hardware_baseline.nvme_power_control_modified) return true;
+
+    for (size_t i = 0; i < HardwareBaselineState::MAX_NVME_CONTROLLERS; ++i) {
+        const char* baseline = s_hardware_baseline.nvme_power_control_baseline[i];
+        if (baseline[0] == '\0') continue; // controller absent or never captured
+
+        char ctrl_path[64];
+        std::snprintf(ctrl_path, sizeof(ctrl_path), "/sys/class/nvme/nvme%zu/power/control", i);
+        int fd = hw_open_write(ctrl_path, O_WRONLY | O_CLOEXEC);
+        if (fd < 0) continue;
+
+        char out[16];
+        int len = std::snprintf(out, sizeof(out), "%s\n", baseline);
+        (void)::write(fd, out, static_cast<size_t>(len));
+        ::close(fd);
+    }
+    s_hardware_baseline.nvme_power_control_modified = false;
+    return true;
+}
+
+bool MitigationEngine::restore_nvme_apst_baseline() noexcept {
+    restore_nvme_power_control_baseline();
+    if (!s_hardware_baseline.nvme_apst_modified) return true;
+    set_nvme_apst_max_latency(s_hardware_baseline.nvme_apst_latency_baseline_us);
+    s_hardware_baseline.nvme_apst_modified = false;
+    return true;
+}
+
+bool MitigationEngine::set_wifi_powersave(bool enable) noexcept {
+    char ifname[32];
+    if (!detect_wireless_ifname(ifname, sizeof(ifname))) {
+        s_hardware_baseline.wifi_power_save_disabled = false;
+        return false;
+    }
+
+    // (a) Bus-level runtime PM of the wireless device.
+    char pm_path[96];
+    std::snprintf(pm_path, sizeof(pm_path), "/sys/class/net/%s/device/power/control", ifname);
+    bool pm_ok = false;
+    int fd = hw_open_write(pm_path, O_WRONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        const char* val = enable ? "auto\n" : "on\n";
+        pm_ok = (::write(fd, val, std::strlen(val)) > 0);
+        ::close(fd);
+    }
+
+    // (b) 802.11 power save via nl80211 generic netlink - no shell, no fork.
+    const bool ps_ok = nl80211_set_power_save(ifname, enable);
+
+    const bool actuated = pm_ok || ps_ok;
+    s_hardware_baseline.wifi_power_save_disabled = actuated && !enable;
+    return actuated;
+}
+
+bool MitigationEngine::restore_wifi_powersave_baseline() noexcept {
+    if (!s_hardware_baseline.wifi_power_save_disabled) return true;
+    set_wifi_powersave(s_hardware_baseline.wifi_power_save_baseline);
+    // Cleared unconditionally: WattCurb no longer holds a power-save override,
+    // even when the captured baseline was itself "power save disabled".
+    s_hardware_baseline.wifi_power_save_disabled = false;
+    return true;
+}
+
+void MitigationEngine::set_actuation_sandbox(bool enable) noexcept {
+    s_actuation_sandbox = enable;
+}
+
+bool MitigationEngine::actuation_sandboxed() noexcept {
+    return s_actuation_sandbox;
+}
+
+void MitigationEngine::release_performance_unleash() noexcept {
+    set_performance_pm_qos(false);              // no-op when the fd was never acquired
+    restore_gpu_power_profile_mode_baseline();
+    restore_nvme_apst_baseline();
+    restore_wifi_powersave_baseline();
+    restore_sched_migration_cost_baseline();
+    s_hardware_baseline.performance_unleash_engaged = false;
+}
+
+bool MitigationEngine::set_sched_migration_cost(uint64_t cost_ns) noexcept {
+    int fd = hw_open_write("/proc/sys/kernel/sched_migration_cost_ns", O_WRONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        char buf[32];
+        int len = std::snprintf(buf, sizeof(buf), "%lu\n", cost_ns);
+        (void)::write(fd, buf, static_cast<size_t>(len));
+        ::close(fd);
+        s_hardware_baseline.sched_migration_cost_modified = true;
+        return true;
+    }
+    return false;
+}
+
+bool MitigationEngine::restore_sched_migration_cost_baseline() noexcept {
+    if (!s_hardware_baseline.sched_migration_cost_modified) return true;
+    set_sched_migration_cost(s_hardware_baseline.sched_migration_cost_baseline_ns);
+    s_hardware_baseline.sched_migration_cost_modified = false;
+    return true;
+}
+
+void MitigationEngine::enforce_cpu_freq_floor() noexcept {
+    // REF-REQ-098: The scaling floor is pinned back to the driver's own minimum
+    // on every profile application. WattCurb never lowers it, but the guarantee
+    // the user needs is that the machine cannot be left crawling by anything -
+    // a previous run, a firmware clamp, or another tool - so the floor is
+    // asserted rather than merely not violated.
+    char buf[32];
+    size_t n = 0;
+    if (!core::fs::read_small_file("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq",
+                                   buf, sizeof(buf), &n) || n == 0) {
+        return;
+    }
+    buf[n] = '\0';
+    const auto hw_min = static_cast<uint32_t>(std::strtoul(buf, nullptr, 10));
+    if (hw_min == 0) return;
+
+    const int32_t cpus = get_total_online_cpus();
+    for (int32_t i = 0; i < cpus && i < 256; ++i) {
+        char path[96];
+        std::snprintf(path, sizeof(path),
+                      "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_min_freq", i);
+        int fd = hw_open_write(path, O_WRONLY | O_CLOEXEC);
+        if (fd < 0) continue;
+        char val[24];
+        const int len = std::snprintf(val, sizeof(val), "%u\n", hw_min);
+        (void)::write(fd, val, static_cast<size_t>(len));
+        ::close(fd);
+    }
+}
+
 bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
     if (!s_hardware_baseline.captured) {
         capture_hardware_baseline();
     }
+
+    // Asserted first, so no profile can leave the machine below its floor.
+    enforce_cpu_freq_floor();
 
     switch (mode) {
     case PowerProfileMode::Performance:
@@ -479,6 +1136,16 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_cpu_epp_policy("performance");
         restore_gpu_max_clock();
         set_gpu_dpm_level("high");
+
+        // Ultimate Performance Unleash Full-Silicon Actuations (REF-REQ-092, REF-ARCH-069)
+        set_performance_pm_qos(true);                 // System-wide C0 clamp (0us DMA latency)
+        set_gpu_power_profile_mode(1);                // 3D_FULL_SCREEN peak compute/VRAM profile
+        set_nvme_apst_max_latency(0);                 // Zero APST disk transition latency
+        set_nvme_power_control("on");                 // Hold NVMe controllers runtime-active
+        set_wifi_powersave(false);                    // Eliminate Wi-Fi power-save jitter
+        set_sched_migration_cost(5000000);            // 5ms CPU cache warmth affinity
+        s_hardware_baseline.performance_unleash_engaged = true;
+
         // Restore UltraEndurance modifications if any
         set_smt_control(s_hardware_baseline.smt_control);
         set_bluetooth_blocked(s_hardware_baseline.bluetooth_blocked);
@@ -492,6 +1159,9 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         return true;
 
     case PowerProfileMode::Balanced:
+        // Demotion / Cleanup from Performance mode (REF-REQ-092)
+        release_performance_unleash();
+
         set_platform_profile("balanced");
         set_cpu_governor("schedutil");
         set_cpu_boost(true);
@@ -516,6 +1186,9 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         return true;
 
     case PowerProfileMode::PowerSaver:
+        // Demotion / Cleanup from Performance mode (REF-REQ-092)
+        release_performance_unleash();
+
         set_platform_profile("low-power");
         set_cpu_governor("schedutil");
         set_cpu_boost(false);
@@ -538,6 +1211,9 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         return true;
 
     case PowerProfileMode::UltraEndurance:
+        // Demotion / Cleanup from Performance mode (REF-REQ-092)
+        release_performance_unleash();
+
         set_platform_profile("low-power");
         set_cpu_governor("powersave");
         set_cpu_boost(false);
@@ -552,7 +1228,12 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_gpu_dpm_level("low");
         trigger_3tier_vram_gc();
         // REF-REQ-063, REF-REQ-064, REF-REQ-065: Ultra-low power hardware & desktop extensions
-        set_smt_control("off");
+        // REF-REQ-098: SMT is deliberately NOT disabled. Offlining half the logical
+        // CPUs in the mode whose failure mode is stalling removes exactly the
+        // scheduling capacity the compositor and input path need, and CPU hotplug
+        // against the engine's own affinity masks can strand a task on a core that
+        // is going away. Deep saving comes from clocks and idle residency here,
+        // not from taking processors out of the scheduler.
         set_bluetooth_blocked(false); // REF-REQ-065: Bluetooth Always-On Invariant
         cap_display_backlight(35.0);
         set_display_refresh_rate(48); // REF-REQ-063: 48Hz DRRS on user Ultra Save
@@ -576,56 +1257,56 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
     return false;
 }
 
-PowerProfileMode MitigationEngine::determine_profile(bool on_battery, double battery_pct) const noexcept {
-    if (m_profile_override.has_value()) {
-        return *m_profile_override;
-    }
+PowerProfileMode MitigationEngine::resolve_profile(
+    PowerProfileMode current, bool on_battery, double battery_pct,
+    ProfileDemotionLatch& latch
+) noexcept {
+    // Rearm once the battery recovers past each threshold. The +5% guard band
+    // stops a reading hovering on the boundary from re-triggering.
+    if (!on_battery || battery_pct > 35.0) latch.crossed_30 = false;
+    if (!on_battery || battery_pct > 25.0) latch.crossed_20 = false;
 
-    if (!on_battery) {
-        return PowerProfileMode::Balanced;
-    }
+    // On AC the daemon never imposes a profile - the user's choice stands.
+    if (!on_battery) return current;
 
-    // REF-REQ-031 Sec 2.2: Hysteresis & Anti-Flapping Guards
-    switch (m_current_profile) {
-    case PowerProfileMode::Performance:
-        if (battery_pct < 20.0) {
-            return PowerProfileMode::UltraEndurance;
-        }
-        if (battery_pct <= 50.0) {
+    // Critical floor. Enforced continuously rather than latched: below 5% no
+    // other profile is permitted at all.
+    if (battery_pct <= 5.0) return PowerProfileMode::UltraEndurance;
+
+    // The latch records the THRESHOLD CROSSING, not the demotion. Otherwise a
+    // user who picks Performance again at 25% would be demoted a second time.
+    // A threshold may only ever move TOWARDS more saving. The enum is ordered
+    // Performance < Balanced < PowerSaver < UltraEndurance, so a user sitting in
+    // UltraEndurance is never pulled back up to PowerSaver by the 20% rule.
+    if (battery_pct <= 20.0 && !latch.crossed_20) {
+        latch.crossed_20 = true;
+        latch.crossed_30 = true; // one large drop must not demote twice
+        if (current < PowerProfileMode::PowerSaver) {
             return PowerProfileMode::PowerSaver;
         }
-        return PowerProfileMode::Balanced;
+    }
 
-    case PowerProfileMode::Balanced:
-        if (battery_pct < 20.0) {
-            return PowerProfileMode::UltraEndurance;
-        }
-        if (battery_pct <= 50.0) {
-            return PowerProfileMode::PowerSaver;
-        }
-        return PowerProfileMode::Balanced;
-
-    case PowerProfileMode::PowerSaver:
-        if (battery_pct < 20.0) {
-            return PowerProfileMode::UltraEndurance;
-        }
-        if (battery_pct > 55.0) { // 55% Hysteresis recovery
+    if (battery_pct <= 30.0 && !latch.crossed_30) {
+        latch.crossed_30 = true;
+        if (current == PowerProfileMode::Performance) {
             return PowerProfileMode::Balanced;
         }
-        return PowerProfileMode::PowerSaver;
-
-    case PowerProfileMode::UltraEndurance:
-        if (battery_pct > 55.0) {
-            return PowerProfileMode::Balanced;
-        }
-        if (battery_pct >= 25.0) { // 25% Hysteresis recovery
-            return PowerProfileMode::PowerSaver;
-        }
-        return PowerProfileMode::UltraEndurance;
-
-    default:
-        return PowerProfileMode::Balanced;
     }
+
+    return current;
+}
+
+PowerProfileMode MitigationEngine::determine_profile(bool on_battery, double battery_pct) noexcept {
+    // The user's explicit selection, when present, is the baseline the battery
+    // rules act on - not something they silently override every cycle.
+    const PowerProfileMode current = m_profile_override.value_or(m_current_profile);
+    const PowerProfileMode target = resolve_profile(current, on_battery, battery_pct, m_demotion_latch);
+
+    // A demotion becomes the new baseline, so it is not undone on the next tick.
+    if (m_profile_override.has_value() && target != *m_profile_override) {
+        m_profile_override = target;
+    }
+    return target;
 }
 
 bool MitigationEngine::resolve_cgroup_path(int32_t pid, char* out_buf, size_t out_cap) noexcept {
@@ -707,6 +1388,11 @@ bool MitigationEngine::is_immune_process(int32_t pid) noexcept {
         comm_buf[--n] = '\0';
     }
     std::string_view comm(comm_buf, n);
+
+    // REF-REQ-096: Whatever currently owns a running PCM stream is immune by
+    // identity, not by name - a sound server the allowlist has never heard of
+    // still must not be throttled while it is moving samples.
+    if (is_audio_owner(pid)) return true;
 
     // Implements REF-REQ-049 & REF-REQ-054: Absolute immunity invariant for audio and critical system daemons
     if (comm.starts_with("pipewire") || comm.starts_with("wireplumber") ||
@@ -945,12 +1631,25 @@ bool MitigationEngine::shield_interactive_process(int32_t pid, std::string_view 
 
     int cur_nice = ::getpriority(PRIO_PROCESS, static_cast<id_t>(pid));
     if (cur_nice > target_nice) {
-        ::setpriority(PRIO_PROCESS, static_cast<id_t>(pid), target_nice);
+        hw_setpriority(PRIO_PROCESS, static_cast<id_t>(pid), target_nice);
     }
 
-    // Pin to Cluster 1 (C1: Cores 0..7) to guarantee zero cross-CCX cache thrashing
+    // REF-REQ-099: Cluster pinning is a CACHE-LOCALITY optimisation, but it is
+    // also a hard capacity cut - it hands the process half the machine. In
+    // Performance mode that is exactly backwards: the foreground application must
+    // never be given less than the whole processor, and a parallel build or a
+    // browser pinned to one CCX stalls visibly. Priority elevation above is kept,
+    // because that ADDS resources; the affinity restriction is not applied.
+    if (s_effective_profile == PowerProfileMode::Performance) {
+        cpu_set_t all_cores = get_all_cores_cpuset();
+        hw_sched_setaffinity(pid, sizeof(cpu_set_t), &all_cores);
+        return true;
+    }
+
+    // Saving profiles keep the single-CCX residency, which lets the other cluster
+    // stay in a deeper idle state.
     const auto& topo = get_cluster_topology();
-    ::sched_setaffinity(pid, sizeof(cpu_set_t), &topo.c1_cpuset);
+    hw_sched_setaffinity(pid, sizeof(cpu_set_t), &topo.c1_cpuset);
     return true;
 }
 
@@ -1031,7 +1730,7 @@ bool MitigationEngine::apply_core_affinity_cap(int32_t pid, const cpu_set_t* all
         allowed_set = &default_set;
     }
 
-    bool any_success = (::sched_setaffinity(pid, sizeof(cpu_set_t), allowed_set) == 0);
+    bool any_success = (hw_sched_setaffinity(pid, sizeof(cpu_set_t), allowed_set) == 0);
 
     // Thread-level traversal via /proc/<pid>/task/ (REF-REQ-054, REF-ARCH-030)
     char task_dir[64];
@@ -1048,7 +1747,7 @@ bool MitigationEngine::apply_core_affinity_cap(int32_t pid, const cpu_set_t* all
         char* endptr = nullptr;
         long tid = std::strtol(entry->d_name, &endptr, 10);
         if (tid > 0 && *endptr == '\0') {
-            if (::sched_setaffinity(static_cast<pid_t>(tid), sizeof(cpu_set_t), allowed_set) == 0) {
+            if (hw_sched_setaffinity(static_cast<pid_t>(tid), sizeof(cpu_set_t), allowed_set) == 0) {
                 any_success = true;
             }
         }
@@ -1068,7 +1767,7 @@ bool MitigationEngine::restore_core_affinity(int32_t pid, const cpu_set_t* targe
         mask_to_set = &all_cores;
     }
 
-    bool any_success = (::sched_setaffinity(pid, sizeof(cpu_set_t), mask_to_set) == 0);
+    bool any_success = (hw_sched_setaffinity(pid, sizeof(cpu_set_t), mask_to_set) == 0);
 
     char task_dir[64];
     std::snprintf(task_dir, sizeof(task_dir), "/proc/%d/task", pid);
@@ -1084,7 +1783,7 @@ bool MitigationEngine::restore_core_affinity(int32_t pid, const cpu_set_t* targe
         char* endptr = nullptr;
         long tid = std::strtol(entry->d_name, &endptr, 10);
         if (tid > 0 && *endptr == '\0') {
-            if (::sched_setaffinity(static_cast<pid_t>(tid), sizeof(cpu_set_t), mask_to_set) == 0) {
+            if (hw_sched_setaffinity(static_cast<pid_t>(tid), sizeof(cpu_set_t), mask_to_set) == 0) {
                 any_success = true;
             }
         }
@@ -1099,8 +1798,8 @@ bool MitigationEngine::apply_sched_batch(int32_t pid, int nice_val) noexcept {
 
     struct sched_param sp{};
     sp.sched_priority = 0;
-    bool any_success = (::sched_setscheduler(pid, SCHED_BATCH, &sp) == 0);
-    ::setpriority(PRIO_PROCESS, static_cast<id_t>(pid), nice_val);
+    bool any_success = (hw_sched_setscheduler(pid, SCHED_BATCH, &sp) == 0);
+    hw_setpriority(PRIO_PROCESS, static_cast<id_t>(pid), nice_val);
 
     char task_dir[64];
     std::snprintf(task_dir, sizeof(task_dir), "/proc/%d/task", pid);
@@ -1116,18 +1815,282 @@ bool MitigationEngine::apply_sched_batch(int32_t pid, int nice_val) noexcept {
         char* endptr = nullptr;
         long tid = std::strtol(entry->d_name, &endptr, 10);
         if (tid > 0 && *endptr == '\0') {
-            if (::sched_setscheduler(static_cast<pid_t>(tid), SCHED_BATCH, &sp) == 0) {
+            if (hw_sched_setscheduler(static_cast<pid_t>(tid), SCHED_BATCH, &sp) == 0) {
                 any_success = true;
             }
-            ::setpriority(PRIO_PROCESS, static_cast<id_t>(tid), nice_val);
+            hw_setpriority(PRIO_PROCESS, static_cast<id_t>(tid), nice_val);
         }
     }
     ::closedir(dir);
     return any_success;
 }
 
+
+void MitigationEngine::refresh_audio_stream_state() noexcept {
+    WATTCURB_PROFILE_SCOPE("mitig.audio_probe");
+    AudioStreamState st{};
+
+    // ALSA publishes both facts we need in one small file per substream:
+    //   state: RUNNING      -> a stream is actually moving samples
+    //   owner_pid   : <pid> -> the process holding the PCM (the sound server)
+    DIR* snd = ::opendir("/proc/asound");
+    if (!snd) {
+        s_audio_state = st;
+        return;
+    }
+
+    struct dirent* card = nullptr;
+    while ((card = ::readdir(snd)) != nullptr) {
+        if (std::strncmp(card->d_name, "card", 4) != 0) continue;
+        if (card->d_name[4] < '0' || card->d_name[4] > '9') continue;
+
+        char card_path[96];
+        if (std::snprintf(card_path, sizeof(card_path), "/proc/asound/%s", card->d_name)
+                >= static_cast<int>(sizeof(card_path))) {
+            continue;
+        }
+
+        DIR* cd = ::opendir(card_path);
+        if (!cd) continue;
+
+        struct dirent* pcm = nullptr;
+        while ((pcm = ::readdir(cd)) != nullptr) {
+            const size_t len = std::strlen(pcm->d_name);
+            // Playback substreams only: "pcm<N>p".
+            if (len < 5 || std::strncmp(pcm->d_name, "pcm", 3) != 0 || pcm->d_name[len - 1] != 'p') {
+                continue;
+            }
+
+            for (int sub_idx = 0; sub_idx < 4; ++sub_idx) {
+                char status_path[192];
+                if (std::snprintf(status_path, sizeof(status_path), "%s/%s/sub%d/status",
+                                  card_path, pcm->d_name, sub_idx)
+                        >= static_cast<int>(sizeof(status_path))) {
+                    break;
+                }
+
+                char buf[256];
+                size_t n = 0;
+                if (!core::fs::read_small_file(status_path, buf, sizeof(buf), &n) || n == 0) break;
+                buf[n] = '\0';
+
+                if (std::strstr(buf, "RUNNING") == nullptr) continue;
+                st.active = true;
+
+                const char* owner = std::strstr(buf, "owner_pid");
+                if (!owner) continue;
+                const char* colon = std::strchr(owner, ':');
+                if (!colon) continue;
+
+                const long pid_val = std::strtol(colon + 1, nullptr, 10);
+                if (pid_val <= 1) continue;
+
+                const auto pid = static_cast<int32_t>(pid_val);
+                bool dup = false;
+                for (size_t i = 0; i < st.owner_count; ++i) {
+                    if (st.owner_pids[i] == pid) { dup = true; break; }
+                }
+                if (!dup && st.owner_count < MAX_AUDIO_OWNERS) {
+                    st.owner_pids[st.owner_count++] = pid;
+                }
+            }
+        }
+        ::closedir(cd);
+    }
+    ::closedir(snd);
+
+    s_audio_state = st;
+}
+
+const MitigationEngine::AudioStreamState& MitigationEngine::audio_stream_state() noexcept {
+    return s_audio_state;
+}
+
+bool MitigationEngine::is_audio_owner(int32_t pid) noexcept {
+    if (pid <= 1) return false;
+    for (size_t i = 0; i < s_audio_state.owner_count; ++i) {
+        if (s_audio_state.owner_pids[i] == pid) return true;
+    }
+    return false;
+}
+
+void MitigationEngine::set_effective_profile(PowerProfileMode mode) noexcept {
+    s_effective_profile = mode;
+}
+
+PowerProfileMode MitigationEngine::effective_profile() noexcept {
+    return s_effective_profile;
+}
+
+bool MitigationEngine::restore_process_affinity(int32_t pid, const cpu_set_t& original) noexcept {
+    if (pid <= 1) return false;
+
+    // A zeroed record would pin the process to nothing at all, so fall back to
+    // the full online set rather than stranding it.
+    if (CPU_COUNT(&original) == 0) {
+        cpu_set_t all_cores = get_all_cores_cpuset();
+        return hw_sched_setaffinity(pid, sizeof(cpu_set_t), &all_cores) == 0;
+    }
+    return hw_sched_setaffinity(pid, sizeof(cpu_set_t), &original) == 0;
+}
+
+bool MitigationEngine::is_graphical_session_process(int32_t pid) noexcept {
+    if (pid <= 1) return false;
+
+    // The daemon runs as root, so it can read any environ. A graphical client
+    // carries the session's display variables; a system service does not.
+    char env_path[64];
+    std::snprintf(env_path, sizeof(env_path), "/proc/%d/environ", pid);
+
+    int fd = ::open(env_path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+
+    char buf[4096];
+    const ssize_t n = ::read(fd, buf, sizeof(buf) - 1);
+    ::close(fd);
+    if (n <= 0) return false;
+
+    // environ is NUL-separated; scan entry by entry.
+    const size_t len = static_cast<size_t>(n);
+    buf[len] = '\0';
+    for (size_t i = 0; i < len; ) {
+        const char* entry = buf + i;
+        const size_t elen = std::strlen(entry);
+        if (std::strncmp(entry, "WAYLAND_DISPLAY=", 16) == 0 ||
+            std::strncmp(entry, "DISPLAY=", 8) == 0) {
+            return true;
+        }
+        i += elen + 1;
+        if (elen == 0) break;
+    }
+    return false;
+}
+
+bool MitigationEngine::is_liveness_critical(int32_t pid) noexcept {
+    if (pid <= 1) return true;
+
+    char comm_path[64];
+    std::snprintf(comm_path, sizeof(comm_path), "/proc/%d/comm", pid);
+    char comm_buf[64]{};
+    size_t n = 0;
+    if (!core::fs::read_small_file(comm_path, comm_buf, sizeof(comm_buf), &n) || n == 0) {
+        return false;
+    }
+    while (n > 0 && (comm_buf[n - 1] == '\n' || comm_buf[n - 1] == '\r' || comm_buf[n - 1] == ' ')) {
+        comm_buf[--n] = '\0';
+    }
+
+    const auto cls = ProcessClassifierDB::classify(std::string_view(comm_buf, n));
+    return cls.tier <= ProcessSafetyTier::DesktopShell;
+}
+
+bool MitigationEngine::is_audio_shielded(int32_t pid) noexcept {
+    if (!s_audio_state.active || pid <= 1) return false;
+
+    char comm_path[64];
+    std::snprintf(comm_path, sizeof(comm_path), "/proc/%d/comm", pid);
+    char comm_buf[64]{};
+    size_t n = 0;
+    if (!core::fs::read_small_file(comm_path, comm_buf, sizeof(comm_buf), &n) || n == 0) {
+        return false;
+    }
+    while (n > 0 && (comm_buf[n - 1] == '\n' || comm_buf[n - 1] == '\r' || comm_buf[n - 1] == ' ')) {
+        comm_buf[--n] = '\0';
+    }
+
+    const auto cls = ProcessClassifierDB::classify(std::string_view(comm_buf, n));
+    // Tier 0..3 (CriticalImmune .. UserInteractive) are shielded while audio runs;
+    // Tier 4/5 background workers remain throttleable.
+    return cls.tier <= ProcessSafetyTier::UserInteractive;
+}
+
+void MitigationEngine::set_audio_latency_floor(bool engage) noexcept {
+    if (engage) {
+        if (s_hardware_baseline.audio_pm_qos_fd < 0) {
+            int fd = hw_open_write("/dev/cpu_dma_latency", O_RDWR | O_CLOEXEC);
+            if (fd >= 0) {
+                int32_t latency = AUDIO_DMA_LATENCY_US;
+                if (::write(fd, &latency, sizeof(latency)) == sizeof(latency)) {
+                    s_hardware_baseline.audio_pm_qos_fd = fd;
+                } else {
+                    ::close(fd);
+                }
+            }
+        }
+    } else if (s_hardware_baseline.audio_pm_qos_fd >= 0) {
+        ::close(s_hardware_baseline.audio_pm_qos_fd);
+        s_hardware_baseline.audio_pm_qos_fd = -1;
+    }
+}
+
+void MitigationEngine::heal_over_throttled_processes() noexcept {
+    WATTCURB_PROFILE_SCOPE("mitig.heal_over_throttled");
+
+    DIR* proc_dir = ::opendir("/proc");
+    if (!proc_dir) return;
+
+    cpu_set_t all_cores = get_all_cores_cpuset();
+    struct dirent* entry = nullptr;
+    while ((entry = ::readdir(proc_dir)) != nullptr) {
+        if (entry->d_name[0] < '0' || entry->d_name[0] > '9') continue;
+
+        const int32_t pid = std::atoi(entry->d_name);
+        if (pid <= 1) continue;
+
+        // Cheap gate first: only processes actually sitting in the idle class are
+        // candidates, so the protective checks run on a handful of PIDs.
+        if (::sched_getscheduler(pid) != SCHED_IDLE) continue;
+
+        const bool protect = is_immune_process(pid)
+                          || is_liveness_critical(pid)
+                          || is_audio_shielded(pid)
+                          || is_graphical_session_process(pid);
+        if (!protect) continue;
+
+        // restore_sched_normal() walks /proc/<pid>/task, so every thread comes
+        // back - restoring only the thread group leader leaves the process just
+        // as unresponsive, which is what made the first manual recovery attempt
+        // look like it had failed.
+        restore_sched_normal(pid);
+        apply_timer_slack(pid, 50'000ULL);
+        hw_sched_setaffinity(pid, sizeof(cpu_set_t), &all_cores);
+    }
+    ::closedir(proc_dir);
+}
+
 void MitigationEngine::audit_and_heal_audio_stack() noexcept {
     WATTCURB_PROFILE_SCOPE("mitig.audit_heal_audio");
+
+    // REF-REQ-103: Release anything protected that is sitting in the idle class,
+    // whatever applied it and whether or not it was ever tracked.
+    heal_over_throttled_processes();
+
+    // REF-REQ-096: Audio continuity applies in EVERY profile, not just Performance.
+    refresh_audio_stream_state();
+    set_audio_latency_floor(s_audio_state.active);
+
+    if (s_audio_state.active) {
+        // HDA codec runtime suspend must not arm underneath a live stream: the
+        // resume costs a codec power-up and is audible. Park it at 0 and record
+        // what to put back once playback stops.
+        if (s_hardware_baseline.audio_codec_power_save_suspended < 0) {
+            char ps_buf[16];
+            size_t ps_n = 0;
+            int cur_ps = 0;
+            if (core::fs::read_small_file("/sys/module/snd_hda_intel/parameters/power_save",
+                                          ps_buf, sizeof(ps_buf), &ps_n) && ps_n > 0) {
+                ps_buf[ps_n] = '\0';
+                cur_ps = std::atoi(ps_buf);
+            }
+            if (cur_ps > 0) {
+                s_hardware_baseline.audio_codec_power_save_suspended = cur_ps;
+                set_audio_codec_power_save(0, false);
+            }
+        }
+    } else if (s_hardware_baseline.audio_codec_power_save_suspended >= 0) {
+        set_audio_codec_power_save(s_hardware_baseline.audio_codec_power_save_suspended, true);
+        s_hardware_baseline.audio_codec_power_save_suspended = -1;
+    }
     // Implements REF-REQ-049 & REF-REQ-054: Dynamic discovery of user session slices and active audio healing
     const char* services[] = {
         "pipewire.service",
@@ -1184,9 +2147,9 @@ void MitigationEngine::audit_and_heal_audio_stack() noexcept {
                                 restore_sched_normal(audio_pid);
                             }
                             // Elevate priority to real-time interactive level (-19 for audio, -10 for compositor)
-                            ::setpriority(PRIO_PROCESS, static_cast<id_t>(audio_pid), target_nice);
+                            hw_setpriority(PRIO_PROCESS, static_cast<id_t>(audio_pid), target_nice);
                             // Ensure audio/compositor threads have full access to all cores including clean headroom
-                            ::sched_setaffinity(audio_pid, sizeof(cpu_set_t), &all_cores);
+                            hw_sched_setaffinity(audio_pid, sizeof(cpu_set_t), &all_cores);
                         }
                         if (next == p) break;
                         p = next;
@@ -1204,15 +2167,31 @@ bool MitigationEngine::apply_sched_idle(int32_t pid) noexcept {
     // REF-REQ-049: Never throttle audio or critical system processes under any circumstance
     if (is_immune_process(pid)) return false;
 
+    // REF-REQ-096.6: Nothing that may be feeding the audio pipeline gets demoted
+    // to SCHED_IDLE while a stream is running.
+    if (is_audio_shielded(pid)) return false;
+
+    // REF-REQ-098: Input and window management keep a working share in every
+    // profile - a compositor that cannot be scheduled looks like a hung machine.
+    if (is_liveness_critical(pid)) return false;
+
+    // REF-REQ-101: An application in the user's graphical session is never
+    // demoted to the idle class. The classifier falls back to Tier 5 for any name
+    // it has not been taught, which meant an app the user was working in - one
+    // desktop chat client, in the reported case - was pinned to a quarter of the
+    // cores at SCHED_IDLE and stopped responding. Absence from a hardcoded list
+    // is not evidence of being a runaway.
+    if (is_graphical_session_process(pid)) return false;
+
     // 1. Set CPU scheduler to SCHED_IDLE
     struct sched_param sp{};
     sp.sched_priority = 0;
-    int sched_ret = ::sched_setscheduler(pid, SCHED_IDLE, &sp);
+    int sched_ret = hw_sched_setscheduler(pid, SCHED_IDLE, &sp);
 
     // 2. Set Block I/O scheduler to IOPRIO_CLASS_IDLE
 #ifdef SYS_ioprio_set
     int prio_val = IOPRIO_PRIO_VALUE(IOPRIO_CLASS_IDLE, 7);
-    int io_ret = static_cast<int>(::syscall(SYS_ioprio_set, IOPRIO_WHO_PROCESS, pid, prio_val));
+    int io_ret = static_cast<int>(hw_ioprio_set(IOPRIO_WHO_PROCESS, pid, prio_val));
     return (sched_ret == 0 || io_ret == 0);
 #else
     return (sched_ret == 0);
@@ -1225,12 +2204,12 @@ bool MitigationEngine::restore_sched_normal(int32_t pid, int original_policy, in
     int target_policy = (original_policy >= 0) ? original_policy : SCHED_OTHER;
 
     // 1. Reset nice priority to original_nice
-    ::setpriority(PRIO_PROCESS, static_cast<id_t>(pid), original_nice);
+    hw_setpriority(PRIO_PROCESS, static_cast<id_t>(pid), original_nice);
 
     // 2. Restore CPU scheduler to original_policy
     struct sched_param sp{};
     sp.sched_priority = 0;
-    int sched_ret = ::sched_setscheduler(pid, target_policy, &sp);
+    int sched_ret = hw_sched_setscheduler(pid, target_policy, &sp);
 
     // Thread-level traversal for all tasks
     char task_dir[64];
@@ -1243,8 +2222,8 @@ bool MitigationEngine::restore_sched_normal(int32_t pid, int original_policy, in
             char* endptr = nullptr;
             long tid = std::strtol(entry->d_name, &endptr, 10);
             if (tid > 0 && *endptr == '\0') {
-                ::sched_setscheduler(static_cast<pid_t>(tid), target_policy, &sp);
-                ::setpriority(PRIO_PROCESS, static_cast<id_t>(tid), original_nice);
+                hw_sched_setscheduler(static_cast<pid_t>(tid), target_policy, &sp);
+                hw_setpriority(PRIO_PROCESS, static_cast<id_t>(tid), original_nice);
             }
         }
         ::closedir(dir);
@@ -1253,7 +2232,7 @@ bool MitigationEngine::restore_sched_normal(int32_t pid, int original_policy, in
     // 3. Restore Block I/O scheduler to Best-Effort (IOPRIO_CLASS_BE, priority 4)
 #ifdef SYS_ioprio_set
     int prio_val = IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, 4);
-    int io_ret = static_cast<int>(::syscall(SYS_ioprio_set, IOPRIO_WHO_PROCESS, pid, prio_val));
+    int io_ret = static_cast<int>(hw_ioprio_set(IOPRIO_WHO_PROCESS, pid, prio_val));
     return (sched_ret == 0 || io_ret == 0);
 #else
     return (sched_ret == 0);
@@ -1263,10 +2242,26 @@ bool MitigationEngine::restore_sched_normal(int32_t pid, int original_policy, in
 bool MitigationEngine::apply_timer_slack(int32_t pid, uint64_t slack_ns) noexcept {
     if (pid <= 1 || slack_ns == 0) return false;
 
+    // REF-REQ-101: Relaxing timer slack had NO immunity check at all - not even
+    // is_immune_process - so any process could be given a 100 ms slack. For an
+    // event-loop application that is indistinguishable from being asleep: every
+    // timer, animation tick and IPC timeout can land 100 ms late. A desktop chat
+    // client was left in exactly this state and reported as frozen.
+    //
+    // Lowering slack back towards the default is always allowed; only RELAXING it
+    // is gated, so restore paths keep working.
+    constexpr uint64_t DEFAULT_TIMERSLACK_NS = 50'000ULL;
+    if (slack_ns > DEFAULT_TIMERSLACK_NS) {
+        if (is_immune_process(pid)) return false;
+        if (is_liveness_critical(pid)) return false;
+        if (is_audio_shielded(pid)) return false;
+        if (is_graphical_session_process(pid)) return false;
+    }
+
     char proc_path[64];
     std::snprintf(proc_path, sizeof(proc_path), "/proc/%d/timerslack_ns", pid);
 
-    int fd = ::open(proc_path, O_WRONLY | O_CLOEXEC);
+    int fd = hw_open_write(proc_path, O_WRONLY | O_CLOEXEC);
     if (fd < 0) return false;
 
     char num_buf[32];
@@ -1288,7 +2283,7 @@ bool MitigationEngine::apply_memory_reclaim(int32_t pid, uint64_t bytes) noexcep
     char reclaim_path[320];
     std::snprintf(reclaim_path, sizeof(reclaim_path), "%s/memory.reclaim", cg_path);
 
-    int fd = ::open(reclaim_path, O_WRONLY | O_CLOEXEC);
+    int fd = hw_open_write(reclaim_path, O_WRONLY | O_CLOEXEC);
     if (fd < 0) return false;
 
     char num_buf[32];
@@ -1300,6 +2295,15 @@ bool MitigationEngine::apply_memory_reclaim(int32_t pid, uint64_t bytes) noexcep
 }
 
 bool MitigationEngine::apply_cgroup_freeze(int32_t pid, bool freeze) noexcept {
+    // REF-REQ-096.6: Freezing a media-pipeline process mid-playback guarantees a
+    // dropout, so it is refused outright while a stream is running.
+    if (freeze && is_audio_shielded(pid)) return false;
+
+    // REF-REQ-098: Freezing the compositor or the desktop shell hangs the session.
+    if (freeze && is_liveness_critical(pid)) return false;
+
+    // REF-REQ-101: Nor may a graphical-session application be frozen.
+    if (freeze && is_graphical_session_process(pid)) return false;
     if (pid <= 1) return false;
 
     // REF-REQ-044 & REF-RES-015: Absolute Zero-Kill & Zero-Freeze Invariant
@@ -1322,7 +2326,7 @@ bool MitigationEngine::apply_cgroup_freeze(int32_t pid, bool freeze) noexcept {
     char freeze_path[320];
     std::snprintf(freeze_path, sizeof(freeze_path), "%s/cgroup.freeze", cg_path);
 
-    int fd = ::open(freeze_path, O_WRONLY | O_CLOEXEC);
+    int fd = hw_open_write(freeze_path, O_WRONLY | O_CLOEXEC);
     if (fd < 0) return false;
 
     ssize_t written = ::write(fd, "0\n", 2);
@@ -1342,7 +2346,7 @@ bool MitigationEngine::apply_cgroup_cpu_quota(int32_t pid, uint32_t max_quota_us
     char cpu_max_path[320];
     std::snprintf(cpu_max_path, sizeof(cpu_max_path), "%s/cpu.max", cg_path);
 
-    int fd = ::open(cpu_max_path, O_WRONLY | O_CLOEXEC);
+    int fd = hw_open_write(cpu_max_path, O_WRONLY | O_CLOEXEC);
     if (fd < 0) return false;
 
     char buf[64];
@@ -1364,7 +2368,7 @@ bool MitigationEngine::restore_cgroup_cpu_quota(int32_t pid) noexcept {
     char cpu_max_path[320];
     std::snprintf(cpu_max_path, sizeof(cpu_max_path), "%s/cpu.max", cg_path);
 
-    int fd = ::open(cpu_max_path, O_WRONLY | O_CLOEXEC);
+    int fd = hw_open_write(cpu_max_path, O_WRONLY | O_CLOEXEC);
     if (fd < 0) return false;
 
     constexpr const char unconstrained[] = "max 100000\n";
@@ -1376,7 +2380,7 @@ bool MitigationEngine::restore_cgroup_cpu_quota(int32_t pid) noexcept {
 
 bool MitigationEngine::set_pcie_aspm_policy(const char* policy) noexcept {
     if (!policy) return false;
-    int fd = ::open("/sys/module/pcie_aspm/parameters/policy", O_WRONLY | O_CLOEXEC);
+    int fd = hw_open_write("/sys/module/pcie_aspm/parameters/policy", O_WRONLY | O_CLOEXEC);
     if (fd < 0) return false;
 
     size_t len = std::strlen(policy);
@@ -1387,7 +2391,7 @@ bool MitigationEngine::set_pcie_aspm_policy(const char* policy) noexcept {
 
 bool MitigationEngine::set_cpu_epp_policy(const char* policy) noexcept {
     if (!policy) return false;
-    int fd = ::open("/sys/devices/system/cpu/cpu0/power/energy_performance_preference", O_WRONLY | O_CLOEXEC);
+    int fd = hw_open_write("/sys/devices/system/cpu/cpu0/power/energy_performance_preference", O_WRONLY | O_CLOEXEC);
     if (fd < 0) return false;
 
     size_t len = std::strlen(policy);
@@ -1398,7 +2402,7 @@ bool MitigationEngine::set_cpu_epp_policy(const char* policy) noexcept {
 
 bool MitigationEngine::set_smt_control(const char* state) noexcept {
     if (!state) return false;
-    int fd = ::open("/sys/devices/system/cpu/smt/control", O_WRONLY | O_CLOEXEC);
+    int fd = hw_open_write("/sys/devices/system/cpu/smt/control", O_WRONLY | O_CLOEXEC);
     if (fd < 0) return false;
     ssize_t w = ::write(fd, state, std::strlen(state));
     (void)::write(fd, "\n", 1);
@@ -1420,7 +2424,7 @@ bool MitigationEngine::set_bluetooth_blocked(bool block) noexcept {
             if (std::strncmp(buf, "bluetooth", 9) == 0) {
                 char soft_path[64];
                 std::snprintf(soft_path, sizeof(soft_path), "/sys/class/rfkill/rfkill%d/soft", r);
-                int fd = ::open(soft_path, O_WRONLY | O_CLOEXEC);
+                int fd = hw_open_write(soft_path, O_WRONLY | O_CLOEXEC);
                 if (fd >= 0) {
                     if (::write(fd, val, 2) > 0) any = true;
                     ::close(fd);
@@ -1460,7 +2464,7 @@ bool MitigationEngine::cap_display_backlight(double max_pct) noexcept {
                 }
                 uint32_t cap_b = static_cast<uint32_t>(max_b * (std::clamp(max_pct, 10.0, 100.0) / 100.0));
                 if (cur_b > cap_b) {
-                    int fd = ::open(bpath, O_WRONLY | O_CLOEXEC);
+                    int fd = hw_open_write(bpath, O_WRONLY | O_CLOEXEC);
                     if (fd >= 0) {
                         char out[32];
                         int len = std::snprintf(out, sizeof(out), "%u\n", cap_b);
@@ -1488,7 +2492,7 @@ bool MitigationEngine::restore_display_backlight() noexcept {
     for (const char* bdir : bl_dirs) {
         char bpath[128];
         std::snprintf(bpath, sizeof(bpath), "%s/brightness", bdir);
-        int fd = ::open(bpath, O_WRONLY | O_CLOEXEC);
+        int fd = hw_open_write(bpath, O_WRONLY | O_CLOEXEC);
         if (fd >= 0) {
             char out[32];
             int len = std::snprintf(out, sizeof(out), "%u\n", s_hardware_baseline.backlight_brightness);
@@ -1501,6 +2505,69 @@ bool MitigationEngine::restore_display_backlight() noexcept {
     return false;
 }
 
+// Identity of the graphical session the daemon should drop privileges into.
+// This used to be hardcoded as uid/gid 1000 with XDG_RUNTIME_DIR=/run/user/1000
+// and WAYLAND_DISPLAY=wayland-0, so on any host whose desktop user is not
+// uid 1000 the root daemon dropped into an unrelated account and ran commands
+// as them.
+struct DesktopSession {
+    uid_t uid{0};
+    gid_t gid{0};
+    char  runtime_dir[64]{};
+    char  wayland_display[32]{};
+    bool  valid{false};
+};
+
+static DesktopSession detect_desktop_session() noexcept {
+    DesktopSession best{};
+    DesktopSession fallback{};
+
+    DIR* dir = ::opendir("/run/user");
+    if (!dir) return best;
+
+    struct dirent* entry = nullptr;
+    while ((entry = ::readdir(dir)) != nullptr) {
+        if (entry->d_name[0] < '0' || entry->d_name[0] > '9') continue;
+
+        DesktopSession cand{};
+        int n = std::snprintf(cand.runtime_dir, sizeof(cand.runtime_dir), "/run/user/%s", entry->d_name);
+        if (n <= 0 || static_cast<size_t>(n) >= sizeof(cand.runtime_dir)) continue;
+
+        struct stat st{};
+        if (::stat(cand.runtime_dir, &st) != 0 || !S_ISDIR(st.st_mode)) continue;
+        if (st.st_uid < 1000) continue; // skip system accounts
+
+        cand.uid = st.st_uid;
+        cand.gid = st.st_gid;
+        std::strncpy(cand.wayland_display, "wayland-0", sizeof(cand.wayland_display) - 1);
+        cand.valid = true;
+        if (!fallback.valid) fallback = cand;
+
+        // Prefer a runtime dir that actually carries a compositor socket.
+        DIR* rt = ::opendir(cand.runtime_dir);
+        if (!rt) continue;
+        bool has_compositor = false;
+        struct dirent* sock = nullptr;
+        while ((sock = ::readdir(rt)) != nullptr) {
+            if (std::strncmp(sock->d_name, "wayland-", 8) != 0) continue;
+            if (std::strstr(sock->d_name, ".lock") != nullptr) continue;
+            std::strncpy(cand.wayland_display, sock->d_name, sizeof(cand.wayland_display) - 1);
+            cand.wayland_display[sizeof(cand.wayland_display) - 1] = '\0';
+            has_compositor = true;
+            break;
+        }
+        ::closedir(rt);
+
+        if (has_compositor) {
+            best = cand;
+            break;
+        }
+    }
+    ::closedir(dir);
+
+    return best.valid ? best : fallback;
+}
+
 static bool execute_user_desktop_cmd(const char* cmd_body) noexcept {
     if (!cmd_body) return false;
     // REF-REQ-071 & REF-ARCH-048: Test harness isolation guard.
@@ -1508,20 +2575,34 @@ static bool execute_user_desktop_cmd(const char* cmd_body) noexcept {
     if (::getenv("WATTCURB_TEST_MOCK_DESKTOP") != nullptr) {
         return true;
     }
+
+    // The body is wrapped in single quotes below, so a quote inside it would
+    // escape that quoting and inject into a root-spawned shell. Every current
+    // caller passes a string literal; refuse rather than depend on that.
+    if (std::strchr(cmd_body, '\'') != nullptr) return false;
+
+    const DesktopSession session = detect_desktop_session();
+    if (!session.valid) return false;
+
     char cmd[512];
+    int n;
     if (::geteuid() == 0) {
-        std::snprintf(cmd, sizeof(cmd),
-            "export WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/1000; "
-            "setpriv --reuid=1000 --regid=1000 --clear-groups sh -c '%s' >/dev/null 2>&1 &",
+        n = std::snprintf(cmd, sizeof(cmd),
+            "export WAYLAND_DISPLAY=%s XDG_RUNTIME_DIR=%s; "
+            "setpriv --reuid=%u --regid=%u --clear-groups sh -c '%s' >/dev/null 2>&1 &",
+            session.wayland_display, session.runtime_dir,
+            static_cast<unsigned>(session.uid), static_cast<unsigned>(session.gid),
             cmd_body);
     } else {
-        std::snprintf(cmd, sizeof(cmd),
-            "export WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/1000; "
-            "( %s ) >/dev/null 2>&1 &",
-            cmd_body);
+        n = std::snprintf(cmd, sizeof(cmd),
+            "export WAYLAND_DISPLAY=%s XDG_RUNTIME_DIR=%s; ( %s ) >/dev/null 2>&1 &",
+            session.wayland_display, session.runtime_dir, cmd_body);
     }
-    int ret = ::system(cmd);
-    return (ret == 0);
+
+    // Truncation would cut the command mid-quote; never hand that to a shell.
+    if (n < 0 || static_cast<size_t>(n) >= sizeof(cmd)) return false;
+
+    return (hw_system(cmd) == 0);
 }
 
 bool MitigationEngine::set_display_refresh_rate(uint32_t hz) noexcept {
@@ -1565,61 +2646,37 @@ bool MitigationEngine::set_baloo_suspended(bool suspend) noexcept {
 }
 
 bool MitigationEngine::set_wifi_txpower_limit(uint32_t mbm) noexcept {
-    char ifname[32] = "wlan0";
-    DIR* dir = ::opendir("/sys/class/net");
-    if (dir) {
-        struct dirent* entry = nullptr;
-        while ((entry = ::readdir(dir)) != nullptr) {
-            if (entry->d_name[0] == '.') continue;
-            char wire_path[128];
-            std::snprintf(wire_path, sizeof(wire_path), "/sys/class/net/%s/wireless", entry->d_name);
-            if (::access(wire_path, F_OK) == 0) {
-                std::strncpy(ifname, entry->d_name, sizeof(ifname) - 1);
-                ifname[sizeof(ifname) - 1] = '\0';
-                break;
-            }
-        }
-        ::closedir(dir);
-    }
+    char ifname[32];
+    if (!detect_wireless_ifname(ifname, sizeof(ifname))) return false;
 
-    char cmd[128];
-    std::snprintf(cmd, sizeof(cmd), "iw dev %s set txpower limit %u >/dev/null 2>&1 &", ifname, mbm);
-    int ret = ::system(cmd);
+    // The Oracle Gate verifies the cap/restore state machine rather than the
+    // radio, so a sandboxed run reports the actuation as performed (matching the
+    // previous hw_system() semantics) without emitting the netlink command.
+    const bool ok = s_actuation_sandbox || nl80211_set_tx_power(ifname, false, mbm);
     s_hardware_baseline.wifi_txpower_capped = true;
-    return (ret == 0);
+    return ok;
 }
 
 bool MitigationEngine::restore_wifi_txpower() noexcept {
     if (!s_hardware_baseline.wifi_txpower_capped) return false;
 
-    char ifname[32] = "wlan0";
-    DIR* dir = ::opendir("/sys/class/net");
-    if (dir) {
-        struct dirent* entry = nullptr;
-        while ((entry = ::readdir(dir)) != nullptr) {
-            if (entry->d_name[0] == '.') continue;
-            char wire_path[128];
-            std::snprintf(wire_path, sizeof(wire_path), "/sys/class/net/%s/wireless", entry->d_name);
-            if (::access(wire_path, F_OK) == 0) {
-                std::strncpy(ifname, entry->d_name, sizeof(ifname) - 1);
-                ifname[sizeof(ifname) - 1] = '\0';
-                break;
-            }
-        }
-        ::closedir(dir);
+    char ifname[32];
+    if (!detect_wireless_ifname(ifname, sizeof(ifname))) {
+        // Radio vanished (dongle unplugged): drop the override so the flag
+        // cannot wedge every subsequent baseline restore.
+        s_hardware_baseline.wifi_txpower_capped = false;
+        return false;
     }
 
-    char cmd[128];
-    std::snprintf(cmd, sizeof(cmd), "iw dev %s set txpower auto >/dev/null 2>&1 &", ifname);
-    int ret = ::system(cmd);
+    const bool ok = s_actuation_sandbox || nl80211_set_tx_power(ifname, true, 0);
     s_hardware_baseline.wifi_txpower_capped = false;
-    return (ret == 0);
+    return ok;
 }
 
 // Implements REF-REQ-087 & REF-ARCH-064: Stack-allocated sysctl writer without heap allocation
 static bool write_uint32_sysctl(const char* path, uint32_t val) noexcept {
     if (!path) return false;
-    int fd = ::open(path, O_WRONLY | O_CLOEXEC);
+    int fd = hw_open_write(path, O_WRONLY | O_CLOEXEC);
     if (fd < 0) return false;
     char buf[32];
     int len = std::snprintf(buf, sizeof(buf), "%u\n", val);
@@ -1691,25 +2748,77 @@ void MitigationEngine::trigger_3tier_vram_gc() noexcept {
         ::closedir(proc_dir);
     }
 
-    // Tier 3: Trigger kernel page cache, dentries and inodes reclamation
-    int drop_fd = ::open("/proc/sys/vm/drop_caches", O_WRONLY | O_CLOEXEC);
-    if (drop_fd >= 0) {
-        (void)::write(drop_fd, "3\n", 2);
-        ::close(drop_fd);
-    }
+    // REF-REQ-098: Tier 3 previously wrote "3" to /proc/sys/vm/drop_caches.
+    //
+    // That purges the ENTIRE page cache, dentry cache and inode cache system
+    // wide. The kernel walks and frees every cached page while holding locks, and
+    // afterwards every binary, library and file the desktop touches has to be
+    // re-read from storage. On this machine that is gigabytes of cache - the
+    // machine stops responding for as long as it takes, which is exactly the
+    // minute-long freeze this mode was reported to cause.
+    //
+    // It also saves no power: page cache occupies otherwise-free memory, and
+    // forcing the re-reads costs additional storage and CPU energy. The write is
+    // removed outright rather than made conditional; there is no battery state in
+    // which purging the system's caches is the right move.
+}
+
+bool MitigationEngine::pci_class_allows_runtime_pm(uint32_t pci_class, bool audio_active) noexcept {
+    // sysfs reports 0xCCSSPP - CC class, SS subclass, PP prog-if.
+    const uint32_t cc = (pci_class >> 16) & 0xFFu;
+    const uint32_t ss = (pci_class >> 8) & 0xFFu;
+
+    if (cc == 0x02) return true;              // network: built for runtime PM
+    if (cc == 0x08 && ss == 0x05) return true; // SD/MMC host: idle card reader
+    if (cc == 0x04) return !audio_active;      // multimedia, only while silent
+
+    // Everything else is infrastructure and is never suspended:
+    //   0x01 storage      - I/O stalls
+    //   0x03 display      - the screen stops updating
+    //   0x06 bridges      - takes everything downstream with it
+    //   0x0c03 USB host   - keyboard and mouse stop responding
+    //   0x0806 IOMMU      - core platform
+    return false;
 }
 
 void MitigationEngine::apply_pcie_runtime_pm_auto() noexcept {
     WATTCURB_PROFILE_SCOPE("mitig.pcie_runtime_pm");
+
+    // REF-REQ-098: LIVENESS INVARIANT.
+    //
+    // This previously wrote "auto" to power/control for EVERY PCI device with no
+    // exclusion whatsoever. On this class of machine that set includes the USB
+    // host controller (input dies), the display controller (screen stops
+    // updating), the NVMe controller (I/O stalls), the PCI bridges (everything
+    // downstream of them suspends) and the IOMMU. The result is indistinguishable
+    // from a hung system.
+    //
+    // Runtime PM is therefore an ALLOWLIST, not a denylist: a class has to be
+    // known-safe to be suspended, rather than merely not yet known to be fatal.
     DIR* dir = ::opendir("/sys/bus/pci/devices");
     if (!dir) return;
 
     struct dirent* entry = nullptr;
     while ((entry = ::readdir(dir)) != nullptr) {
         if (entry->d_name[0] == '.') continue;
+
+        char class_path[256];
+        std::snprintf(class_path, sizeof(class_path),
+                      "/sys/bus/pci/devices/%s/class", entry->d_name);
+        char class_buf[32];
+        size_t n = 0;
+        if (!core::fs::read_small_file(class_path, class_buf, sizeof(class_buf) - 1, &n) || n == 0) {
+            continue; // unknown class: leave it alone
+        }
+        class_buf[n] = '\0';
+
+        const auto full = static_cast<uint32_t>(std::strtoul(class_buf, nullptr, 16));
+        if (!pci_class_allows_runtime_pm(full, s_audio_state.active)) continue;
+
         char ctrl_path[256];
-        std::snprintf(ctrl_path, sizeof(ctrl_path), "/sys/bus/pci/devices/%s/power/control", entry->d_name);
-        int fd = ::open(ctrl_path, O_WRONLY | O_CLOEXEC);
+        std::snprintf(ctrl_path, sizeof(ctrl_path),
+                      "/sys/bus/pci/devices/%s/power/control", entry->d_name);
+        int fd = hw_open_write(ctrl_path, O_WRONLY | O_CLOEXEC);
         if (fd >= 0) {
             (void)::write(fd, "auto\n", 5);
             ::close(fd);
@@ -1778,7 +2887,7 @@ void MitigationEngine::apply_usb_runtime_pm_auto() noexcept {
 
         char ctrl_path[320];
         std::snprintf(ctrl_path, sizeof(ctrl_path), "%s/power/control", dev_path);
-        int fd = ::open(ctrl_path, O_WRONLY | O_CLOEXEC);
+        int fd = hw_open_write(ctrl_path, O_WRONLY | O_CLOEXEC);
         if (fd >= 0) {
             (void)::write(fd, "auto\n", 5);
             ::close(fd);
@@ -1790,7 +2899,7 @@ void MitigationEngine::apply_usb_runtime_pm_auto() noexcept {
 bool MitigationEngine::set_audio_codec_power_save(int seconds, bool controller) noexcept {
     WATTCURB_PROFILE_SCOPE("mitig.audio_codec_power_save");
     bool ok = false;
-    int fd = ::open("/sys/module/snd_hda_intel/parameters/power_save", O_WRONLY | O_CLOEXEC);
+    int fd = hw_open_write("/sys/module/snd_hda_intel/parameters/power_save", O_WRONLY | O_CLOEXEC);
     if (fd >= 0) {
         char buf[16];
         int len = std::snprintf(buf, sizeof(buf), "%d\n", seconds);
@@ -1800,7 +2909,7 @@ bool MitigationEngine::set_audio_codec_power_save(int seconds, bool controller) 
         ::close(fd);
     }
 
-    int c_fd = ::open("/sys/module/snd_hda_intel/parameters/power_save_controller", O_WRONLY | O_CLOEXEC);
+    int c_fd = hw_open_write("/sys/module/snd_hda_intel/parameters/power_save_controller", O_WRONLY | O_CLOEXEC);
     if (c_fd >= 0) {
         const char* val = controller ? "Y\n" : "N\n";
         (void)::write(c_fd, val, 2);
@@ -1816,7 +2925,7 @@ bool MitigationEngine::restore_audio_codec_baseline() noexcept {
     if (!s_hardware_baseline.audio_power_save_modified) return true;
 
     if (s_hardware_baseline.audio_power_save >= 0) {
-        int fd = ::open("/sys/module/snd_hda_intel/parameters/power_save", O_WRONLY | O_CLOEXEC);
+        int fd = hw_open_write("/sys/module/snd_hda_intel/parameters/power_save", O_WRONLY | O_CLOEXEC);
         if (fd >= 0) {
             char buf[16];
             int len = std::snprintf(buf, sizeof(buf), "%d\n", s_hardware_baseline.audio_power_save);
@@ -1826,7 +2935,7 @@ bool MitigationEngine::restore_audio_codec_baseline() noexcept {
     }
 
     if (s_hardware_baseline.audio_power_save_controller[0] != '\0') {
-        int c_fd = ::open("/sys/module/snd_hda_intel/parameters/power_save_controller", O_WRONLY | O_CLOEXEC);
+        int c_fd = hw_open_write("/sys/module/snd_hda_intel/parameters/power_save_controller", O_WRONLY | O_CLOEXEC);
         if (c_fd >= 0) {
             char buf[16];
             int len = std::snprintf(buf, sizeof(buf), "%s\n", s_hardware_baseline.audio_power_save_controller);
@@ -1910,12 +3019,19 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
     PowerProfileMode old_profile = m_current_profile;
 
     if (old_profile != target_profile) {
+        // REF-REQ-092.2: process-domain mitigations must be released BEFORE the
+        // new profile actuates. rollback_all() reaches restore_hardware_baseline(),
+        // so running it afterwards would immediately undo the just-applied
+        // full-silicon unleash (and, for Balanced, reset the profile to the
+        // bootstrap baseline). Restore first, then apply.
+        if (target_profile == PowerProfileMode::Performance ||
+            target_profile == PowerProfileMode::Balanced) {
+            rollback_all();
+        }
+
         apply_power_profile(target_profile);
-        if (target_profile == PowerProfileMode::Performance) {
-            rollback_all();
-        } else if (target_profile == PowerProfileMode::Balanced) {
-            rollback_all();
-        } else if (old_profile == PowerProfileMode::UltraEndurance && target_profile == PowerProfileMode::PowerSaver) {
+
+        if (old_profile == PowerProfileMode::UltraEndurance && target_profile == PowerProfileMode::PowerSaver) {
             thaw_all_frozen();
         } else if (target_profile == PowerProfileMode::PowerSaver) {
             m_aspm_modified = true;

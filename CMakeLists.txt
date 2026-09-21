@@ -76,6 +76,15 @@ endif()
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SYSTEMD REQUIRED libsystemd)
 
+# REF-REQ-097: Optional. Present -> the tray renders Material icon glyphs from an
+# installed font; absent -> it falls back to its own procedural glyphs.
+pkg_check_modules(FREETYPE freetype2)
+if(FREETYPE_FOUND)
+    message(STATUS "FreeType found: tray icons render from installed icon fonts")
+else()
+    message(STATUS "FreeType not found: tray icons use procedural glyph fallback")
+endif()
+
 # Core Library Sources
 set(WATTCURB_LIB_SOURCES
     src/core/singleton_lock.cpp
@@ -106,11 +115,17 @@ target_link_libraries(wattcurb PRIVATE wattcurb_lib)
 add_executable(wattcurb-tray
     src/tray/main_tray.cpp
     src/tray/tray_client.cpp
+    src/tray/icon_renderer.cpp
     src/core/singleton_lock.cpp
     src/core/l10n.cpp
 )
 target_include_directories(wattcurb-tray PRIVATE src ${SYSTEMD_INCLUDE_DIRS})
 target_link_libraries(wattcurb-tray PRIVATE ${SYSTEMD_LIBRARIES})
+if(FREETYPE_FOUND)
+    target_include_directories(wattcurb-tray PRIVATE ${FREETYPE_INCLUDE_DIRS})
+    target_link_libraries(wattcurb-tray PRIVATE ${FREETYPE_LIBRARIES})
+    target_compile_definitions(wattcurb-tray PRIVATE WATTCURB_HAS_FREETYPE=1)
+endif()
 
 # Native KDE Plasma 6 Matrix Dashboard (REF-REQ-036, REF-ARCH-026)
 find_package(Qt6 COMPONENTS Core Gui Qml Quick QuickControls2 QUIET)
@@ -145,9 +160,15 @@ enable_testing()
 add_executable(wattcurb_tests
     tests/test_units.cpp
     src/tray/tray_client.cpp
+    src/tray/icon_renderer.cpp
 )
 target_include_directories(wattcurb_tests PRIVATE src ${SYSTEMD_INCLUDE_DIRS})
 target_link_libraries(wattcurb_tests PRIVATE wattcurb_lib ${SYSTEMD_LIBRARIES})
+if(FREETYPE_FOUND)
+    target_include_directories(wattcurb_tests PRIVATE ${FREETYPE_INCLUDE_DIRS})
+    target_link_libraries(wattcurb_tests PRIVATE ${FREETYPE_LIBRARIES})
+    target_compile_definitions(wattcurb_tests PRIVATE WATTCURB_HAS_FREETYPE=1)
+endif()
 if(Qt6_FOUND)
     target_sources(wattcurb_tests PRIVATE src/ui/dashboard_backend.cpp src/ui/dashboard_backend.hpp)
     target_link_libraries(wattcurb_tests PRIVATE Qt6::Core Qt6::Gui)

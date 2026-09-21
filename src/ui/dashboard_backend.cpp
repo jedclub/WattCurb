@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <cstdlib>
 #include <QDateTime>
 #include <QProcess>
 #include <QJsonDocument>
@@ -60,6 +61,15 @@ DashboardBackend::~DashboardBackend() {
 }
 
 void DashboardBackend::mapSharedMemory() noexcept {
+    // REF-REQ-092 & REF-ARCH-069: Oracle Gate isolation. The unit suite ingests
+    // synthetic telemetry and asserts on the derived power shares. Attaching to
+    // a live daemon's /dev/shm silently overwrites that telemetry with whatever
+    // the host is drawing at this instant, making the assertions depend on the
+    // machine's momentary power state rather than on the code under test.
+    if (::getenv("WATTCURB_TEST_ISOLATE") != nullptr) {
+        return;
+    }
+
     shm_fd_ = ::open(ipc::SHARED_STATE_SHM_PATH, O_RDONLY | O_CLOEXEC);
     if (shm_fd_ >= 0) {
         void* addr = ::mmap(nullptr, sizeof(ipc::WattCurbSharedState), PROT_READ, MAP_SHARED, shm_fd_, 0);
@@ -92,6 +102,7 @@ void DashboardBackend::onPollTimer() {
     }
 
     bool state_changed = false;
+    const bool first_poll = !initial_poll_done_;
     uint64_t cur_seq = 0;
     if (shm_state_) {
         WATTCURB_PROFILE_SCOPE("dashboard.shm.read");
@@ -117,13 +128,15 @@ void DashboardBackend::onPollTimer() {
     // REF-REQ-074 & REF-ARCH-051: Seqlock Delta-Gated IPC Querying
     // Only query FULL_TELEMETRY over Unix domain socket when daemon state actually changes or on initial start
     bool telemetry_queried = false;
-    if (state_changed || prev_seq_version_ == 0) {
+    if (state_changed || first_poll) {
         telemetry_queried = queryDaemonTelemetry();
         prev_seq_version_ = cur_seq;
     }
     if (!telemetry_queried && process_list_.isEmpty()) {
         updateFallbackTelemetry();
     }
+
+    initial_poll_done_ = true;
 
     last_update_time_ = QDateTime::currentDateTime().toString("hh:mm:ss");
 
@@ -156,13 +169,13 @@ void DashboardBackend::onPollTimer() {
     // Delta-guarded signal emission (avoid triggering heavy QML re-renders if nothing changed)
     {
         WATTCURB_PROFILE_SCOPE("dashboard.qml.signal_emit");
-        if (state_changed || prev_seq_version_ == 0) {
+        if (state_changed || first_poll) {
             emit telemetryChanged();
             emit processListChanged();
         }
 
         int eff_profile = powerProfileMode();
-        if (eff_profile != prev_profile_mode_ || prev_seq_version_ == 0) {
+        if (eff_profile != prev_profile_mode_ || first_poll) {
             prev_profile_mode_ = eff_profile;
             emit profileChanged();
         }
@@ -174,6 +187,17 @@ void DashboardBackend::onPollTimer() {
 
 bool DashboardBackend::queryDaemonTelemetry() noexcept {
     WATTCURB_PROFILE_SCOPE("dashboard.daemon.query_ipc");
+
+    // REF-REQ-092 & REF-ARCH-069: Oracle Gate isolation. SingletonLock uses the
+    // ABSTRACT AF_UNIX namespace, so this reaches a running root daemon even
+    // though no socket node exists in the filesystem. Without this guard the
+    // constructor ingests the live daemon's telemetry - including its current
+    // power_profile_mode - and any test asserting on a profile transition then
+    // depends on what the host's daemon happens to be doing.
+    if (::getenv("WATTCURB_TEST_ISOLATE") != nullptr) {
+        return false;
+    }
+
     std::string resp;
     if (!core::SingletonLock::query_daemon("FULL_TELEMETRY\n", resp, "wattcurb.lock", 300)) {
         return false;
@@ -518,6 +542,18 @@ QString DashboardBackend::powerProfileName() const {
 }
 
 void DashboardBackend::sendDaemonCommand(const char* cmd) noexcept {
+    // REF-REQ-092 & REF-ARCH-069: Oracle Gate isolation, outbound half.
+    //
+    // The read side was detached earlier, but this is a WRITE to a live root
+    // daemon. test_bi_directional_power_profile_coherence calls setProfile(2),
+    // which sent "PROFILE 2" over the abstract socket and actually switched the
+    // developer's machine into PowerSaver on every test run - the reported
+    // "power profile keeps changing on its own". A suite must never command the
+    // system it is running on.
+    if (::getenv("WATTCURB_TEST_ISOLATE") != nullptr) {
+        return;
+    }
+
     std::string dummy;
     core::SingletonLock::query_daemon(cmd, dummy, "wattcurb.lock", 50);
 }

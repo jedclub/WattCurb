@@ -79,6 +79,11 @@ public:
     static bool actuate_anti_starvation_cap(int32_t pid, PowerProfileMode mode = PowerProfileMode::Balanced, const char* comm = "runaway-task") noexcept;
     static bool actuate_anti_starvation_restore(int32_t pid, const cpu_set_t* target_affinity = nullptr, int orig_policy = 0, int orig_nice = 0, const char* comm = "runaway-task") noexcept;
 
+    // REF-REQ-102: Releases every tracked mitigation - scheduling class, nice,
+    // timer slack, CPU affinity and cgroup freeze - back to what was recorded
+    // before it was applied.
+    void rollback_all_tracked() noexcept;
+
 private:
     std::array<FeatureMetrics, static_cast<size_t>(FeatureId::Count)> m_metrics{};
 
@@ -95,6 +100,10 @@ private:
     };
     core::FixedVector<TrackedMitigation, MAX_TRACKED_MITIGATIONS> m_tracked{};
     std::optional<PowerProfileMode> m_profile_override{};
+    ProfileDemotionLatch m_demotion_latch{};
+    // REF-REQ-102: Profile in force at the end of the previous cycle. A change
+    // must release everything the old profile applied.
+    std::optional<PowerProfileMode> m_last_profile{};
 };
 
 } // namespace wattcurb::policy

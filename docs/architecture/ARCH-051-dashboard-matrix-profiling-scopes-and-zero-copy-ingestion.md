@@ -107,4 +107,13 @@ double cached_proc_sum_{0.0};
 
 ### 2.3 Seqlock Delta-Gated IPC Suppression
 
+> **First-poll sentinel (REF-REQ-092 follow-up).** The gate must not reuse
+> `prev_seq_version_ == 0` to mean "first poll". When no daemon is publishing to
+> `/dev/shm/wattcurb_state.shm`, the observed sequence stays `0` forever, that
+> test never becomes false, and the gate degrades into an unconditional socket
+> query plus a full QML signal emission on **every** poll tick - the exact cost
+> this section exists to remove. A dedicated `initial_poll_done_` latch, sampled
+> once into `first_poll` at the top of `onPollTimer()`, carries the meaning
+> instead.
+
 Since the WattCurb daemon updates shared memory atomically at a fixed cadence (10s in steady state, 2s in interactive mode), polling at 1.5s frequently lands between updates. Checking `cur.seq_version != prev_seq_version_` eliminates **up to 75% of socket queries and JSON parsing**.

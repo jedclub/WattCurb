@@ -291,6 +291,12 @@ private:
     std::vector<ProcessShareSummary> cached_proc_summaries_{};
     double cached_proc_sum_{0.0};
     uint64_t prev_seq_version_{0};
+    // REF-REQ-074 & REF-ARCH-051: Explicit first-poll sentinel. prev_seq_version_
+    // cannot serve as one: when no daemon is publishing to /dev/shm the observed
+    // sequence stays 0 forever, so a "prev_seq_version_ == 0" test never becomes
+    // false and the Seqlock delta gate degrades into an unconditional socket
+    // query plus a full QML signal storm on every single poll tick.
+    bool initial_poll_done_{false};
 
     QVariantList device_power_shares_{};
     QVariantList process_power_shares_{};

@@ -1,4 +1,5 @@
 #include "core/daemon_runner.hpp"
+#include "core/posix_fs.hpp"
 #include "report/report_generator.hpp"
 #include "core/scoped_profiler.hpp"
 #include "policy/mitigation_engine.hpp"
@@ -21,6 +22,61 @@
 #include <unistd.h>
 
 namespace wattcurb::core {
+
+namespace {
+
+// ---------------------------------------------------------------------------
+// Daemon-owned profile persistence (REF-REQ-053, security hardening)
+//
+// This previously lived at a hardcoded "/home/<dev>/.cache/power_profile_mode",
+// opened by the ROOT daemon with O_CREAT|O_TRUNC and no O_NOFOLLOW, then forced
+// to mode 0666 via fchmod(). Any code running as that desktop user could replace
+// the file with a symlink to an arbitrary root-owned path; the daemon would then
+// truncate it, chmod it world-writable and write to it as root - a local
+// privilege escalation (CWE-59 + CWE-732).
+//
+// The live profile handoff from the tray/dashboard already travels over the
+// authenticated Unix command socket ("PROFILE <n>"), so this file only ever
+// needed to be the daemon's OWN restart persistence. It now lives in the
+// daemon's root-owned state directory, is created 0644, and is opened with
+// O_NOFOLLOW. The daemon no longer reads or writes anything under /home.
+// ---------------------------------------------------------------------------
+constexpr const char* PROFILE_STATE_DIR  = "/var/lib/wattcurb";
+constexpr const char* PROFILE_STATE_PATH = "/var/lib/wattcurb/power_profile_mode";
+
+void persist_profile_mode(const char* mode) noexcept {
+    if (!mode) return;
+
+    // systemd provisions this via StateDirectory=wattcurb; mkdir covers manual runs.
+    (void)::mkdir(PROFILE_STATE_DIR, 0755);
+
+    int fd = ::open(PROFILE_STATE_PATH,
+                    O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0644);
+    if (fd < 0) return;
+
+    (void)::write(fd, mode, std::strlen(mode));
+    (void)::write(fd, "\n", 1);
+    ::close(fd);
+}
+
+// Contents are the daemon's own prior output, but read defensively anyway.
+size_t load_profile_mode(char* buf, size_t cap) noexcept {
+    if (!buf || cap == 0) return 0;
+    buf[0] = '\0';
+
+    int fd = ::open(PROFILE_STATE_PATH, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) return 0;
+
+    ssize_t n = ::read(fd, buf, cap - 1);
+    ::close(fd);
+    if (n <= 0) return 0;
+
+    buf[n] = '\0';
+    return static_cast<size_t>(n);
+}
+
+} // namespace
+
 
 DaemonRunner::DaemonRunner(double period_sec, double window_sec, std::string_view lock_name)
     : period_sec_(period_sec > 0.0 ? period_sec : 10.0),
@@ -67,12 +123,15 @@ bool DaemonRunner::setup_history_shm() {
     }
 
     if (shm_history_fd_ < 0) {
-        shm_history_fd_ = ::open(ipc::HISTORY_SHM_PATH, O_RDWR | O_CREAT | O_CLOEXEC, 0666);
+        shm_history_fd_ = ::open(ipc::HISTORY_SHM_PATH, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
     }
     if (shm_history_fd_ < 0) {
         return false;
     }
-    ::fchmod(shm_history_fd_, 0666);
+    // 0644, not 0666: the daemon is the only writer. Every consumer (tray,
+    // dashboard, CLI, history analyzer) opens O_RDONLY and maps PROT_READ, so a
+    // world-writable mapping only let any local user forge daemon telemetry.
+    ::fchmod(shm_history_fd_, 0644);
     if (::ftruncate(shm_history_fd_, sizeof(ipc::HistoryRingBufferShm)) < 0) {
         ::close(shm_history_fd_);
         shm_history_fd_ = -1;
@@ -137,12 +196,14 @@ bool DaemonRunner::setup_shm() {
     if (shm_fd_ < 0) {
         // If it does not exist, or permissions prevented opening, unlink any stale file and create anew
         ::unlink(ipc::SHARED_STATE_SHM_PATH);
-        shm_fd_ = ::open(ipc::SHARED_STATE_SHM_PATH, O_RDWR | O_CREAT | O_CLOEXEC, 0666);
+        shm_fd_ = ::open(ipc::SHARED_STATE_SHM_PATH, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
     }
     if (shm_fd_ < 0) {
         return false;
     }
-    ::fchmod(shm_fd_, 0666); // Explicitly ensure world-readability even under root umask
+    // 0644: world-READABLE (clients need that, and root's umask may strip it),
+    // but not world-writable - the daemon is the sole writer of this Seqlock.
+    ::fchmod(shm_fd_, 0644);
     if (::ftruncate(shm_fd_, sizeof(ipc::WattCurbSharedState)) < 0) {
         ::close(shm_fd_);
         shm_fd_ = -1;
@@ -174,9 +235,9 @@ bool DaemonRunner::initialize() {
     // Load persisted profile mode if available (REF-REQ-053)
     PowerProfileMode initial_mode = PowerProfileMode::Balanced;
     char mode_buf[32]{};
-    int r_mode = core::fs::read_small_file("/home/jedclub/.cache/power_profile_mode", mode_buf, sizeof(mode_buf) - 1);
+    size_t r_mode = load_profile_mode(mode_buf, sizeof(mode_buf));
     if (r_mode > 0) {
-        std::string_view m(mode_buf, static_cast<size_t>(r_mode));
+        std::string_view m(mode_buf, r_mode);
         if (m.find("performance") != std::string_view::npos) {
             initial_mode = PowerProfileMode::Performance;
             local_shared_state_.power_profile_mode = 0;
@@ -251,24 +312,11 @@ bool DaemonRunner::process_light_probe_cycle() {
     // REF-REQ-069: Decoupled Light Probe baseline (eliminates timebase desync)
     cached_report_.hardware = engine_.compute_hardware_power(hw_light_prev_, hw_cur, 10.0);
 
-    // REF-REQ-067: Active Lockout and Demotion of Performance Mode
+    // REF-REQ-094: profile demotion is decided in exactly one place
+    // (MitigationEngine::resolve_profile, reached via FeatureManager). The daemon
+    // no longer runs a second, differently-calibrated ladder here.
     bool on_battery = cached_report_.hardware.is_battery_discharging;
     double batt_pct = static_cast<double>(cached_report_.hardware.battery_capacity_percent);
-    if (on_battery && batt_pct <= 20.0) {
-        if (feature_manager_.override_profile() == PowerProfileMode::Performance ||
-            cached_report_.mitigation_status.current_profile == PowerProfileMode::Performance) {
-            feature_manager_.set_override_profile(PowerProfileMode::Balanced);
-            policy::MitigationEngine::apply_power_profile(PowerProfileMode::Balanced);
-            EventLogger::log_alert("BATTERY", "Performance mode automatically demoted to Balanced: Battery capacity <= 20% (REF-REQ-067)");
-
-            int mode_fd = ::open("/home/jedclub/.cache/power_profile_mode", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
-            if (mode_fd >= 0) {
-                ::fchmod(mode_fd, 0666);
-                (void)::write(mode_fd, "balanced\n", 9);
-                ::close(mode_fd);
-            }
-        }
-    }
 
     // Seqlock State Export
     if (shm_state_ == nullptr) setup_shm();
@@ -376,23 +424,6 @@ void DaemonRunner::process_deep_observation_cycle() {
         WATTCURB_PROFILE_SCOPE("daemon.evaluate_and_actuate");
         bool on_battery = cached_report_.hardware.is_battery_discharging;
         double batt_pct = static_cast<double>(cached_report_.hardware.battery_capacity_percent);
-
-        // REF-REQ-067: Active Lockout and Demotion of Performance Mode
-        if (on_battery && batt_pct <= 20.0) {
-            if (feature_manager_.override_profile() == PowerProfileMode::Performance ||
-                cached_report_.mitigation_status.current_profile == PowerProfileMode::Performance) {
-                feature_manager_.set_override_profile(PowerProfileMode::Balanced);
-                policy::MitigationEngine::apply_power_profile(PowerProfileMode::Balanced);
-                EventLogger::log_alert("BATTERY", "Performance mode automatically demoted to Balanced: Battery capacity <= 20% (REF-REQ-067)");
-
-                int mode_fd = ::open("/home/jedclub/.cache/power_profile_mode", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
-                if (mode_fd >= 0) {
-                    ::fchmod(mode_fd, 0666);
-                    (void)::write(mode_fd, "balanced\n", 9);
-                    ::close(mode_fd);
-                }
-            }
-        }
 
         feature_manager_.evaluate_and_actuate(cached_report_, on_battery, batt_pct);
     }
@@ -563,10 +594,42 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
     struct sockaddr_un client_addr{};
     socklen_t client_len = sizeof(client_addr);
 
-    ssize_t bytes = ::recvfrom(fd, buf, sizeof(buf) - 1, 0,
-                               reinterpret_cast<struct sockaddr*>(&client_addr), &client_len);
+    // recvmsg rather than recvfrom so SCM_CREDENTIALS comes with the datagram.
+    struct iovec iov{ buf, sizeof(buf) - 1 };
+    alignas(struct cmsghdr) char cmsg_buf[CMSG_SPACE(sizeof(struct ucred))]{};
+    struct msghdr msg{};
+    msg.msg_name = &client_addr;
+    msg.msg_namelen = client_len;
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = cmsg_buf;
+    msg.msg_controllen = sizeof(cmsg_buf);
+
+    ssize_t bytes = ::recvmsg(fd, &msg, 0);
     if (bytes <= 0) return;
     buf[bytes] = '\0';
+    client_len = msg.msg_namelen;
+
+    // Who asked. Empty when the kernel supplied no credentials.
+    char requester[64] = "unknown";
+    for (struct cmsghdr* c = CMSG_FIRSTHDR(&msg); c != nullptr; c = CMSG_NXTHDR(&msg, c)) {
+        if (c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_CREDENTIALS) continue;
+        struct ucred cred{};
+        std::memcpy(&cred, CMSG_DATA(c), sizeof(cred));
+        if (cred.pid <= 0) break;
+
+        char comm_path[64];
+        std::snprintf(comm_path, sizeof(comm_path), "/proc/%d/comm", cred.pid);
+        char comm[48]{};
+        size_t cn = 0;
+        if (core::fs::read_small_file(comm_path, comm, sizeof(comm), &cn) && cn > 0) {
+            while (cn > 0 && (comm[cn - 1] == '\n' || comm[cn - 1] == '\r')) comm[--cn] = '\0';
+        } else {
+            std::snprintf(comm, sizeof(comm), "?");
+        }
+        std::snprintf(requester, sizeof(requester), "%s[%d] uid=%d", comm, cred.pid, cred.uid);
+        break;
+    }
 
     std::string_view req(buf, static_cast<size_t>(bytes));
 
@@ -697,11 +760,14 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
             // REF-REQ-067: Battery <= 20% Performance Mode Lockout Invariant
             bool is_discharging = cached_report_.hardware.is_battery_discharging;
             uint32_t batt_pct = cached_report_.hardware.battery_capacity_percent;
-            if (new_mode == PowerProfileMode::Performance && is_discharging && batt_pct <= 20) {
-                const char reject[] = "ERROR: Performance mode is prohibited when battery <= 20% (REF-REQ-067)\n";
+            // REF-REQ-094: only the 5% critical floor overrides an explicit user
+            // choice. Between 5% and 30% the user may select whatever they want;
+            // the automatic threshold demotions fire at most once each.
+            if (new_mode != PowerProfileMode::UltraEndurance && is_discharging && batt_pct <= 5) {
+                const char reject[] = "ERROR: Only UltraEndurance is permitted when battery <= 5% (REF-REQ-094)\n";
                 ::sendto(fd, reject, sizeof(reject) - 1, 0,
                          reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
-                EventLogger::log_alert("BATTERY", "Performance mode switch rejected: Battery capacity <= 20% (REF-REQ-067)");
+                EventLogger::log_alert("BATTERY", "Profile switch rejected: Battery capacity <= 5% permits UltraEndurance only (REF-REQ-094)");
                 return;
             }
 
@@ -717,7 +783,9 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
 
             PowerProfileMode old_p = last_logged_profile_;
             last_logged_profile_ = new_mode;
-            EventLogger::log_profile_change(old_p, new_mode, "User IPC Command");
+            char trigger[96];
+            std::snprintf(trigger, sizeof(trigger), "IPC request from %s", requester);
+            EventLogger::log_profile_change(old_p, new_mode, trigger);
 
             // Persist selected mode
             const char* hw_arg = "balanced";
@@ -725,13 +793,7 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
             else if (new_mode == PowerProfileMode::PowerSaver) hw_arg = "save";
             else if (new_mode == PowerProfileMode::UltraEndurance) hw_arg = "ultra";
 
-            int mode_fd = ::open("/home/jedclub/.cache/power_profile_mode", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
-            if (mode_fd >= 0) {
-                ::fchmod(mode_fd, 0666);
-                (void)::write(mode_fd, hw_arg, std::strlen(hw_arg));
-                (void)::write(mode_fd, "\n", 1);
-                ::close(mode_fd);
-            }
+            persist_profile_mode(hw_arg);
 
             // Immediately refresh observation and shared memory state
             process_observation_cycle();

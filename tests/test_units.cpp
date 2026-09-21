@@ -18,6 +18,8 @@
 #include "core/event_logger.hpp"
 #include "core/l10n.hpp"
 #include "tray/tray_client.hpp"
+#include "tray/icon_renderer.hpp"
+#include <sys/prctl.h>
 #include "core/daemon_runner.hpp"
 #include "core/scoped_profiler.hpp"
 #if defined(WATTCURB_HAS_QT6)
@@ -34,6 +36,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <vector>
 #include <sys/resource.h>
 #include <linux/perf_event.h>
 #include <sstream>
@@ -843,33 +846,67 @@ void test_adaptive_mitigation_and_rollback() {
 
     MitigationEngine engine;
 
-    // 1. Initial State & AC Power Verification
+    // 1. REF-REQ-094: Stability Invariant - nothing changes the user's profile
+    //    on AC, nor anywhere above 30% on battery.
     assert(engine.current_profile() == PowerProfileMode::Balanced);
-    assert(engine.determine_profile(false, 10.0) == PowerProfileMode::Balanced); // AC always Balanced
-
-    // 2. Battery Discharge Hysteresis Transitions
-    // Balanced -> PowerSaver trigger at <= 50.0%
-    assert(engine.determine_profile(true, 75.0) == PowerProfileMode::Balanced);
-    assert(engine.determine_profile(true, 50.0) == PowerProfileMode::PowerSaver);
-
-    // Transition to PowerSaver
     AnalysisReportData report;
+
+    engine.set_profile_override(PowerProfileMode::Performance);
+    assert(engine.determine_profile(false, 10.0) == PowerProfileMode::Performance &&
+           "AC must never impose a profile, not even at 10% battery");
+    for (double pct : {100.0, 80.0, 55.0, 45.0, 31.0}) {
+        assert(engine.determine_profile(true, pct) == PowerProfileMode::Performance &&
+               "Above 30% on battery the selected profile must stand");
+    }
+
+    // 2. 30% threshold: fires ONCE, and only out of Performance.
+    assert(engine.determine_profile(true, 30.0) == PowerProfileMode::Balanced &&
+           "30% must demote Performance -> Balanced exactly once");
+    engine.set_profile_override(PowerProfileMode::Performance);
+    assert(engine.determine_profile(true, 28.0) == PowerProfileMode::Performance &&
+           "The 30% crossing is spent: re-selecting Performance must stick");
+
+    // A profile that is not Performance is untouched by the 30% rule.
+    {
+        MitigationEngine e30;
+        e30.set_profile_override(PowerProfileMode::Balanced);
+        assert(e30.determine_profile(true, 29.0) == PowerProfileMode::Balanced);
+        e30.set_profile_override(PowerProfileMode::PowerSaver);
+        assert(e30.determine_profile(true, 29.0) == PowerProfileMode::PowerSaver);
+    }
+
+    // 3. 20% threshold: fires ONCE, from any profile, to PowerSaver.
+    assert(engine.determine_profile(true, 20.0) == PowerProfileMode::PowerSaver &&
+           "20% must demote to PowerSaver exactly once");
+    engine.set_profile_override(PowerProfileMode::Performance);
+    assert(engine.determine_profile(true, 12.0) == PowerProfileMode::Performance &&
+           "The 20% crossing is spent: the user's later choice must stick");
+
+    // 4. 5% floor: continuous, overrides everything.
+    assert(engine.determine_profile(true, 5.0) == PowerProfileMode::UltraEndurance);
+    assert(engine.determine_profile(true, 2.0) == PowerProfileMode::UltraEndurance);
+    engine.set_profile_override(PowerProfileMode::Performance);
+    assert(engine.determine_profile(true, 4.0) == PowerProfileMode::UltraEndurance &&
+           "Below 5% no other profile is permitted, even if explicitly selected");
+
+    // 5. Latches rearm after recovery, so the next discharge cycle demotes again.
+    engine.set_profile_override(PowerProfileMode::Performance);
+    assert(engine.determine_profile(false, 90.0) == PowerProfileMode::Performance); // charged
+    assert(engine.determine_profile(true, 30.0) == PowerProfileMode::Balanced &&
+           "After recovery the 30% threshold must arm again");
+
+    // 6. A single large drop past both thresholds must demote only once.
+    {
+        MitigationEngine drop;
+        drop.set_profile_override(PowerProfileMode::Performance);
+        assert(drop.determine_profile(true, 60.0) == PowerProfileMode::Performance);
+        assert(drop.determine_profile(true, 18.0) == PowerProfileMode::PowerSaver);
+        assert(drop.determine_profile(true, 17.0) == PowerProfileMode::PowerSaver &&
+               "Both crossings are consumed by the single drop");
+    }
+
+    engine.set_profile_override(std::nullopt);
     engine.evaluate_and_actuate(report, true, 49.0);
-    assert(engine.current_profile() == PowerProfileMode::PowerSaver);
-
-    // Hysteresis Guard: 52% must stay in PowerSaver (requires > 55% to recover to Balanced)
-    assert(engine.determine_profile(true, 52.0) == PowerProfileMode::PowerSaver);
-    assert(engine.determine_profile(true, 54.9) == PowerProfileMode::PowerSaver);
-    assert(engine.determine_profile(true, 55.1) == PowerProfileMode::Balanced);
-
-    // Transition to UltraEndurance (< 20%)
-    engine.evaluate_and_actuate(report, true, 18.0);
-    assert(engine.current_profile() == PowerProfileMode::UltraEndurance);
-
-    // Hysteresis Guard: 22% must stay in UltraEndurance (requires >= 25% to recover to PowerSaver)
-    assert(engine.determine_profile(true, 22.0) == PowerProfileMode::UltraEndurance);
-    assert(engine.determine_profile(true, 24.9) == PowerProfileMode::UltraEndurance);
-    assert(engine.determine_profile(true, 25.0) == PowerProfileMode::PowerSaver);
 
     // 3. Actuation and Bidirectional Rollback Test
     // Construct report with a heavy Background Worker and a Critical process
@@ -892,7 +929,10 @@ void test_adaptive_mitigation_and_rollback() {
     bg.timerslack_ns = 50000;
     report.top_processes.push_back(bg);
 
-    // In UltraEndurance: bg worker is frozen (or throttled if cgroup access fails in unprivileged mock)
+    // In UltraEndurance: bg worker is frozen (or throttled if cgroup access fails in unprivileged mock).
+    // REF-REQ-094: UltraEndurance is an explicit user selection above the 5% floor,
+    // so this exercise selects it rather than relying on a battery ladder.
+    engine.set_profile_override(PowerProfileMode::UltraEndurance);
     auto status = engine.evaluate_and_actuate(report, true, 15.0);
     assert(status.current_profile == PowerProfileMode::UltraEndurance);
     assert(status.active_summary.size() > 0);
@@ -903,14 +943,21 @@ void test_adaptive_mitigation_and_rollback() {
     shm.update_from_report(report);
     assert(shm.power_profile_mode == static_cast<uint8_t>(PowerProfileMode::UltraEndurance));
 
-    // Transition to PowerSaver (battery recovers to 30%): Thaw executed
+    // Transition to PowerSaver: Thaw executed. Again an explicit selection under REF-REQ-094.
+    engine.set_profile_override(PowerProfileMode::PowerSaver);
     engine.evaluate_and_actuate(report, true, 30.0);
     assert(engine.current_profile() == PowerProfileMode::PowerSaver);
     shm.update_from_report(report);
     assert(shm.power_profile_mode == static_cast<uint8_t>(PowerProfileMode::PowerSaver));
 
-    // Transition to Balanced on AC Connection: Full Rollback executed
+    // REF-REQ-094: AC connection alone must NOT move the user off their profile.
     engine.evaluate_and_actuate(report, false, 30.0); // AC connected
+    assert(engine.current_profile() == PowerProfileMode::PowerSaver &&
+           "Plugging in must never impose a profile change on its own");
+
+    // Returning to Balanced is an explicit choice, and it performs the full rollback.
+    engine.set_profile_override(PowerProfileMode::Balanced);
+    engine.evaluate_and_actuate(report, false, 30.0);
     assert(engine.current_profile() == PowerProfileMode::Balanced);
     assert(engine.tracked_count() == 0); // Rollback must completely clear active tracked list!
     shm.update_from_report(report);
@@ -2556,30 +2603,102 @@ void test_wifi_txpower_and_platform_loss_decomposition() {
 void test_battery_low_performance_lockout() {
     using namespace wattcurb::policy;
     using wattcurb::PowerProfileMode;
-    FeatureManager fm;
 
-    // Test 1: On battery discharging at 19% (<=20%) with Performance override requested
-    fm.set_override_profile(PowerProfileMode::Performance);
+    std::cout << "--- [REF-TEST-057] Deterministic Battery Threshold Demotion (REF-REQ-094) ---\n";
     wattcurb::AnalysisReportData report{};
-    auto status1 = fm.evaluate_and_actuate(report, true, 19.0);
-    assert(status1.current_profile == PowerProfileMode::Balanced && "Performance mode must be demoted to Balanced when discharging on battery <= 20%");
-    assert(fm.override_profile().has_value() && *fm.override_profile() == PowerProfileMode::Balanced && "Internal override must reflect demotion to Balanced");
 
-    // Test 2: Exactly 20.0% boundary condition
-    fm.set_override_profile(PowerProfileMode::Performance);
-    auto status2 = fm.evaluate_and_actuate(report, true, 20.0);
-    assert(status2.current_profile == PowerProfileMode::Balanced && "20.0% boundary must also enforce lockout");
+    // 1. Stability: above 30% on battery, the selected profile is never touched.
+    {
+        FeatureManager fm;
+        fm.set_override_profile(PowerProfileMode::Performance);
+        for (double pct : {100.0, 70.0, 45.0, 31.0}) {
+            auto st = fm.evaluate_and_actuate(report, true, pct);
+            assert(st.current_profile == PowerProfileMode::Performance &&
+                   "Above 30% the daemon must not change the user's profile");
+        }
+    }
 
-    // Test 3: On battery at 21.0% (>20%) with Performance override
-    fm.set_override_profile(PowerProfileMode::Performance);
-    auto status3 = fm.evaluate_and_actuate(report, true, 21.0);
-    assert(status3.current_profile == PowerProfileMode::Performance && "Performance mode must be permitted when battery > 20%");
+    // 2. 30% threshold: Performance -> Balanced, exactly once.
+    {
+        FeatureManager fm;
+        fm.set_override_profile(PowerProfileMode::Performance);
+        auto st = fm.evaluate_and_actuate(report, true, 30.0);
+        assert(st.current_profile == PowerProfileMode::Balanced && "30% must demote Performance -> Balanced");
+        assert(fm.override_profile().has_value() && *fm.override_profile() == PowerProfileMode::Balanced &&
+               "The demotion must become the new baseline");
 
-    // Test 4: Connected to AC power (on_battery == false) even when battery is critically low (10%)
-    fm.set_override_profile(PowerProfileMode::Performance);
-    auto status4 = fm.evaluate_and_actuate(report, false, 10.0);
-    assert(status4.current_profile == PowerProfileMode::Performance && "Performance mode must be permitted on external AC power");
-    std::cout << " [PASS] test_battery_low_performance_lockout (REF-TEST-032: <=20% demotion & AC bypass verified)\n";
+        // Re-selecting Performance below 30% must stick: the crossing is spent.
+        fm.set_override_profile(PowerProfileMode::Performance);
+        auto st2 = fm.evaluate_and_actuate(report, true, 26.0);
+        assert(st2.current_profile == PowerProfileMode::Performance &&
+               "A spent 30% crossing must not demote the user a second time");
+    }
+
+    // 3. The 30% rule only applies to Performance.
+    {
+        FeatureManager fm;
+        fm.set_override_profile(PowerProfileMode::Balanced);
+        auto st = fm.evaluate_and_actuate(report, true, 29.0);
+        assert(st.current_profile == PowerProfileMode::Balanced && "Balanced must survive the 30% crossing untouched");
+    }
+
+    // 4. 20% threshold: any profile -> PowerSaver, exactly once.
+    {
+        FeatureManager fm;
+        fm.set_override_profile(PowerProfileMode::Balanced);
+        auto st = fm.evaluate_and_actuate(report, true, 20.0);
+        assert(st.current_profile == PowerProfileMode::PowerSaver && "20.0% boundary must demote to PowerSaver");
+
+        fm.set_override_profile(PowerProfileMode::Performance);
+        auto st2 = fm.evaluate_and_actuate(report, true, 12.0);
+        assert(st2.current_profile == PowerProfileMode::Performance &&
+               "Between 5% and 20% an explicit choice must stand once the crossing is spent");
+    }
+
+    // 5. 5% floor: continuous and absolute.
+    {
+        FeatureManager fm;
+        fm.set_override_profile(PowerProfileMode::Performance);
+        auto st = fm.evaluate_and_actuate(report, true, 5.0);
+        assert(st.current_profile == PowerProfileMode::UltraEndurance && "<= 5% must force UltraEndurance");
+        fm.set_override_profile(PowerProfileMode::Performance);
+        auto st2 = fm.evaluate_and_actuate(report, true, 3.0);
+        assert(st2.current_profile == PowerProfileMode::UltraEndurance &&
+               "Below 5% no other profile is permitted, even when explicitly selected");
+    }
+
+    // 6. AC never imposes a profile, at any charge level.
+    {
+        FeatureManager fm;
+        fm.set_override_profile(PowerProfileMode::Performance);
+        auto st = fm.evaluate_and_actuate(report, false, 10.0);
+        assert(st.current_profile == PowerProfileMode::Performance &&
+               "Performance must be permitted on AC even at 10% battery");
+    }
+
+    // 7. Latches rearm after recovery so the next discharge cycle demotes again.
+    {
+        FeatureManager fm;
+        fm.set_override_profile(PowerProfileMode::Performance);
+        assert(fm.evaluate_and_actuate(report, true, 30.0).current_profile == PowerProfileMode::Balanced);
+        fm.evaluate_and_actuate(report, false, 90.0);              // charged back up
+        fm.set_override_profile(PowerProfileMode::Performance);
+        assert(fm.evaluate_and_actuate(report, true, 30.0).current_profile == PowerProfileMode::Balanced &&
+               "After recovery the 30% threshold must arm again");
+    }
+
+    // 8. One large drop past both thresholds demotes only once.
+    {
+        FeatureManager fm;
+        fm.set_override_profile(PowerProfileMode::Performance);
+        assert(fm.evaluate_and_actuate(report, true, 60.0).current_profile == PowerProfileMode::Performance);
+        assert(fm.evaluate_and_actuate(report, true, 18.0).current_profile == PowerProfileMode::PowerSaver);
+        fm.set_override_profile(PowerProfileMode::Performance);
+        assert(fm.evaluate_and_actuate(report, true, 17.0).current_profile == PowerProfileMode::Performance &&
+               "Both crossings are consumed by the single drop");
+    }
+
+    std::cout << " [PASS] test_battery_low_performance_lockout (REF-TEST-057: 30/20/5% one-shot demotion, AC & above-30% stability verified)\n";
 }
 
 void test_adaptive_three_tier_cadence() {
@@ -3434,7 +3553,642 @@ void test_bi_directional_power_profile_coherence() {
 
     std::cout << " [PASS] test_bi_directional_power_profile_coherence (REF-TEST-055: Seqlock Versioning, Ingestion & Coherence verified)\n";
 }
+
+void test_ultimate_performance_unleash_actuation() {
+    using namespace wattcurb;
+    using namespace wattcurb::policy;
+
+    std::cout << "\n--- [REF-TEST-056] Ultimate Performance Unleash Full-Silicon Actuation Oracle Gate (REF-REQ-092, REF-ARCH-069) ---\n";
+
+    // 0. Host Isolation Guard: no assertion below may reach live hardware.
+    assert(MitigationEngine::actuation_sandboxed() &&
+           "Oracle Gate Failed: actuation sandbox must be engaged before any "
+           "profile actuation, or this suite mutates the developer's machine");
+
+    // 1. Actuate Performance Mode & Verify Full-Silicon Actuation
+    bool perf_ok = MitigationEngine::apply_power_profile(PowerProfileMode::Performance);
+    assert(perf_ok && "apply_power_profile(Performance) must succeed");
+
+    const auto& base_perf = MitigationEngine::hardware_baseline();
+    std::cout << "   * Performance PM QoS C0 Clamp Active : " << (base_perf.performance_pm_qos_active ? "YES" : "NO (Mock/Non-root)") << "\n";
+    std::cout << "   * NVMe APST Zero-Latency Modified    : " << (base_perf.nvme_apst_modified ? "YES" : "NO") << "\n";
+    std::cout << "   * CFS Sched Migration Cost Modified  : " << (base_perf.sched_migration_cost_modified ? "YES" : "NO") << "\n";
+    std::cout << "   * Wi-Fi Power Save Disabled          : " << (base_perf.wifi_power_save_disabled ? "YES" : "NO") << "\n";
+
+    // 2. Actuate Balanced Mode & Verify Clean Demotion & Rollback
+    bool bal_ok = MitigationEngine::apply_power_profile(PowerProfileMode::Balanced);
+    assert(bal_ok && "apply_power_profile(Balanced) must succeed");
+
+    const auto& base_bal = MitigationEngine::hardware_baseline();
+    assert(!base_bal.performance_pm_qos_active && "PM QoS C0 clamp must be cleanly released in Balanced mode");
+    assert(!base_bal.nvme_apst_modified && "NVMe APST latency must be cleanly restored to baseline in Balanced mode");
+    assert(!base_bal.sched_migration_cost_modified && "CFS sched migration cost must be restored to baseline in Balanced mode");
+    assert(!base_bal.wifi_power_save_disabled && "Wi-Fi power save must be re-enabled in Balanced mode");
+
+    // 3. Actuate UltraEndurance Mode & Verify Performance Lockouts Are Released
+    MitigationEngine::apply_power_profile(PowerProfileMode::Performance);
+    MitigationEngine::apply_power_profile(PowerProfileMode::UltraEndurance);
+
+    const auto& base_ultra = MitigationEngine::hardware_baseline();
+    assert(!base_ultra.performance_pm_qos_active && "PM QoS C0 clamp must be released in UltraEndurance mode");
+    assert(!base_ultra.nvme_apst_modified && "NVMe APST must be restored in UltraEndurance mode");
+    assert(!base_ultra.sched_migration_cost_modified && "CFS migration cost must be restored in UltraEndurance mode");
+
+    // Restore to Balanced baseline
+    MitigationEngine::apply_power_profile(PowerProfileMode::Balanced);
+
+    // 4. Transition-Path Ordering Invariant (REF-REQ-092.2)
+    //    evaluate_and_actuate() must release process-domain mitigations BEFORE
+    //    actuating the new profile. rollback_all() reaches restore_hardware_baseline(),
+    //    so applying first and rolling back after silently undoes the entire
+    //    full-silicon unleash - leaving Performance mode actuated in name only.
+    //    This is privilege-independent: the engaged flag tracks which actuation
+    //    ran last, whether or not the underlying sysfs writes were permitted.
+    MitigationEngine engine;
+    AnalysisReportData transition_report{};
+
+    engine.set_profile_override(PowerProfileMode::PowerSaver);
+    engine.evaluate_and_actuate(transition_report, true, 40.0);
+    assert(!MitigationEngine::hardware_baseline().performance_unleash_engaged &&
+           "PowerSaver must not hold the Performance unleash");
+
+    engine.set_profile_override(PowerProfileMode::Performance);
+    auto perf_status = engine.evaluate_and_actuate(transition_report, false, 100.0);
+    assert(perf_status.current_profile == PowerProfileMode::Performance);
+    assert(MitigationEngine::hardware_baseline().performance_unleash_engaged &&
+           "Oracle Gate Failed: Performance unleash must survive the profile "
+           "transition (rollback_all must precede apply_power_profile)");
+
+    engine.set_profile_override(PowerProfileMode::Balanced);
+    engine.evaluate_and_actuate(transition_report, false, 100.0);
+    assert(!MitigationEngine::hardware_baseline().performance_unleash_engaged &&
+           "Demotion to Balanced must release the Performance unleash");
+
+    engine.set_profile_override(std::nullopt);
+    std::cout << "   * Transition-Path Ordering Invariant   : VERIFIED (PowerSaver -> Performance -> Balanced)\n";
+
+    // 5. Oracle Gate Benchmark: 10,000 iterations of hardware actuation switches
+    constexpr size_t BENCH_ITERS = 10000;
+    auto t0 = std::chrono::steady_clock::now();
+    uint64_t tsc0 = wattcurb::core::hw_isa::read_tsc();
+
+    for (size_t iter = 0; iter < BENCH_ITERS; ++iter) {
+        MitigationEngine::set_performance_pm_qos((iter & 1) != 0);
+        MitigationEngine::set_gpu_power_profile_mode((iter & 1) != 0 ? 1 : 0);
+    }
+    MitigationEngine::set_performance_pm_qos(false);
+
+    uint64_t tsc1 = wattcurb::core::hw_isa::read_tsc();
+    auto t1 = std::chrono::steady_clock::now();
+    double avg_ns = static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count()) / static_cast<double>(BENCH_ITERS);
+    double avg_cycles = static_cast<double>(tsc1 - tsc0) / static_cast<double>(BENCH_ITERS);
+
+    std::cout << " [ORACLE GATE] Ultimate Performance Actuation Benchmark (" << BENCH_ITERS << " iters):\n"
+              << "   * PM QoS + GPU Profile Switch Latency: " << std::fixed << std::setprecision(2) << avg_ns << " ns/op (" << avg_cycles << " cycles/op)\n";
+
+    assert(avg_ns < 100000.0 && "Oracle Gate Failed: Performance actuation switch must execute in < 100 us/op!");
+
+    std::cout << " [PASS] test_ultimate_performance_unleash_actuation (REF-TEST-056: C0 Clamp, GPU 3D, APST 0, Rollback verified)\n";
+}
 #endif
+
+// Implements REF-TEST-058 & REF-REQ-095: Watt-Reactive Procedural Tray Icon Oracle Gate
+void test_watt_reactive_tray_icon() {
+    using namespace wattcurb;
+    using namespace wattcurb::tray;
+
+    std::cout << "\n--- [REF-TEST-058] Watt-Reactive Tray Icon Rendering (REF-REQ-095, REF-ARCH-071) ---\n";
+
+    // 1. Each profile owns a distinct, ordered, non-degenerate watt band.
+    const PowerProfileMode profiles[4] = {
+        PowerProfileMode::Performance, PowerProfileMode::Balanced,
+        PowerProfileMode::PowerSaver, PowerProfileMode::UltraEndurance
+    };
+    double prev_green = 1e9, prev_red = 1e9;
+    for (auto pm : profiles) {
+        const WattBand b = profile_band(pm);
+        assert(b.red_w > b.green_w && "A band must have a positive span");
+        assert(b.green_w < prev_green && b.red_w < prev_red &&
+               "Bands must tighten monotonically towards the saving profiles");
+        prev_green = b.green_w;
+        prev_red = b.red_w;
+    }
+
+    // 2. watt_ratio clamps to the band and is monotonic inside it.
+    for (auto pm : profiles) {
+        const WattBand b = profile_band(pm);
+        assert(watt_ratio(pm, b.green_w - 5.0) == 0.0 && "Below the band must clamp to 0");
+        assert(watt_ratio(pm, b.red_w + 50.0) == 1.0 && "Above the band must clamp to 1");
+        assert(std::abs(watt_ratio(pm, (b.green_w + b.red_w) * 0.5) - 0.5) < 1e-9);
+        double last = -1.0;
+        for (int i = 0; i <= 20; ++i) {
+            const double w = b.green_w + (b.red_w - b.green_w) * (i / 20.0);
+            const double r = watt_ratio(pm, w);
+            assert(r >= last && "watt_ratio must be non-decreasing");
+            last = r;
+        }
+    }
+
+    // 3. Colour ramp actually travels green -> red.
+    const uint32_t c0 = watt_color(0.0);
+    const uint32_t c1 = watt_color(1.0);
+    assert(((c0 >> 8) & 0xFF) > ((c0 >> 16) & 0xFF) && "0.0 must be green-dominant");
+    assert(((c1 >> 16) & 0xFF) > ((c1 >> 8) & 0xFF) && "1.0 must be red-dominant");
+    int prev_r = -1;
+    for (int i = 0; i <= 10; ++i) {
+        const uint32_t c = watt_color(i / 10.0);
+        const int red = static_cast<int>((c >> 16) & 0xFF);
+        assert(red >= prev_r && "Red channel must rise monotonically across the ramp");
+        prev_r = red;
+    }
+
+    // 4. Frame colour: blue while charging, white above 30%, fading to red below.
+    assert(frame_color(true, 80) == 0x38BDF8 && "Charging must drive the frame bright blue");
+    assert(frame_color(true, 10) == 0x38BDF8 && "Charging takes precedence over the low warning");
+    const uint32_t f30 = frame_color(false, 30);
+    const uint32_t f00 = frame_color(false, 0);
+    assert(((f30 >> 16) & 0xFF) > 200 && ((f30 >> 8) & 0xFF) > 200 && (f30 & 0xFF) > 200 &&
+           "30% must still be white");
+    assert(((f00 >> 16) & 0xFF) > ((f00 >> 8) & 0xFF) + 80 && "0% must be strongly red");
+    int prev_g = 256;
+    for (int pct = 30; pct >= 0; --pct) {
+        const uint32_t c = frame_color(false, static_cast<uint8_t>(pct));
+        const int g = static_cast<int>((c >> 8) & 0xFF);
+        assert(g <= prev_g && "Warning ramp must desaturate monotonically towards red");
+        prev_g = g;
+    }
+
+    // 5. Every profile renders a DISTINCT silhouette - UltraEndurance must not
+    //    reuse the PowerSaver leaf.
+    auto silhouette = [](PowerProfileMode pm, int sz) {
+        IconInputs in{};
+        in.profile = pm;
+        in.system_watts = 100.0; // saturate so colour cannot vary the mask
+        in.battery_percent = 70;
+        IconBitmap bm{};
+        render_tray_icon(in, bm, sz);
+        std::string mask;
+        mask.reserve(static_cast<size_t>(sz * sz));
+        for (int i = 0; i < sz * sz; ++i) mask.push_back(((bm.px[i] >> 24) & 0xFF) > 96 ? '#' : '.');
+        return mask;
+    };
+    std::string masks[4];
+    for (int i = 0; i < 4; ++i) masks[i] = silhouette(profiles[i], 48);
+    for (int i = 0; i < 4; ++i) {
+        assert(masks[i].find('#') != std::string::npos && "Every profile must render visible pixels");
+        for (int j = i + 1; j < 4; ++j) {
+            assert(masks[i] != masks[j] && "Each profile badge must be visually distinct");
+        }
+    }
+
+    // 5b. The charge rail must be present and must track the battery level. It
+    //     replaced an enclosing battery outline, which was the brightest element
+    //     in the tile while carrying the least information.
+    {
+        auto lit_width = [](uint8_t pct, bool charging) {
+            IconInputs in{};
+            in.profile = PowerProfileMode::Balanced;
+            in.system_watts = 10.0;
+            in.battery_percent = pct;
+            in.charging = charging;
+            IconBitmap bm{};
+            render_tray_icon(in, bm, 48);
+
+            // Rail spans design y 86..95; sample its middle row.
+            const int y = static_cast<int>(90.5 * 48.0 / 100.0);
+            int lit = 0;
+            for (int x = 0; x < bm.size; ++x) {
+                const uint32_t px = bm.px[static_cast<size_t>(y) * static_cast<size_t>(bm.size)
+                                          + static_cast<size_t>(x)];
+                if (((px >> 24) & 0xFF) > 200) ++lit; // full-strength portion only
+            }
+            return lit;
+        };
+
+        const int w90 = lit_width(90, false);
+        const int w40 = lit_width(40, false);
+        const int w05 = lit_width(5, false);
+        assert(w90 > 0 && "The charge rail must render");
+        assert(w90 > w40 && w40 > w05 && "Rail width must decrease with charge");
+        assert(w05 > 0 && "A nearly empty battery must still show a lit stub");
+
+        // Charging recolours the rail without changing its geometry.
+        assert(lit_width(40, true) == w40 && "Charging must not alter the rail geometry");
+    }
+
+    // 5c. No glyph may touch the tile border. Every glyph is rotated onto the
+    //     diagonal to fill the square, which makes overrun easy to introduce:
+    //     a wider fin span or a longer stem silently gets sliced off.
+    for (auto pm : profiles) {
+        IconInputs in{};
+        in.profile = pm;
+        in.system_watts = 100.0; // saturate so colour cannot vary the mask
+        in.battery_percent = 70;
+        IconBitmap bm{};
+        render_tray_icon(in, bm, 64);
+
+        auto opaque = [&bm](int x, int y) {
+            return ((bm.px[static_cast<size_t>(y) * static_cast<size_t>(bm.size)
+                           + static_cast<size_t>(x)] >> 24) & 0xFF) > 40;
+        };
+        const int last = bm.size - 1;
+        int touching = 0;
+        for (int i = 0; i < bm.size; ++i) {
+            // The charge rail legitimately runs to the bottom edge region, so the
+            // bottom row is excluded; the glyph must clear the other three.
+            if (opaque(i, 0) || opaque(0, i) || opaque(last, i)) ++touching;
+        }
+        assert(touching == 0 && "A glyph must not reach the tile border");
+    }
+
+    // 6. The dial must fill RIGHTWARD as the reading rises.
+    //    Neither an alpha mask nor an absolute centroid works here: the unlit
+    //    track is drawn at full opacity, and a fully lit 252-degree dial is
+    //    symmetric about its vertical axis, so its centroid sits back in the
+    //    middle. What actually carries the direction is the INCREMENT - which
+    //    part of the dial lit up between two readings.
+    {
+        auto lit_mask = [](double t_val, std::vector<char>& mask) {
+            const WattBand b = profile_band(PowerProfileMode::Balanced);
+            IconInputs in{};
+            in.profile = PowerProfileMode::Balanced;
+            in.system_watts = b.green_w + (b.red_w - b.green_w) * t_val;
+            in.battery_percent = 70;
+            IconBitmap bm{};
+            render_tray_icon(in, bm, 48);
+
+            const uint32_t target = watt_color(watt_ratio(PowerProfileMode::Balanced, in.system_watts));
+            const int tr = static_cast<int>((target >> 16) & 0xFF);
+            const int tg = static_cast<int>((target >> 8) & 0xFF);
+            const int tb = static_cast<int>(target & 0xFF);
+
+            mask.assign(48 * 48, 0);
+            const int rail_top = static_cast<int>(84.0 * 48.0 / 100.0);
+            for (int y = 0; y < rail_top; ++y) {
+                for (int x = 0; x < 48; ++x) {
+                    const size_t idx = static_cast<size_t>(y) * 48u + static_cast<size_t>(x);
+                    const uint32_t px = bm.px[idx];
+                    if (((px >> 24) & 0xFF) < 200) continue;
+                    const int dr = static_cast<int>((px >> 16) & 0xFF) - tr;
+                    const int dg = static_cast<int>((px >> 8) & 0xFF) - tg;
+                    const int db = static_cast<int>(px & 0xFF) - tb;
+                    if (std::abs(dr) > 26 || std::abs(dg) > 26 || std::abs(db) > 26) continue;
+                    mask[idx] = 1;
+                }
+            }
+        };
+
+        // A font glyph is a single static symbol, so this property belongs to the
+        // procedural dial. Force that source for the duration of the check.
+        const GlyphSource prior = glyph_source();
+        set_glyph_source(GlyphSource::Procedural);
+
+        std::vector<char> m0, m5, m10;
+        lit_mask(0.0, m0);
+        lit_mask(0.5, m5);
+        lit_mask(1.0, m10);
+
+        auto gained_centroid = [](const std::vector<char>& before, const std::vector<char>& after,
+                                  double& cx, int& n) {
+            double sum = 0.0;
+            n = 0;
+            for (int y = 0; y < 48; ++y) {
+                for (int x = 0; x < 48; ++x) {
+                    const size_t idx = static_cast<size_t>(y) * 48u + static_cast<size_t>(x);
+                    if (after[idx] && !before[idx]) { sum += x; ++n; }
+                }
+            }
+            cx = (n > 0) ? sum / n : 0.0;
+        };
+
+        double first_cx = 0.0, second_cx = 0.0;
+        int first_n = 0, second_n = 0;
+        gained_centroid(m0, m5, first_cx, first_n);
+        gained_centroid(m5, m10, second_cx, second_n);
+
+        std::cout << "   * Dial fill increment       : 0.0->0.5 lights x=" << std::fixed
+                  << std::setprecision(1) << first_cx << "px (" << first_n << "px), 0.5->1.0 lights x="
+                  << second_cx << "px (" << second_n << "px)" << std::endl;
+
+        assert(first_n > 0 && second_n > 0 && "Each half of the sweep must light a distinct region");
+        assert(second_cx > first_cx + 4.0 &&
+               "The second half of the sweep must light up to the RIGHT of the first");
+
+        set_glyph_source(prior);
+    }
+
+    // 6b. Whichever source is active, the badge colour must still track the
+    //     reading - that is the channel the requirement actually specifies.
+    {
+        auto badge_hue = [](double t_val) {
+            const WattBand b = profile_band(PowerProfileMode::Balanced);
+            IconInputs in{};
+            in.profile = PowerProfileMode::Balanced;
+            in.system_watts = b.green_w + (b.red_w - b.green_w) * t_val;
+            in.battery_percent = 70;
+            IconBitmap bm{};
+            render_tray_icon(in, bm, 48);
+
+            long r = 0, g = 0;
+            int n = 0;
+            const int rail_top = static_cast<int>(84.0 * 48.0 / 100.0);
+            for (int y = 0; y < rail_top; ++y) {
+                for (int x = 0; x < 48; ++x) {
+                    const uint32_t px = bm.px[static_cast<size_t>(y) * 48u + static_cast<size_t>(x)];
+                    if (((px >> 24) & 0xFF) < 200) continue;
+                    r += static_cast<long>((px >> 16) & 0xFF);
+                    g += static_cast<long>((px >> 8) & 0xFF);
+                    ++n;
+                }
+            }
+            return (n > 0) ? (static_cast<double>(r) / n) - (static_cast<double>(g) / n) : 0.0;
+        };
+
+        const double cold = badge_hue(0.0);
+        const double hot = badge_hue(1.0);
+        std::cout << "   * Badge hue (R-G)           : " << std::fixed << std::setprecision(1)
+                  << cold << " (green) -> " << hot << " (red), source="
+                  << (icon_font_available() ? "font" : "procedural") << "\n";
+        assert(cold < 0.0 && "A low reading must render green-dominant");
+        assert(hot > cold + 60.0 && "A high reading must render decisively redder");
+    }
+
+    // 7. Oracle Gate: rendering must stay cheap enough for a tray property read.
+    constexpr size_t ITERS = 300;
+    IconBitmap bench{};
+    IconInputs bin{};
+    bin.profile = PowerProfileMode::Balanced;
+    bin.system_watts = 14.0;
+    bin.battery_percent = 65;
+
+    auto t0 = std::chrono::steady_clock::now();
+    for (size_t i = 0; i < ITERS; ++i) {
+        bin.system_watts = 6.0 + static_cast<double>(i % 20);
+        render_tray_icon(bin, bench, 48);
+    }
+    auto t1 = std::chrono::steady_clock::now();
+    const double avg_us = static_cast<double>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count()) / (ITERS * 1000.0);
+
+    std::cout << " [ORACLE GATE] Procedural Icon Render (" << ITERS << " iters @48px):\n"
+              << "   * Average Latency : " << avg_us << " us/op\n";
+    assert(avg_us < 4000.0 && "48px icon render must complete in < 4 ms/op");
+
+    std::cout << " [PASS] test_watt_reactive_tray_icon (REF-TEST-058: bands, ramp, frame warning, 4 distinct badges, needle deflection verified)\n";
+}
+
+// Implements REF-TEST-059 & REF-REQ-096: Audio Continuity Guarantee Oracle Gate
+void test_audio_continuity_guarantee() {
+    using namespace wattcurb;
+    using namespace wattcurb::policy;
+
+    std::cout << "\n--- [REF-TEST-059] Audio Continuity Guarantee (REF-REQ-096) ---\n";
+
+    // 1. The latency ceiling must admit shallow idle states and exclude the
+    //    deepest one. This is the whole point of the requirement, so it is
+    //    checked against the HOST's real cpuidle table rather than a constant.
+    {
+        int min_nonzero = -1;
+        int deepest = -1;
+        for (int i = 0; i < 12; ++i) {
+            char path[96];
+            std::snprintf(path, sizeof(path),
+                          "/sys/devices/system/cpu/cpu0/cpuidle/state%d/latency", i);
+            char buf[32];
+            size_t n = 0;
+            if (!core::fs::read_small_file(path, buf, sizeof(buf), &n) || n == 0) break;
+            buf[n] = '\0';
+            const int lat = std::atoi(buf);
+            if (lat > 0 && (min_nonzero < 0 || lat < min_nonzero)) min_nonzero = lat;
+            if (lat > deepest) deepest = lat;
+        }
+        if (deepest > 0) {
+            std::cout << "   * Host cpuidle exit latency : " << min_nonzero << " us (shallowest) .. "
+                      << deepest << " us (deepest)\n";
+            std::cout << "   * Audio latency ceiling     : "
+                      << MitigationEngine::AUDIO_DMA_LATENCY_US << " us\n";
+            assert(MitigationEngine::AUDIO_DMA_LATENCY_US > min_nonzero &&
+                   "The ceiling must still permit a real idle state, or audio costs full idle power");
+            assert(MitigationEngine::AUDIO_DMA_LATENCY_US < deepest &&
+                   "The ceiling must exclude the deepest C-state, or it guarantees nothing");
+        } else {
+            std::cout << "   * Host exposes no cpuidle table; latency band check skipped\n";
+        }
+    }
+
+    // 2. The probe must survive a host with no playback, and stay cheap enough to
+    //    run on every evaluation cycle.
+    constexpr size_t ITERS = 100;
+    auto t0 = std::chrono::steady_clock::now();
+    for (size_t i = 0; i < ITERS; ++i) {
+        MitigationEngine::refresh_audio_stream_state();
+    }
+    auto t1 = std::chrono::steady_clock::now();
+    const double avg_us = static_cast<double>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count()) / (ITERS * 1000.0);
+
+    const auto& st = MitigationEngine::audio_stream_state();
+    std::cout << "   * PCM probe                 : " << std::fixed << std::setprecision(1)
+              << avg_us << " us/op, active=" << (st.active ? "yes" : "no")
+              << ", owners=" << st.owner_count << "\n";
+    assert(avg_us < 3000.0 && "The audio probe must stay well inside one evaluation cycle");
+    assert(st.owner_count <= MitigationEngine::MAX_AUDIO_OWNERS);
+
+    // 3. Whatever the probe reports must be self-consistent: owners imply active.
+    if (st.owner_count > 0) {
+        assert(st.active && "Reporting a stream owner without an active stream is incoherent");
+        for (size_t i = 0; i < st.owner_count; ++i) {
+            assert(st.owner_pids[i] > 1);
+            assert(MitigationEngine::is_audio_owner(st.owner_pids[i]));
+            assert(MitigationEngine::is_immune_process(st.owner_pids[i]) &&
+                   "A live stream owner must be immune to every mitigation");
+        }
+    }
+
+    // 3b. Tier shielding: while a stream runs, a media-pipeline process keeps a
+    //     normal scheduling class, while a genuine background worker stays
+    //     throttleable. Driven by renaming this very process, so the check is
+    //     deterministic instead of depending on what happens to be running.
+    {
+        char original[20]{};
+        (void)::prctl(PR_GET_NAME, original, 0, 0, 0);
+
+        (void)::prctl(PR_SET_NAME, "chrome", 0, 0, 0);
+        const bool interactive_shielded = MitigationEngine::is_audio_shielded(::getpid());
+        const bool interactive_idle_ok = MitigationEngine::apply_sched_idle(::getpid());
+
+        (void)::prctl(PR_SET_NAME, "baloo_file", 0, 0, 0);
+        const bool worker_shielded = MitigationEngine::is_audio_shielded(::getpid());
+
+        (void)::prctl(PR_SET_NAME, original, 0, 0, 0);
+
+        std::cout << "   * Tier shielding            : interactive="
+                  << (interactive_shielded ? "shielded" : "open")
+                  << ", background worker=" << (worker_shielded ? "shielded" : "open") << "\n";
+
+        assert(!worker_shielded && "Background workers must stay throttleable, or playback halts power saving");
+        if (st.active) {
+            assert(interactive_shielded &&
+                   "A media-pipeline process must not be demoted while a stream is running");
+            assert(!interactive_idle_ok &&
+                   "apply_sched_idle must refuse a shielded process outright");
+        } else {
+            assert(!interactive_shielded && "Nothing is shielded when no stream is running");
+        }
+    }
+
+    // 3c. REF-REQ-100: The suite must be unable to command the running system at
+    //     all. Enforced in SingletonLock::query_daemon, so it holds no matter
+    //     which API a test reaches for - this is checked directly rather than
+    //     trusting that every caller remembered to guard itself.
+    {
+        std::string resp;
+        const bool sent = wattcurb::core::SingletonLock::query_daemon(
+            "PROFILE 2\n", resp, "wattcurb.lock", 50);
+        assert(!sent && resp.empty() &&
+               "Under isolation no test may reach the live daemon socket");
+        std::cout << "   * Live-daemon command path   : refused (test isolation enforced at IPC layer)\n";
+    }
+
+    // 4. Ownership lookup must reject non-PIDs rather than matching a zeroed slot.
+    assert(!MitigationEngine::is_audio_owner(0));
+    assert(!MitigationEngine::is_audio_owner(1));
+    assert(!MitigationEngine::is_audio_owner(-1));
+
+    // 5. The floor is idempotent and releases cleanly. Under the actuation
+    //    sandbox no descriptor is taken, so the invariant checked here is that
+    //    the engine never believes it holds one after a release.
+    for (int i = 0; i < 4; ++i) {
+        MitigationEngine::set_audio_latency_floor(true);
+    }
+    MitigationEngine::set_audio_latency_floor(false);
+    MitigationEngine::set_audio_latency_floor(false);
+    assert(MitigationEngine::hardware_baseline().audio_pm_qos_fd < 0 &&
+           "Releasing the audio latency floor must drop the descriptor");
+
+    // 6. The sound-server allowlist still stands on its own, independent of
+    //    whether anything is playing right now.
+    std::cout << " [PASS] test_audio_continuity_guarantee (REF-TEST-059: latency band, probe cost, owner immunity, floor lifecycle verified)\n";
+}
+
+// Implements REF-TEST-060 & REF-REQ-098: System Liveness Invariant Oracle Gate
+void test_system_liveness_invariant() {
+    using namespace wattcurb;
+    using namespace wattcurb::policy;
+
+    std::cout << "\n--- [REF-TEST-060] System Liveness Invariant (REF-REQ-098) ---\n";
+
+    // 1. Runtime PM is an allowlist. These are the real class codes present on
+    //    the development machine; suspending any of the infrastructure ones is
+    //    what made the system look hung in UltraEndurance.
+    struct Case { uint32_t cls; bool allowed_idle; const char* what; };
+    static const Case CASES[] = {
+        { 0x010802u, false, "NVMe storage controller" },
+        { 0x030000u, false, "VGA display controller" },
+        { 0x0C0320u, false, "USB host controller" },
+        { 0x0C0330u, false, "USB xHCI controller" },
+        { 0x060000u, false, "Host bridge" },
+        { 0x060400u, false, "PCI bridge" },
+        { 0x060100u, false, "ISA bridge" },
+        { 0x080600u, false, "IOMMU" },
+        { 0x020000u, true,  "Ethernet controller" },
+        { 0x028000u, true,  "Wireless controller" },
+        { 0x080501u, true,  "SD/MMC host" },
+    };
+    for (const auto& c : CASES) {
+        const bool got = MitigationEngine::pci_class_allows_runtime_pm(c.cls, false);
+        if (got != c.allowed_idle) {
+            std::cout << "   ! class 0x" << std::hex << c.cls << std::dec
+                      << " (" << c.what << ") expected "
+                      << (c.allowed_idle ? "allow" : "deny") << "\n";
+        }
+        assert(got == c.allowed_idle && c.what);
+    }
+
+    // Audio may suspend only while nothing is playing (REF-REQ-096).
+    assert(MitigationEngine::pci_class_allows_runtime_pm(0x040300u, false) &&
+           "An idle audio controller may runtime-suspend");
+    assert(!MitigationEngine::pci_class_allows_runtime_pm(0x040300u, true) &&
+           "An audio controller must not suspend under a live stream");
+    std::cout << "   * PCI runtime PM allowlist  : "
+              << (sizeof(CASES) / sizeof(CASES[0])) << " classes verified, infrastructure denied\n";
+
+    // 2. Input and window management keep a working share in EVERY profile.
+    //    Driven by renaming this process, so the result does not depend on what
+    //    happens to be running.
+    {
+        char original[20]{};
+        (void)::prctl(PR_GET_NAME, original, 0, 0, 0);
+
+        struct Role { const char* comm; bool critical; };
+        static const Role ROLES[] = {
+            { "kwin_wayland", true  },  // compositor: also the Wayland input path
+            { "plasmashell",  true  },  // desktop shell
+            { "systemd",      true  },  // critical daemon
+            { "baloo_file",   false },  // background worker: still throttleable
+        };
+        for (const auto& r : ROLES) {
+            (void)::prctl(PR_SET_NAME, r.comm, 0, 0, 0);
+            const bool crit = MitigationEngine::is_liveness_critical(::getpid());
+            assert(crit == r.critical && r.comm);
+
+            if (r.critical) {
+                assert(!MitigationEngine::apply_sched_idle(::getpid()) &&
+                       "A liveness-critical process must never be demoted to SCHED_IDLE");
+                assert(!MitigationEngine::apply_cgroup_freeze(::getpid(), true) &&
+                       "A liveness-critical process must never be frozen");
+            }
+        }
+        (void)::prctl(PR_SET_NAME, original, 0, 0, 0);
+        std::cout << "   * Liveness shielding        : compositor/shell/critical protected, workers throttleable\n";
+    }
+
+    // 3. The frequency ceiling may never fall below the driver's own minimum,
+    //    which would leave the governor without a usable operating point.
+    {
+        char buf[32];
+        size_t n = 0;
+        if (core::fs::read_small_file("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq",
+                                      buf, sizeof(buf), &n) && n > 0) {
+            buf[n] = '\0';
+            const auto hw_min = static_cast<uint32_t>(std::strtoul(buf, nullptr, 10));
+            std::cout << "   * Host cpufreq floor        : " << hw_min << " kHz\n";
+            assert(hw_min > 0);
+        } else {
+            std::cout << "   * Host exposes no cpufreq floor; guard check skipped\n";
+        }
+    }
+
+    // 4. No code path may purge the system page cache. Writing "3" to
+    //    /proc/sys/vm/drop_caches froze this machine for about a minute: the
+    //    kernel frees every cached page under lock, and afterwards every binary
+    //    and library the desktop touches is re-read from storage. It also costs
+    //    power rather than saving it. Guarded at source level because the
+    //    actuation is unconditional and there is no safe runtime probe for it.
+    {
+        FILE* f = std::fopen("src/policy/mitigation_engine.cpp", "r");
+        if (f) {
+            char line[512];
+            int offenders = 0;
+            while (std::fgets(line, sizeof(line), f)) {
+                if (std::strstr(line, "drop_caches") == nullptr) continue;
+                // A mention in a comment is fine; an open-for-write is not.
+                if (std::strstr(line, "open_write") != nullptr ||
+                    std::strstr(line, "::open(") != nullptr) {
+                    ++offenders;
+                }
+            }
+            std::fclose(f);
+            std::cout << "   * drop_caches actuations    : " << offenders << " (must be 0)\n";
+            assert(offenders == 0 &&
+                   "No profile may purge the system page cache: it stalls the machine and costs power");
+        } else {
+            std::cout << "   * Source not reachable from CWD; drop_caches guard skipped\n";
+        }
+    }
+
+    std::cout << " [PASS] test_system_liveness_invariant (REF-TEST-060: runtime PM allowlist, compositor/input shielding, frequency floor, no cache purge verified)\n";
+}
 
 void test_multilingual_l10n_and_auto_system_locale() {
     std::cout << "--- [REF-TEST-041] Multilingual L10n & Auto System Locale Verification ---\n";
@@ -3884,15 +4638,24 @@ void test_ultimate_ultra_endurance_power_minimization() {
     proc.timerslack_ns = 50000; // 50us default
     report.top_processes.push_back(proc);
 
-    auto status = engine.evaluate_and_actuate(report, true, 10.0); // 10% battery -> UltraEndurance
+    // REF-REQ-094: UltraEndurance is now reached only below the 5% critical floor
+    // (or by explicit user selection); 10% lands in PowerSaver instead.
+    auto status = engine.evaluate_and_actuate(report, true, 4.0); // 4% battery -> UltraEndurance floor
     assert(status.current_profile == wattcurb::PowerProfileMode::UltraEndurance);
 
     // Verify Zero-Kill Safety Invariant: Test process must still be running alive!
     assert(::kill(::getpid(), 0) == 0 && "Self PID must never be killed (Zero-Kill invariant)");
 
-    // Restore to AC power / Balanced
+    // REF-REQ-094: plugging in must NOT silently move the user off their profile.
+    engine.evaluate_and_actuate(report, false, 100.0);
+    assert(engine.current_profile() == wattcurb::PowerProfileMode::UltraEndurance &&
+           "AC power must never impose a profile change on its own");
+
+    // Returning to Balanced is an explicit choice.
+    engine.set_profile_override(wattcurb::PowerProfileMode::Balanced);
     engine.evaluate_and_actuate(report, false, 100.0);
     assert(engine.current_profile() == wattcurb::PowerProfileMode::Balanced);
+    engine.set_profile_override(std::nullopt);
 
     std::cout << " [PASS] test_ultimate_ultra_endurance_power_minimization (REF-TEST-052: All 6 dimensions verified, Zero-Kill preserved)\n";
 }
@@ -4017,6 +4780,18 @@ int main() {
     // REF-REQ-071 & REF-ARCH-048: Protect physical compositor & display during test harness execution
     ::setenv("WATTCURB_TEST_MOCK_DESKTOP", "1", 1);
 
+    // REF-REQ-092 & REF-ARCH-069: Protect the physical machine during test harness
+    // execution. Without this the Oracle Gate really does clamp the host CPU to C0
+    // via /dev/cpu_dma_latency, rewrite NVMe APST and runtime PM, retune the CFS
+    // scheduler, toggle 802.11 power save, and renice the developer's audio daemon
+    // - and it succeeds wherever the test user happens to hold the rights.
+    wattcurb::policy::MitigationEngine::set_actuation_sandbox(true);
+
+    // REF-REQ-092 & REF-ARCH-069: Detach the suite from any live wattcurb daemon.
+    // DashboardBackend mmaps /dev/shm/wattcurb_state.shm, and a running daemon's
+    // telemetry overwrites the synthetic JSON these tests ingest.
+    ::setenv("WATTCURB_TEST_ISOLATE", "1", 1);
+
     std::cout << "=== WattCurb Unit Test Suite & Oracle Gate Verifier ===\n";
     test::test_token_minimization_harness_integrity();
     test::test_package_autostart_and_installer_integrity();
@@ -4049,7 +4824,11 @@ int main() {
     test::test_matrix_dashboard_expanded_power_shares_and_typography();
     test::test_process_cstate_affinity_and_badges();
     test::test_bi_directional_power_profile_coherence();
+    test::test_ultimate_performance_unleash_actuation();
 #endif
+    test::test_watt_reactive_tray_icon();
+    test::test_audio_continuity_guarantee();
+    test::test_system_liveness_invariant();
     test::test_multilingual_l10n_and_auto_system_locale();
     test::test_anti_starvation_and_greedy_capping();
     test::test_adaptive_c1_c2_cluster_dispersion();

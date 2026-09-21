@@ -1,4 +1,5 @@
 #include "tray/tray_client.hpp"
+#include "tray/icon_renderer.hpp"
 #include "core/singleton_lock.hpp"
 #include "core/posix_fs.hpp"
 #include "core/scoped_profiler.hpp"
@@ -28,7 +29,7 @@ static const sd_bus_vtable sni_vtable[] = {
     SD_BUS_PROPERTY("Title", "s", TrayClient::property_get_title, 0, SD_BUS_VTABLE_PROPERTY_CONST),
     SD_BUS_PROPERTY("Status", "s", TrayClient::property_get_status, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
     SD_BUS_PROPERTY("IconName", "s", TrayClient::property_get_icon_name, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
-    SD_BUS_PROPERTY("IconPixmap", "a(iiay)", TrayClient::property_get_icon_pixmap, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+    SD_BUS_PROPERTY("IconPixmap", "a(iiay)", TrayClient::property_get_icon_pixmap, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
     SD_BUS_PROPERTY("IconThemePath", "s", TrayClient::property_get_icon_theme_path, 0, SD_BUS_VTABLE_PROPERTY_CONST),
     SD_BUS_PROPERTY("Menu", "o", TrayClient::property_get_menu, 0, SD_BUS_VTABLE_PROPERTY_CONST),
     SD_BUS_PROPERTY("ItemIsMenu", "b", TrayClient::property_get_item_is_menu, 0, SD_BUS_VTABLE_PROPERTY_CONST),
@@ -585,13 +586,27 @@ void TrayClient::resolve_icon_name(
     }
 }
 
+
+// Resolve "$HOME/.local/bin/wattcurb-dashboard". The previous hardcoded
+// "/home/<dev>/..." shipped in every release binary and was tried BEFORE
+// /usr/local/bin, so on any host where that path happened to exist and be
+// writable, its contents would be executed instead of the installed binary.
+static bool user_dashboard_path(char* out, size_t cap) noexcept {
+    const char* home = ::getenv("HOME");
+    if (!home || home[0] != '/') return false;
+    int n = std::snprintf(out, cap, "%s/.local/bin/wattcurb-dashboard", home);
+    return (n > 0 && static_cast<size_t>(n) < cap);
+}
+
 static void apply_hardware_profile(const char* mode) noexcept {
     if (!mode) return;
     const char* home = ::getenv("HOME");
     if (home) {
         char path[256];
         std::snprintf(path, sizeof(path), "%s/.cache/power_profile_mode", home);
-        int fd = ::open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        // 0644, not 0666: this is the tray's own per-user UI cache, and nothing
+        // else needs write access to it. O_NOFOLLOW refuses a planted symlink.
+        int fd = ::open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0644);
         if (fd >= 0) {
             ::write(fd, mode, std::strlen(mode));
             ::write(fd, "\n", 1);
@@ -815,10 +830,12 @@ int TrayClient::property_get_icon_name(sd_bus*, const char*, const char*, const 
     ipc::WattCurbSharedState state{};
     self->read_state(state);
 
-    char icon[64]{};
-    resolve_icon_name(state, icon, sizeof(icon));
-    sanitize_utf8_inplace(icon);
-    return sd_bus_message_append(reply, "s", icon);
+    // REF-REQ-095: The icon is drawn, not themed. A non-empty IconName would take
+    // precedence over IconPixmap in Plasma, so it is deliberately empty here.
+    // resolve_icon_name() is retained for the freedesktop-name fallback path and
+    // its Oracle Gate coverage.
+    (void)state;
+    return sd_bus_message_append(reply, "s", "");
 }
 
 int TrayClient::property_get_tooltip(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*) {
@@ -869,9 +886,80 @@ int TrayClient::property_get_icon_theme_path(sd_bus*, const char*, const char*, 
     return sd_bus_message_append(reply, "s", "");
 }
 
-int TrayClient::property_get_icon_pixmap(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void*, sd_bus_error*) {
+int TrayClient::property_get_icon_pixmap(sd_bus*, const char*, const char*, const char*, sd_bus_message* reply, void* userdata, sd_bus_error*) {
+    WATTCURB_PROFILE_SCOPE("tray.property_get_icon_pixmap");
+    auto* self = static_cast<TrayClient*>(userdata);
+
+    ipc::WattCurbSharedState state{};
+    self->read_state(state);
+
+    IconInputs in{};
+    in.profile = static_cast<PowerProfileMode>(state.power_profile_mode <= 3 ? state.power_profile_mode : 1);
+    in.system_watts = static_cast<double>(state.system_drain_mw) / 1000.0;
+    in.battery_percent = state.battery_percent > 100 ? uint8_t{100} : state.battery_percent;
+    // battery_state: 0 = AC, 1 = Discharging, 2 = AC passthrough.
+    in.charging = (state.battery_state != 1);
+
+    // Offer the three sizes Plasma picks between; the host selects one.
+    static constexpr int SIZES[] = { 22, 32, 48 };
+    static constexpr size_t SIZE_COUNT = sizeof(SIZES) / sizeof(SIZES[0]);
+
+    // Hosts re-read this property more often than the icon actually changes, and
+    // a full three-size rasterisation is far more expensive than a comparison.
+    // The key quantises the watt ratio to 1/64 so ordinary telemetry jitter does
+    // not force a redraw that would be invisible anyway. Function-local statics
+    // are safe here: the tray is a singleton process on a single sd-bus loop.
+    struct IconCacheKey {
+        uint8_t profile{0xFF};
+        uint8_t watt_step{0xFF};
+        uint8_t battery{0xFF};
+        uint8_t charging{0xFF};
+        [[nodiscard]] bool operator==(const IconCacheKey&) const noexcept = default;
+    };
+    static IconCacheKey s_key{};
+    static uint8_t s_bytes[SIZE_COUNT][ICON_MAX_SIZE * ICON_MAX_SIZE * 4];
+    static size_t s_len[SIZE_COUNT]{};
+
+    IconCacheKey key{};
+    key.profile = static_cast<uint8_t>(in.profile);
+    key.watt_step = static_cast<uint8_t>(watt_ratio(in.profile, in.system_watts) * 64.0);
+    key.battery = in.battery_percent;
+    key.charging = in.charging ? uint8_t{1} : uint8_t{0};
+
+    if (!(key == s_key)) {
+        IconBitmap bm{};
+        for (size_t k = 0; k < SIZE_COUNT; ++k) {
+            const int sz = SIZES[k];
+            render_tray_icon(in, bm, sz);
+
+            size_t n = 0;
+            const size_t count = static_cast<size_t>(sz) * static_cast<size_t>(sz);
+            for (size_t i = 0; i < count; ++i) {
+                // SNI carries ARGB32 in network byte order.
+                const uint32_t px = bm.px[i];
+                s_bytes[k][n++] = static_cast<uint8_t>((px >> 24) & 0xFFu);
+                s_bytes[k][n++] = static_cast<uint8_t>((px >> 16) & 0xFFu);
+                s_bytes[k][n++] = static_cast<uint8_t>((px >> 8) & 0xFFu);
+                s_bytes[k][n++] = static_cast<uint8_t>(px & 0xFFu);
+            }
+            s_len[k] = n;
+        }
+        s_key = key;
+    }
+
     int r = sd_bus_message_open_container(reply, 'a', "(iiay)");
     if (r < 0) return r;
+
+    for (size_t k = 0; k < SIZE_COUNT; ++k) {
+        r = sd_bus_message_open_container(reply, 'r', "iiay");
+        if (r < 0) return r;
+        r = sd_bus_message_append(reply, "ii", SIZES[k], SIZES[k]);
+        if (r < 0) return r;
+        r = sd_bus_message_append_array(reply, 'y', s_bytes[k], s_len[k]);
+        if (r < 0) return r;
+        r = sd_bus_message_close_container(reply);
+        if (r < 0) return r;
+    }
     return sd_bus_message_close_container(reply);
 }
 
@@ -1106,8 +1194,8 @@ int TrayClient::dbusmenu_method_event(sd_bus_message* msg, void* userdata, sd_bu
             if (pid == 0) {
                 ::setsid();
                 ::system("pkill -f wattcurb-dashboard 2>/dev/null");
-                const char* dash_bin = "/home/jedclub/.local/bin/wattcurb-dashboard";
-                if (::access(dash_bin, X_OK) == 0) {
+                char dash_bin[256];
+                if (user_dashboard_path(dash_bin, sizeof(dash_bin)) && ::access(dash_bin, X_OK) == 0) {
                     ::execl(dash_bin, "wattcurb-dashboard", nullptr);
                 } else {
                     const char* usr_bin = "/usr/local/bin/wattcurb-dashboard";
@@ -1130,8 +1218,8 @@ int TrayClient::dbusmenu_method_event(sd_bus_message* msg, void* userdata, sd_bu
             if (pid == 0) {
                 ::setsid();
                 ::system("pkill -f 'wattcurb-dashboard.*--report' 2>/dev/null");
-                const char* dash_bin = "/home/jedclub/.local/bin/wattcurb-dashboard";
-                if (::access(dash_bin, X_OK) == 0) {
+                char dash_bin[256];
+                if (user_dashboard_path(dash_bin, sizeof(dash_bin)) && ::access(dash_bin, X_OK) == 0) {
                     ::execl(dash_bin, "wattcurb-dashboard", "--report", nullptr);
                 } else {
                     const char* usr_bin = "/usr/local/bin/wattcurb-dashboard";

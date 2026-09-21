@@ -3,6 +3,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <cstdlib>
 #include <poll.h>
 #include <ctime>
 #include <cstdio>
@@ -40,6 +41,13 @@ SingletonLock::SingletonLock(std::string_view lock_name)
         socket_fd_ = -1;
         return;
     }
+
+    // REF-REQ-094: Ask the kernel to attach the sender's credentials to every
+    // datagram. Profile changes arrive on this socket, and when one happens the
+    // log has to be able to name which process asked for it - "the profile
+    // changed on its own" is otherwise unfalsifiable.
+    int pass = 1;
+    (void)::setsockopt(fd, SOL_SOCKET, SO_PASSCRED, &pass, sizeof(pass));
 
     socket_fd_ = fd;
 }
@@ -84,6 +92,23 @@ bool SingletonLock::is_daemon_running(std::string_view lock_name) {
 }
 
 bool SingletonLock::query_daemon(std::string_view command, std::string& out_response, std::string_view lock_name, int timeout_ms) {
+    // REF-REQ-100: TEST ISOLATION IS ENFORCED HERE, NOT AT THE CALL SITES.
+    //
+    // A test suite must never reach the machine it runs on. Guarding individual
+    // callers does not achieve that: a test only has to call some other API that
+    // eventually sends, and the isolation is silently gone. This is the single
+    // choke point every client path funnels through - tray, dashboard and CLI -
+    // so refusing here makes the guarantee structural.
+    //
+    // It was not structural before: test_bi_directional_power_profile_coherence
+    // called DashboardBackend::setProfile(2), which sent "PROFILE 2" over the
+    // abstract socket and switched the developer's machine into PowerSaver on
+    // every single run.
+    if (::getenv("WATTCURB_TEST_ISOLATE") != nullptr) {
+        out_response.clear();
+        return false;
+    }
+
     int fd = ::socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (fd < 0) return false;
 

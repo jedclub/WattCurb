@@ -447,6 +447,14 @@ enum class PowerProfileMode : uint8_t {
     UltraEndurance = 3   // Ultra Save: 1.4GHz, SCHED_IDLE graceful throttle, 48Hz panel, zero-kill non-halting safety (REF-REQ-044)
 };
 
+// REF-REQ-094: Per-owner record of which battery thresholds have already been
+// crossed in the current discharge cycle. Each threshold demotes the profile at
+// most once, so the daemon can never keep pulling a user off their choice.
+struct ProfileDemotionLatch {
+    bool crossed_30{false};
+    bool crossed_20{false};
+};
+
 struct ActiveMitigationStatus {
     PowerProfileMode current_profile{PowerProfileMode::Balanced};
     size_t throttled_count{0};

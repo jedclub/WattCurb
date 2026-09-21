@@ -217,11 +217,17 @@ int main(int argc, char* argv[]) {
     QString qmlFile = report_mode ? "qml/BatteryReportWindow.qml" : "qml/DashboardWindow.qml";
     QUrl qmlUrl("qrc:/" + qmlFile);
     
-    // Check if running from dev directory directly
-    QString devPath = "/home/jedclub/Develop/WattCurb/src/ui/" + qmlFile;
-    if (QFileInfo::exists(devPath)) {
-        qmlUrl = QUrl::fromLocalFile(devPath);
+#ifndef NDEBUG
+    // Development-only override. This must never be compiled into a release
+    // binary: a filesystem path that outranks the compiled-in QRC lets whoever
+    // can write that directory supply the QML - and QML executes JavaScript.
+    if (const char* dev_root = ::getenv("WATTCURB_QML_DEV_ROOT")) {
+        QString devPath = QString::fromUtf8(dev_root) + "/" + qmlFile;
+        if (QFileInfo::exists(devPath)) {
+            qmlUrl = QUrl::fromLocalFile(devPath);
+        }
     }
+#endif
 
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreated,
                      &app, [qmlUrl, report_mode](QObject *obj, const QUrl &objUrl) {

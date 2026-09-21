@@ -90,9 +90,14 @@ int main(int argc, char* argv[]) {
             // Dynamic culprits
             const char* c0 = culprits_pool[static_cast<size_t>(i) % pool_size];
             const char* c1 = culprits_pool[static_cast<size_t>(i + 3) % pool_size];
-            std::strncpy(state.culprits[0].comm, c0, 16);
+            // strncpy with the full buffer size leaves the result unterminated for
+            // any name >= sizeof(comm); mirror the production writer in
+            // ipc/tray_shared_state.hpp and terminate explicitly.
+            std::strncpy(state.culprits[0].comm, c0, sizeof(state.culprits[0].comm) - 1);
+            state.culprits[0].comm[sizeof(state.culprits[0].comm) - 1] = '\0';
             state.culprits[0].drain_mw = static_cast<uint32_t>(500 + (i % 4000));
-            std::strncpy(state.culprits[1].comm, c1, 16);
+            std::strncpy(state.culprits[1].comm, c1, sizeof(state.culprits[1].comm) - 1);
+            state.culprits[1].comm[sizeof(state.culprits[1].comm) - 1] = '\0';
             state.culprits[1].drain_mw = static_cast<uint32_t>(200 + (i % 2000));
 
             // 1. ToolTip rendering

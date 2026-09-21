@@ -189,22 +189,26 @@ bool FeatureManager::actuate_ccx_affinity(int32_t pid, int32_t target_core) noex
 }
 
 bool FeatureManager::actuate_anti_starvation_cap(int32_t pid, PowerProfileMode mode, const char* comm) noexcept {
-    const auto& topo = MitigationEngine::get_cluster_topology();
-    cpu_set_t allowed_set;
-    bool c2_dispersed = false;
-    if (topo.cluster_count >= 2 && mode == PowerProfileMode::Performance) {
-        allowed_set = topo.c2_cpuset;
-        c2_dispersed = true;
-    } else {
-        allowed_set = MitigationEngine::get_headroom_allowed_cpuset(mode);
+    // REF-REQ-104: Performance mode applies NO process throttling at all.
+    //
+    // This branch used to do the opposite of its name: in Performance mode it
+    // confined the process to the C2 cluster - four of sixteen logical CPUs on
+    // this machine - and applied nice +5. A desktop application was found pinned
+    // to CPUs 8,10,12,14 while the machine was nominally in Performance mode. The
+    // feature exists to keep greedy work off the cores reserved for audio and the
+    // compositor; in a profile whose entire contract is "do not hold anything
+    // back", the correct amount of capping is none.
+    if (mode == PowerProfileMode::Performance) {
+        return false;
     }
+
+    const cpu_set_t allowed_set = MitigationEngine::get_headroom_allowed_cpuset(mode);
+    const bool c2_dispersed = false;
 
     bool aff = MitigationEngine::apply_core_affinity_cap(pid, &allowed_set);
     int nice_val = 10;
     if (mode == PowerProfileMode::UltraEndurance) {
         nice_val = 15; // Balanced CFS deprioritization in UltraEndurance
-    } else if (mode == PowerProfileMode::Performance) {
-        nice_val = 5;
     }
     bool batch = MitigationEngine::apply_sched_batch(pid, nice_val);
     if (mode == PowerProfileMode::UltraEndurance) {
@@ -227,6 +231,25 @@ bool FeatureManager::actuate_anti_starvation_restore(int32_t pid, const cpu_set_
     return (aff || norm);
 }
 
+void FeatureManager::rollback_all_tracked() noexcept {
+    for (auto& tm : m_tracked) {
+        if (tm.pid <= 1) continue;
+
+        // Thaw first: a frozen task cannot be re-scheduled.
+        actuate_cgroup_freeze(tm.pid, false);
+        MitigationEngine::restore_sched_normal(tm.pid, tm.original_sched_policy, tm.original_nice);
+        MitigationEngine::apply_timer_slack(
+            tm.pid, tm.original_timerslack_ns > 0 ? tm.original_timerslack_ns : 50'000ULL);
+
+        // Affinity was previously never restored on a profile change, so a core
+        // mask applied in a saving profile survived into Performance - the
+        // reported case had a desktop application left at SCHED_IDLE on four of
+        // sixteen cores while the machine was nominally in Performance mode.
+        MitigationEngine::restore_process_affinity(tm.pid, tm.original_affinity);
+    }
+    m_tracked.clear();
+}
+
 ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
     AnalysisReportData& report,
     bool on_battery,
@@ -246,27 +269,33 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
         fm.detail_summary.clear();
     }
 
-    // Determine Power Profile and Aggressiveness (REF-ARCH-008, REF-REQ-020, REF-REQ-035)
-    PowerProfileMode eff_profile = PowerProfileMode::Balanced;
-    if (m_profile_override.has_value()) {
-        eff_profile = *m_profile_override;
-        // REF-REQ-067: Battery <= 20% Performance Mode Lockout Invariant
-        if (eff_profile == PowerProfileMode::Performance && on_battery && battery_pct <= 20.0) {
-            eff_profile = PowerProfileMode::Balanced;
-            m_profile_override = PowerProfileMode::Balanced;
-        }
-    } else if (on_battery) {
-        if (battery_pct < 20.0) {
-            eff_profile = PowerProfileMode::UltraEndurance;
-        } else if (battery_pct <= 50.0) {
-            eff_profile = PowerProfileMode::PowerSaver;
-        } else {
-            eff_profile = PowerProfileMode::Balanced;
-        }
-    } else {
-        eff_profile = PowerProfileMode::Balanced;
+    // Determine Power Profile (REF-REQ-094). This is the production policy path,
+    // and it defers entirely to MitigationEngine::resolve_profile() so the daemon
+    // cannot end up with two ladders disagreeing about the user's profile - the
+    // defect that made the selected profile change on its own.
+    PowerProfileMode eff_profile = MitigationEngine::resolve_profile(
+        m_profile_override.value_or(PowerProfileMode::Balanced),
+        on_battery, battery_pct, m_demotion_latch);
+
+    // A threshold demotion becomes the new baseline, so the next cycle does not
+    // silently restore the profile the battery rule just moved away from.
+    if (m_profile_override.has_value() && eff_profile != *m_profile_override) {
+        m_profile_override = eff_profile;
     }
     status.current_profile = eff_profile;
+
+    // REF-REQ-099: Publish it so the static actuators (which are reached from
+    // here, not from MitigationEngine's own instance) can see which profile is
+    // in force.
+    MitigationEngine::set_effective_profile(eff_profile);
+
+    // REF-REQ-102: A profile change releases everything the previous profile
+    // applied, before the new one decides anything. Restrictions must not
+    // outlive the profile that imposed them.
+    if (m_last_profile.has_value() && *m_last_profile != eff_profile) {
+        rollback_all_tracked();
+    }
+    m_last_profile = eff_profile;
 
     bool is_perf_mode = (eff_profile == PowerProfileMode::Performance);
 

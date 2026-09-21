@@ -11,5 +11,46 @@ RestartSec=3
 KillMode=mixed
 TimeoutStopSec=2
 
+# ---------------------------------------------------------------------------
+# Security hardening (REF-REQ-092 privilege-path audit)
+# ---------------------------------------------------------------------------
+
+# Pin PATH. The daemon shells out to bluetoothctl / kscreen-doctor / qdbus6 /
+# balooctl6 / setpriv; without this they resolve through whatever PATH the
+# manager happens to pass in.
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Root-owned state and log directories, provisioned by systemd. The power
+# profile used to be persisted into a hardcoded user home directory by the
+# root daemon; it now lives in /var/lib/wattcurb.
+StateDirectory=wattcurb
+StateDirectoryMode=0755
+LogsDirectory=wattcurb
+LogsDirectoryMode=0755
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+
+# Deliberately NOT set - each of these would break a core function:
+#   ProtectKernelTunables=  daemon writes /proc/sys/kernel and /proc/sys/vm
+#   ProtectControlGroups=   progressive mitigation freezes cgroups v2
+#   PrivateDevices=         PM QoS C0 clamp needs /dev/cpu_dma_latency
+#   ProtectKernelModules=   NVMe APST is tuned via /sys/module/nvme_core
+# PrivateTmp covers only /tmp and /var/tmp, so the /dev/shm Seqlock IPC that
+# the tray and dashboard attach to is unaffected.
+#
+# If the KDE helpers (balooctl6, kscreen-doctor) misbehave, ProtectHome= is the
+# directive to relax first - set it to "no".
+
 [Install]
 WantedBy=multi-user.target
