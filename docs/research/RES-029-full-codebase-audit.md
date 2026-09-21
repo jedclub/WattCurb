@@ -41,14 +41,35 @@ not a pass.
 
 | Metric | 60 s steady state | 16 profile-switch cycles |
 | :--- | :--- | :--- |
-| Open file descriptors | 6, flat | - |
+| Open file descriptors | - | **144, flat** (`144 -> 144`) |
+| Mapped regions | - | 44, flat |
 | Threads | 1, flat | - |
 | RSS | 4,708 KB, flat | 5,772 -> 5,780 KB (+8 KB, flat after cycle 2) |
 | VmSize | - | 11,968 -> 11,972 KB (+4 KB) |
 
 The 16 cycles drove all four profiles four times each, so every actuator and
-every rollback path ran repeatedly. **No file-descriptor leak and no heap growth
-across actuation.**
+every rollback path ran repeatedly. **No file-descriptor leak, no mapping leak
+and no heap growth across actuation.**
+
+The 144 descriptors are held deliberately, not leaked. Enumerated:
+
+| Count | Descriptor |
+| ---: | :--- |
+| 64 | `/sys/devices/system/cpu/cpu{0..15}/cpuidle/state{0..3}/time` |
+| 4 | `anon_inode:[perf_event]` |
+| 3 | sockets (command socket + clients) |
+| 3 | `timerfd`, `signalfd`, `eventpoll` |
+| 1 | `/var/log/wattcurb/audit.log` |
+| rest | cached sysfs sensor and policy handles |
+
+Holding them open is the point of the lazy-FD design (REQ-024/REQ-027): the
+C-state residency sample costs a `pread` per descriptor instead of an
+`open`/`read`/`close` triple, sixteen times per state per cycle.
+
+**Correction**: an earlier revision of this document reported "6 file
+descriptors, flat". That reading was taken from an unprivileged shell, which
+cannot list a root process's `/proc/<pid>/fd`, and the figure was wrong. The
+measured value from a privileged enumeration is 144.
 
 ### 1.3 Ownership and lifetime
 
