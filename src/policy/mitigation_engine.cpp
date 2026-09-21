@@ -2197,6 +2197,28 @@ bool MitigationEngine::mask_matches_engine_pattern(const cpu_set_t& mask) noexce
         const cpu_set_t headroom = get_headroom_allowed_cpuset(m);
         if (cpuset_equal(mask, headroom)) return true;
     }
+
+    // SMT-sibling-excluding variants: one logical CPU per physical core within a
+    // cluster. ksecretd was found pinned to {8,10,12,14} on this host - every
+    // other CPU of the C2 cluster (8-15) - and no function in the engine today
+    // produces that set. It is the residue of an earlier dispersion algorithm
+    // that has since been rewritten.
+    //
+    // A mask can outlive the code that applied it by an arbitrary number of
+    // releases, so matching only what the CURRENT engine emits leaves damage
+    // permanently unrepairable. These stride-2 variants are added from direct
+    // observation, not speculation; a pattern nobody has seen is not added here.
+    for (const cpu_set_t* base : { &topo.c1_cpuset, &topo.c2_cpuset, &topo.all_cores_cpuset }) {
+        cpu_set_t strided;
+        CPU_ZERO(&strided);
+        int32_t taken = 0;
+        for (int32_t c = 0; c < CPU_SETSIZE && c < 1024; ++c) {
+            if (!CPU_ISSET(static_cast<size_t>(c), base)) continue;
+            if ((taken++ % 2) == 0) CPU_SET(static_cast<size_t>(c), &strided);
+        }
+        if (CPU_COUNT(&strided) > 0 && cpuset_equal(mask, strided)) return true;
+    }
+
     return false;
 }
 

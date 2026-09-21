@@ -4285,6 +4285,20 @@ void test_profile_throughput_and_liveness_guarantees() {
         CPU_SET(3, &deliberate);
         assert(!MitigationEngine::mask_matches_engine_pattern(deliberate) &&
                "REQ-110.2: a deliberate single-CPU taskset is not repaired");
+        // The SMT-sibling-excluding variant of a cluster: the residue found on the
+        // host (ksecretd at 8,10,12,14 - every other CPU of the C2 cluster).
+        cpu_set_t strided;
+        CPU_ZERO(&strided);
+        int taken = 0;
+        for (int c = 0; c < CPU_SETSIZE && c < 1024; ++c) {
+            if (!CPU_ISSET(static_cast<size_t>(c), &c2)) continue;
+            if ((taken++ % 2) == 0) CPU_SET(static_cast<size_t>(c), &strided);
+        }
+        if (CPU_COUNT(&strided) > 0) {
+            assert(MitigationEngine::mask_matches_engine_pattern(strided) &&
+                   "REQ-110.2: the SMT-excluding cluster variant is recognised");
+        }
+
         std::cout << "   * Affinity repair matches engine masks, spares a deliberate taskset\n";
     }
 

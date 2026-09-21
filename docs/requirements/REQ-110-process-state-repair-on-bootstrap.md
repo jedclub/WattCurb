@@ -77,6 +77,22 @@ Matching the mask keeps the property the class scope was there to provide: a
 deliberate `taskset -c 3` by the user is not a mask this engine produces, so it
 is still left alone.
 
+### REQ-110.2a: The pattern set includes masks older code produced
+A mask outlives the code that applied it by an arbitrary number of releases, so
+matching only what the **current** engine emits leaves damage permanently
+unrepairable.
+
+`ksecretd` was found pinned to `{8,10,12,14}` on this host - every other CPU of
+the C2 cluster (`8-15`) - and survived the first corrected sweep because no
+function in the engine today produces that set. It is the residue of a dispersion
+algorithm that has since been rewritten. The pattern list therefore also carries
+the SMT-sibling-excluding variant (one logical CPU per physical core) of each
+cluster mask.
+
+These variants are added from **direct observation**. A pattern nobody has seen
+is not added speculatively: every entry widens the set of user-chosen masks that
+could be overridden.
+
 ### REQ-110.3: Bootstrap only
 The sweep walks `/proc` and reads every process's affinity. It must not run on
 the evaluation cycle.
