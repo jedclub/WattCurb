@@ -147,6 +147,8 @@ private:
     // Peripheral Batteries (Bluetooth/HID/Stylus)
     struct PeripheralProbe {
         core::FixedString<32> name{};
+        std::filesystem::path capacity_path{};
+        std::filesystem::path status_path{};
         int capacity_fd{-1};
         int status_fd{-1};
     };
@@ -208,6 +210,10 @@ private:
     // Sub-sampling caches to eliminate ACPI EC & NVMe wake latency
     mutable uint64_t sample_counter_{0};
     mutable bool cached_ac_online_{false};
+    // Set when a fresh AC read differs from the previous value. The threshold
+    // block below needs the transition, but sample.is_ac_online has by then been
+    // overwritten with the cached value, so the swap must be captured here.
+    mutable bool ac_transition_{false};
     mutable bool cached_kbdlight_initialized_{false};
     mutable uint32_t cached_kbdlight_level_{0};
     mutable bool cached_bluetooth_enabled_{false};

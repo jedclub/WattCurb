@@ -404,7 +404,8 @@ void HardwareProbe::close_fds() noexcept {
         safe_close(peripheral_probes_[i].capacity_fd);
         safe_close(peripheral_probes_[i].status_fd);
     }
-    peripheral_probe_count_ = 0;
+    // The registry (names + paths) is populated by refresh_device_paths and
+    // survives an fd close; open_persistent_fds re-opens the fds from the paths.
 
     safe_close(rapl_pkg_fd_);
     safe_close(rapl_core_fd_);
@@ -494,6 +495,17 @@ void HardwareProbe::close_fds() noexcept {
         if (!usbc_type_path_.empty()) usbc_type_fd_ = open_ro_cloexec(usbc_type_path_);
         if (!usbc_voltage_max_path_.empty()) usbc_voltage_max_fd_ = open_ro_cloexec(usbc_voltage_max_path_);
         if (!usbc_current_max_path_.empty()) usbc_current_max_fd_ = open_ro_cloexec(usbc_current_max_path_);
+    }
+
+    // Peripheral batteries (Bluetooth/HID/stylus). The registry is built by
+    // refresh_device_paths, but the fds are opened only here: previously
+    // discovery opened them and open_persistent_fds' close_fds() immediately
+    // closed them, so peripheral_probe_count_ was reset to 0 and the whole
+    // feature read nothing. Paths survive the close; the fds are re-opened now.
+    for (size_t i = 0; i < peripheral_probe_count_; ++i) {
+        auto& probe = peripheral_probes_[i];
+        if (!probe.capacity_path.empty()) probe.capacity_fd = open_ro_cloexec(probe.capacity_path);
+        if (!probe.status_path.empty()) probe.status_fd = open_ro_cloexec(probe.status_path);
     }
 
     // 2. RAPL & CPU
@@ -663,6 +675,14 @@ std::pair<uint8_t, uint8_t> HardwareProbe::read_pcie_binary_link_status(int conf
 [[gnu::noinline, gnu::cold]] void HardwareProbe::refresh_device_paths() {
     std::error_code ec;
 
+    // Rebuild the peripheral registry: drop any fds from the previous scan so
+    // the count and the fd set stay in step.
+    for (size_t i = 0; i < peripheral_probe_count_; ++i) {
+        safe_close(peripheral_probes_[i].capacity_fd);
+        safe_close(peripheral_probes_[i].status_fd);
+    }
+    peripheral_probe_count_ = 0;
+
     // 1. Power Supply Discovery (/sys/class/power_supply/*)
     auto power_supply_dir = sysfs_root_ / "class/power_supply";
     if (std::filesystem::exists(power_supply_dir, ec)) {
@@ -706,10 +726,14 @@ std::pair<uint8_t, uint8_t> HardwareProbe::read_pcie_binary_link_status(int conf
                 if (std::filesystem::exists(cap_file, ec)) {
                     auto& probe = peripheral_probes_[peripheral_probe_count_++];
                     probe.name = filename;
-                    probe.capacity_fd = open_ro_cloexec(cap_file);
+                    probe.capacity_path = cap_file;
+                    probe.capacity_fd = -1;
+                    probe.status_fd = -1;
                     auto stat_file = entry.path() / "status";
                     if (std::filesystem::exists(stat_file, ec)) {
-                        probe.status_fd = open_ro_cloexec(stat_file);
+                        probe.status_path = stat_file;
+                    } else {
+                        probe.status_path.clear();
                     }
                 }
             }
@@ -872,7 +896,12 @@ HardwareSample HardwareProbe::capture_sample() const {
             if (ac_online_fd_ >= 0) {
                 if (!cached_battery_static_initialized_ || (sample_counter_ % 4 == 1)) {
                     auto ac_val = read_uint32_fd(ac_online_fd_);
-                    cached_ac_online_ = (ac_val.value_or(0) == 1);
+                    const bool new_ac = (ac_val.value_or(0) == 1);
+                    // Capture the edge here: sample.is_ac_online is set from the
+                    // cache on the next line, so the threshold block could not
+                    // otherwise see the transition.
+                    ac_transition_ = cached_battery_static_initialized_ && (new_ac != cached_ac_online_);
+                    cached_ac_online_ = new_ac;
                 }
                 sample.is_ac_online = cached_ac_online_;
             }
@@ -1004,9 +1033,15 @@ HardwareSample HardwareProbe::capture_sample() const {
         // Eliminate periodic EC SMBus wakeups completely: only sample on initial pass or AC plug/unplug transition.
         {
             WATTCURB_PROFILE_SCOPE("hw.battery.thresholds");
-            bool ac_transition = (sample.is_ac_online != cached_ac_online_);
-            cached_ac_online_ = sample.is_ac_online;
-            bool poll_thresholds = !cached_battery_static_initialized_ || ac_transition;
+            // ac_transition_ was captured at the AC read above. Comparing
+            // sample.is_ac_online with cached_ac_online_ here was always false,
+            // because sample.is_ac_online had already been set from the cache.
+            bool poll_thresholds = !cached_battery_static_initialized_ || ac_transition_;
+            if (ac_online_fd_ < 0) {
+                // No AC node to observe: refresh thresholds periodically rather
+                // than never.
+                poll_thresholds = poll_thresholds || (sample_counter_ % 8 == 1);
+            }
             if (poll_thresholds) {
                 WATTCURB_PROFILE_SCOPE("hw.battery.threshold_io");
                 if (battery_threshold_start_fd_ >= 0) {

@@ -392,6 +392,33 @@ void test_persistent_hw_probe() {
     std::cout << " [PASS] test_persistent_hw_probe\n";
 }
 
+// Implements REF-TEST-067 (REF-REQ-022): peripheral battery fd lifecycle.
+// Discovery used to open the capacity/status fds and open_persistent_fds then
+// closed them immediately (resetting the registry count), so the peripheral
+// feature read nothing. This mock-sysfs test fails on that code.
+void test_peripheral_battery_fd_lifecycle() {
+    namespace fs = std::filesystem;
+    const fs::path root = "/tmp/wattcurb_mock_sysfs_periph";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    const fs::path ps = root / "class/power_supply/hid-mock-battery";
+    fs::create_directories(ps, ec);
+    { std::ofstream(ps / "capacity") << "42\n"; }
+    { std::ofstream(ps / "status") << "Charging\n"; }
+
+    wattcurb::hw::HardwareProbe probe(root);
+    auto s = probe.capture_sample();
+
+    assert(s.peripheral_batteries.size() == 1 &&
+           "mock peripheral battery must be read, not dropped by the fd lifecycle");
+    assert(s.peripheral_batteries[0].capacity_percent == 42);
+    assert(s.peripheral_batteries[0].is_charging);
+    assert(std::string(s.peripheral_batteries[0].name.c_str()) == "hid-mock-battery");
+
+    fs::remove_all(root, ec);
+    std::cout << " [PASS] test_peripheral_battery_fd_lifecycle (REF-TEST-067: peripheral fd reopened, 42% Charging)\n";
+}
+
 void test_cpu_features() {
     const auto& feats = wattcurb::core::CpuFeatures::instance();
     std::cout << " [INFO] CPU Features detected: AVX2=" << feats.has_avx2 
@@ -5257,6 +5284,7 @@ int main() {
     test::test_windowed_attribution_engine();
     test::test_singleton_lock();
     test::test_persistent_hw_probe();
+    test::test_peripheral_battery_fd_lifecycle();
     test::test_pmu_perf_event_telemetry();
     test::test_pmu_energy_proxy_metrics();
     test::test_pcie_binary_config_decoder();
