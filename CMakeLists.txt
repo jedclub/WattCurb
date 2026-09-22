@@ -100,6 +100,7 @@ set(WATTCURB_LIB_SOURCES
     src/policy/window_aware_governor.cpp
     src/policy/unified_rollback_coordinator.cpp
     src/policy/battery_feature.cpp
+    src/policy/memory_pressure_guard.cpp
     src/report/report_generator.cpp
     src/report/battery_history_analyzer.cpp
 )

@@ -7,6 +7,7 @@
 #include "policy/attribution_engine.hpp"
 #include "policy/battery_feature.hpp"
 #include "policy/window_aware_governor.hpp"
+#include "policy/memory_pressure_guard.hpp"
 
 #include <atomic>
 #include <string>
@@ -49,6 +50,10 @@ private:
     policy::AttributionEngine engine_;
     policy::FeatureManager feature_manager_;
     policy::WindowAwareGovernor window_governor_{};
+    // REF-REQ-112: memory-pressure guard. Its PSI trigger joins the same
+    // epoll set as timerfd and signalfd, so pressure is an event the daemon
+    // is woken for, not something it polls for.
+    policy::MemoryPressureGuard memory_guard_{};
     ProcessPool proc_pool_;
     AnalysisReportData cached_report_;
     HardwareSample hw_prev_{};
@@ -69,6 +74,7 @@ private:
     int epoll_fd_{-1};
     int timer_fd_{-1};
     int signal_fd_{-1};
+    int psi_fd_{-1};
 
     // REF-REQ-068 & REF-REQ-069: Adaptive 3-Tier Cadence & Smart Trigger
     uint64_t bg_tick_count_{0};
@@ -84,6 +90,7 @@ private:
     bool arm_timer(double interval_sec) noexcept;
     bool setup_timer();
     bool setup_signals();
+    bool setup_memory_guard();
     bool setup_shm();
     bool setup_history_shm();
     void process_observation_cycle();

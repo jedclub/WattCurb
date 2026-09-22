@@ -193,9 +193,24 @@ State these rather than imply coverage:
 - The unit suite was never run under sanitizers (section 1.1).
 - `wattcurb-dashboard` was not sanitized; Qt was excluded from the ASan build.
 - No fuzzing of the procfs/sysfs parsers, which consume untrusted-width kernel
-  text.
+  text. *(Partially addressed 2026-09-22: `REF-TEST-070` exercises the
+  `/proc/meminfo` and `/proc/pressure/memory` parsers with truncated, absent
+  and prefix-colliding fields. The `/proc/<pid>/stat`, `statm`, `status` and
+  DRM fdinfo parsers remain unfuzzed.)*
 - Concurrency was not analyzed because the daemon is single-threaded (measured:
   1 thread), but the `/dev/shm` Seqlock is read by separate processes and that
   protocol was not modelled.
-- The audit covers `commit 7d720c6`. DEF-1 through DEF-4 are unfixed as of this
-  document.
+- The audit covers `commit 7d720c6`. DEF-1 through DEF-4 were unfixed **as of
+  this document**; all four were remediated in `f67d844`
+  ([`REF-REQ-111`](../requirements/REQ-111-audit-defect-remediation.md),
+  verified by `REF-TEST-062`). This line is kept rather than rewritten so the
+  audit remains a record of what was true when it was taken.
+
+## 4. Subsequent Findings Outside This Audit
+
+The audit did not model memory pressure, and on 2026-09-22 13:28:02 the kernel
+OOM killer terminated a desktop application on this machine with
+`Free swap = 200kB` of 24 GB. The daemon had no memory-pressure awareness at
+all - it read neither `/proc/meminfo` nor `/proc/pressure/*` - and its only
+memory actuator pushed anonymous pages *into* the exhausted swap tier. See
+[`REF-REQ-112`](../requirements/REQ-112-boost-restoration-and-non-halting-memory-guard.md).

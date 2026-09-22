@@ -161,6 +161,11 @@ DaemonRunner::~DaemonRunner() {
     // the ordering against the hardware restore is stated rather than implied.
     feature_manager_.rollback_all_tracked();
 
+    // REF-REQ-112: a cgroup CPU quota is cgroup state, in the same category as
+    // the affinity masks above - it outlives the daemon and would leave a user's
+    // application capped at 20% for the rest of the session.
+    memory_guard_.shutdown();
+
     window_governor_.rollback_all();
     policy::MitigationEngine::restore_hardware_baseline();
     cleanup_descriptors();
@@ -376,6 +381,35 @@ bool DaemonRunner::initialize() {
         ::epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, lock_.socket_fd(), &ev);
     }
 
+    // REF-REQ-112: register the PSI memory-pressure trigger. EPOLLPRI, not
+    // EPOLLIN - that is how the kernel signals a psi window breach. On a
+    // healthy machine this descriptor never fires, so the guard costs nothing
+    // until it is needed.
+    setup_memory_guard();
+    if (psi_fd_ >= 0) {
+        struct epoll_event pev{};
+        pev.events = EPOLLPRI;
+        pev.data.fd = psi_fd_;
+        if (::epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, psi_fd_, &pev) < 0) {
+            psi_fd_ = -1; // guard still runs on the observation tick
+        }
+    }
+
+    return true;
+}
+
+bool DaemonRunner::setup_memory_guard() {
+    if (!memory_guard_.initialize()) {
+        EventLogger::log_alert("MEMORY",
+                               "/proc/meminfo unreadable; memory pressure guard inactive (REF-REQ-112)");
+        return false;
+    }
+    psi_fd_ = memory_guard_.psi_fd();
+    if (psi_fd_ < 0) {
+        EventLogger::log_alert("MEMORY",
+                               "PSI trigger unavailable; memory pressure guard falls back to "
+                               "tick-driven sampling (REF-REQ-112)");
+    }
     return true;
 }
 
@@ -609,6 +643,12 @@ void DaemonRunner::process_observation_cycle() {
             }
         }
     }
+
+    // REF-REQ-112: the PSI trigger wakes the daemon when pressure RISES. Nothing
+    // wakes it when pressure falls, so the tick is what walks the guard back
+    // down and releases the throttles. Two file reads and, on a healthy machine,
+    // no writes at all.
+    memory_guard_.evaluate_and_actuate(cached_report_, window_governor_.active_window_pid());
 }
 
 int DaemonRunner::run() {
@@ -661,6 +701,12 @@ int DaemonRunner::run() {
                         hw_probe_.refresh_device_paths();
                     }
                 }
+            } else if (psi_fd_ >= 0 && fd == psi_fd_) {
+                // REF-REQ-112: the kernel says memory is stalling. Act now
+                // rather than at the next tick - under a runaway allocation the
+                // distance between "stalling" and "kernel OOM kill" is seconds.
+                memory_guard_.evaluate_and_actuate(cached_report_,
+                                                   window_governor_.active_window_pid());
             } else if (fd == lock_.socket_fd()) {
                 handle_ipc_datagram(fd);
             }

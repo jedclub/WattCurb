@@ -1,4 +1,5 @@
 #include "policy/battery_feature.hpp"
+#include "policy/memory_pressure_guard.hpp"
 #include "core/posix_fs.hpp"
 #include "policy/mitigation_engine.hpp"
 #include "core/event_logger.hpp"
@@ -160,7 +161,10 @@ bool FeatureManager::actuate_timer_slack(int32_t pid, uint64_t slack_ns) noexcep
 }
 
 bool FeatureManager::actuate_memory_reclaim(int32_t pid, uint64_t bytes) noexcept {
-    return MitigationEngine::apply_memory_reclaim(pid, bytes);
+    // REF-REQ-112: under memory pressure this reclaim must not be allowed to
+    // convert a power optimisation into swap consumption.
+    return MitigationEngine::apply_memory_reclaim(pid, bytes,
+                                                  MemoryPressureGuard::swap_feeding_suspended());
 }
 
 bool FeatureManager::actuate_cgroup_freeze(int32_t pid, bool freeze) noexcept {

@@ -55,7 +55,11 @@ public:
     static bool apply_sched_idle(int32_t pid) noexcept;
     static bool restore_sched_normal(int32_t pid, int original_policy = 0, int original_nice = 0) noexcept;
     static bool apply_timer_slack(int32_t pid, uint64_t slack_ns) noexcept;
-    static bool apply_memory_reclaim(int32_t pid, uint64_t bytes) noexcept;
+    // file_only appends "swappiness=0", which makes the kernel reclaim
+    // FILE-backed pages and leave anonymous pages alone. Under swap pressure
+    // a plain reclaim pushes anon pages into the very tier that is running
+    // out, so REF-REQ-112 uses the file-only form once the guard escalates.
+    static bool apply_memory_reclaim(int32_t pid, uint64_t bytes, bool file_only = false) noexcept;
     static bool apply_cgroup_freeze(int32_t pid, bool freeze) noexcept;
     static bool apply_cgroup_cpu_quota(int32_t pid, uint32_t max_quota_us = 200000, uint32_t period_us = 100000) noexcept;
     static bool restore_cgroup_cpu_quota(int32_t pid) noexcept;
@@ -95,6 +99,16 @@ public:
         int cpu_boost{1};
         char aspm_policy[32]{"default"};
         uint32_t scaling_max_freq_khz{0};
+        // REF-REQ-112: the cpufreq driver's own ceiling, read from
+        // cpuinfo_max_freq. scaling_max_freq_khz above is whatever sysfs held
+        // when the daemon started, and after an unclean exit in PowerSaver or
+        // UltraEndurance that value is WattCurb's OWN leftover cap, not the
+        // user's configuration. Capturing it as "the baseline" launders the cap
+        // into permanence: Performance and Balanced then "restore" 1.4 GHz and
+        // the CPU never boosts again. Performance and Balanced assert this
+        // field instead, and a captured ceiling below it is repaired at capture.
+        uint32_t hw_max_freq_khz{0};
+        bool orphaned_freq_cap_repaired{false};
         uint32_t panel_power_savings{1};
         char gpu_dpm_level[32]{"auto"};
         char smt_control[16]{"on"};
@@ -156,6 +170,12 @@ public:
     static bool set_cpu_governor(const char* governor) noexcept;
     static bool set_cpu_boost(bool enable) noexcept;
     static bool set_cpu_scaling_max_freq(uint32_t khz) noexcept;
+    // REF-REQ-112: assert "no WattCurb-imposed ceiling" - scaling_max_freq at
+    // the driver's cpuinfo_max_freq and the boost bit set. Idempotent: reads
+    // first and writes only the CPUs that diverge, so it can run every cycle
+    // without turning into a sysfs write storm. Returns true if it had to
+    // repair anything.
+    static bool assert_unrestricted_cpu_ceiling() noexcept;
     static bool set_panel_power_savings(uint32_t level) noexcept;
     static bool set_pcie_aspm_policy(const char* policy) noexcept;
     static bool set_cpu_epp_policy(const char* policy) noexcept;

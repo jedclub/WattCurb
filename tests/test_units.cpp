@@ -11,6 +11,7 @@
 #include "policy/pm_qos_controller.hpp"
 #include "policy/unified_rollback_coordinator.hpp"
 #include "policy/battery_feature.hpp"
+#include "policy/memory_pressure_guard.hpp"
 #include "report/report_generator.hpp"
 #include "ipc/tray_shared_state.hpp"
 #include "ipc/history_ring_buffer.hpp"
@@ -4434,6 +4435,214 @@ void test_profile_throughput_and_liveness_guarantees() {
     std::cout << " [PASS] test_profile_throughput_and_liveness_guarantees (REF-TEST-061: no C0 clamp in Performance, playback-independent stall shield, bounded writeback verified)\n";
 }
 
+// Implements REF-TEST-068 & REF-REQ-112: the CPU frequency ceiling may never be
+// captured below the hardware maximum.
+//
+// The defect this falsifies: capture_hardware_baseline() snapshotted whatever
+// scaling_max_freq sysfs happened to hold. After an unclean exit in PowerSaver
+// (1.7 GHz cap) or UltraEndurance (1.4 GHz cap) that value is WattCurb's OWN
+// leftover, and capturing it as "the user's baseline" made Performance and
+// Balanced restore the cap forever - a CPU that never boosts again.
+void test_cpu_ceiling_baseline_is_hardware_max() {
+    using namespace wattcurb::policy;
+
+    std::cout << "\n--- [REF-TEST-068] CPU Frequency Ceiling Baseline (REF-REQ-112) ---\n";
+
+    const bool prev_sandbox_ceiling = MitigationEngine::actuation_sandboxed();
+    MitigationEngine::set_actuation_sandbox(true);
+    MitigationEngine::capture_hardware_baseline();
+    const auto& base = MitigationEngine::hardware_baseline();
+
+    if (base.hw_max_freq_khz == 0) {
+        std::cout << " [SKIP] test_cpu_ceiling_baseline_is_hardware_max "
+                     "(no cpufreq driver on this host)\n";
+        MitigationEngine::set_actuation_sandbox(prev_sandbox_ceiling);
+        return;
+    }
+
+    // The invariant. Before REF-REQ-112 this assertion could fail on any machine
+    // whose daemon had last exited in a saving profile.
+    assert(base.scaling_max_freq_khz >= base.hw_max_freq_khz);
+
+    // A repaired capture must also have re-armed the boost bit: the two are set
+    // by the same actuation, so recording one as orphaned and the other as the
+    // user's preference would restore a half-capped machine.
+    if (base.orphaned_freq_cap_repaired) {
+        assert(base.cpu_boost == 1);
+        std::cout << "   - Orphaned cap repaired at capture; boost baseline re-armed\n";
+    }
+
+    std::cout << "   - Hardware ceiling: " << base.hw_max_freq_khz
+              << " kHz, captured baseline: " << base.scaling_max_freq_khz << " kHz\n";
+
+    // The assertion helper must be side-effect free on an already-unrestricted
+    // machine. Under the sandbox no write can reach sysfs, so a "true" return
+    // here would mean it believed it had repaired something it never wrote.
+    const bool repaired_under_sandbox = MitigationEngine::assert_unrestricted_cpu_ceiling();
+    assert(!repaired_under_sandbox);
+
+    MitigationEngine::set_actuation_sandbox(prev_sandbox_ceiling);
+    std::cout << " [PASS] test_cpu_ceiling_baseline_is_hardware_max (REF-TEST-068: "
+                 "baseline >= cpuinfo_max_freq, sandboxed assertion writes nothing)\n";
+}
+
+// Implements REF-TEST-069 & REF-REQ-112: the memory pressure ladder.
+//
+// The risk this change introduces is acting on the wrong process, or acting at
+// the wrong time - a guard that throttles the compositor, or one that oscillates
+// against its own effect, is worse than no guard. Both are falsified here on
+// synthetic samples, so the gate does not depend on a host that is actually out
+// of memory.
+void test_memory_pressure_ladder() {
+    using namespace wattcurb;
+    using namespace wattcurb::policy;
+
+    std::cout << "\n--- [REF-TEST-069] Non-Halting Memory Pressure Ladder (REF-REQ-112) ---\n";
+
+    auto make = [](uint64_t mem_avail_pct, uint64_t swap_free_pct, double psi_full) {
+        MemoryPressureSample s{};
+        s.mem_total_kb = 16'000'000;
+        s.mem_available_kb = (s.mem_total_kb * mem_avail_pct) / 100;
+        s.swap_total_kb = 24'000'000;
+        s.swap_free_kb = (s.swap_total_kb * swap_free_pct) / 100;
+        s.psi_full_avg10 = psi_full;
+        return s;
+    };
+
+    // 1. A healthy machine stays at Normal.
+    assert(MemoryPressureGuard::classify(make(60, 90, 0.0), MemoryPressureTier::Normal) ==
+           MemoryPressureTier::Normal);
+
+    // 2. The exact shape of the 13:28:02 kill: swap all but gone while
+    //    MemAvailable still looks survivable. Swap is the leading indicator and
+    //    must escalate on its own.
+    assert(MemoryPressureGuard::classify(make(40, 1, 0.0), MemoryPressureTier::Normal) ==
+           MemoryPressureTier::Throttle);
+
+    // 3. Intermediate swap depletion reaches Advisory, not Throttle.
+    assert(MemoryPressureGuard::classify(make(50, 25, 0.0), MemoryPressureTier::Normal) ==
+           MemoryPressureTier::Advisory);
+
+    // 4. PSI alone escalates, even with swap and MemAvailable intact: a machine
+    //    thrashing its page cache stalls without ever depleting swap.
+    assert(MemoryPressureGuard::classify(make(60, 90, 30.0), MemoryPressureTier::Normal) ==
+           MemoryPressureTier::Throttle);
+
+    // 5. Hysteresis. Recovering to just above the escalation threshold must NOT
+    //    release the throttle - that is the oscillation the release band exists
+    //    to prevent.
+    assert(MemoryPressureGuard::classify(make(40, 20, 8.0), MemoryPressureTier::Throttle) ==
+           MemoryPressureTier::Throttle);
+
+    // 6. Inside the release band, de-escalation is one tier per evaluation.
+    const auto step1 = MemoryPressureGuard::classify(make(60, 90, 0.0), MemoryPressureTier::Throttle);
+    assert(step1 == MemoryPressureTier::Advisory);
+    const auto step2 = MemoryPressureGuard::classify(make(60, 90, 0.0), step1);
+    assert(step2 == MemoryPressureTier::Normal);
+
+    // 7. A swapless machine must not read as "0% swap free" and pin itself at
+    //    Throttle for its entire uptime.
+    MemoryPressureSample swapless{};
+    swapless.mem_total_kb = 16'000'000;
+    swapless.mem_available_kb = 9'600'000; // 60%
+    swapless.swap_total_kb = 0;
+    swapless.swap_free_kb = 0;
+    assert(MemoryPressureGuard::classify(swapless, MemoryPressureTier::Normal) ==
+           MemoryPressureTier::Normal);
+
+    // --- Target selection: who may be slowed down -------------------------
+    auto proc = [](int32_t pid, uint8_t tier, uint64_t pss_mib) {
+        ProcessAttributedPower p{};
+        p.pid = pid;
+        p.safety_tier = tier;
+        p.pss_kib = pss_mib * 1024;
+        return p;
+    };
+
+    // Tiers 0..2 are the session itself and are never candidates, however much
+    // memory they hold.
+    assert(!MemoryPressureGuard::is_throttle_candidate(proc(100, 0, 4096), 0)); // CriticalImmune
+    assert(!MemoryPressureGuard::is_throttle_candidate(proc(101, 1, 4096), 0)); // DesktopCore
+    assert(!MemoryPressureGuard::is_throttle_candidate(proc(102, 2, 4096), 0)); // DesktopShell
+
+    // Tier 3+ holding real memory is a candidate.
+    assert(MemoryPressureGuard::is_throttle_candidate(proc(103, 3, 4096), 0));
+    assert(MemoryPressureGuard::is_throttle_candidate(proc(104, 5, 512), 0));
+
+    // The focused window is exempt even when it is the largest holder.
+    assert(!MemoryPressureGuard::is_throttle_candidate(proc(105, 3, 8192), 105));
+
+    // Small processes are not worth acting on, and init is never touched.
+    assert(!MemoryPressureGuard::is_throttle_candidate(proc(106, 5, 64), 0));
+    assert(!MemoryPressureGuard::is_throttle_candidate(proc(1, 5, 4096), 0));
+
+    std::cout << " [PASS] test_memory_pressure_ladder (REF-TEST-069: swap-led escalation, "
+                 "PSI escalation, one-step hysteresis, swapless safety, tier 0-2 and "
+                 "focused-window exemption verified)\n";
+}
+
+// Implements REF-TEST-070 & REF-REQ-112: the /proc/meminfo and
+// /proc/pressure/memory parsers. These consume untrusted-width kernel text,
+// which REF-RES-029 listed as an audit gap.
+void test_memory_pressure_parsers() {
+    using namespace wattcurb::policy;
+
+    std::cout << "\n--- [REF-TEST-070] Memory Pressure Parsers (REF-REQ-112) ---\n";
+
+    using Probe = MemoryPressureGuard;
+
+    static constexpr char kMeminfo[] =
+        "MemTotal:       15710204 kB\n"
+        "MemFree:         6761984 kB\n"
+        "MemAvailable:   11266048 kB\n"
+        "Buffers:           38412 kB\n"
+        "SwapCached:         1234 kB\n"
+        "SwapTotal:      39847420 kB\n"
+        "SwapFree:       39847420 kB\n";
+
+    MemoryPressureSample s{};
+    assert(Probe::parse_meminfo(kMeminfo, sizeof(kMeminfo) - 1, s));
+    assert(s.mem_total_kb == 15710204ull);
+    assert(s.mem_available_kb == 11266048ull);
+    assert(s.swap_total_kb == 39847420ull);
+    assert(s.swap_free_kb == 39847420ull);
+
+    // "SwapCached" precedes "SwapTotal" and shares no prefix with it, but a
+    // substring match anywhere in the line would pick up the wrong number.
+    // Matching is anchored to line starts, so this holds.
+    assert(s.swap_total_kb != 1234ull);
+
+    // Truncated input must fail cleanly rather than read past the buffer.
+    MemoryPressureSample t{};
+    assert(!Probe::parse_meminfo("MemTot", 6, t));
+
+    // A field that is present but empty yields 0, not garbage.
+    static constexpr char kNoAvail[] = "MemTotal:       15710204 kB\nSwapTotal:      100 kB\n";
+    MemoryPressureSample u{};
+    assert(Probe::parse_meminfo(kNoAvail, sizeof(kNoAvail) - 1, u));
+    assert(u.mem_available_kb == 0);
+    assert(u.swap_free_kb == 0);
+
+    static constexpr char kPsi[] =
+        "some avg10=12.34 avg60=5.00 avg300=3.44 total=1113389582\n"
+        "full avg10=7.89 avg60=2.00 avg300=2.93 total=909394492\n";
+    MemoryPressureSample p{};
+    assert(Probe::parse_psi(kPsi, sizeof(kPsi) - 1, p));
+    assert(p.psi_some_avg10 > 12.33 && p.psi_some_avg10 < 12.35);
+    assert(p.psi_full_avg10 > 7.88 && p.psi_full_avg10 < 7.90);
+
+    // A kernel without the "full" row (PSI on a cgroup-v1 host) must still
+    // yield the "some" row rather than failing outright.
+    static constexpr char kSomeOnly[] = "some avg10=1.50 avg60=0.00 avg300=0.00 total=1\n";
+    MemoryPressureSample q{};
+    assert(Probe::parse_psi(kSomeOnly, sizeof(kSomeOnly) - 1, q));
+    assert(q.psi_some_avg10 > 1.49 && q.psi_some_avg10 < 1.51);
+    assert(q.psi_full_avg10 == 0.0);
+
+    std::cout << " [PASS] test_memory_pressure_parsers (REF-TEST-070: line-anchored "
+                 "meminfo fields, truncation safety, PSI avg10 extraction verified)\n";
+}
+
 // Implements REF-TEST-062 & REF-REQ-111: the four defects found by the
 // REF-RES-029 audit.
 void test_audit_defect_remediation() {
@@ -5254,6 +5463,9 @@ int main() {
     test::test_system_liveness_invariant();
     test::test_profile_throughput_and_liveness_guarantees();
     test::test_audit_defect_remediation();
+    test::test_cpu_ceiling_baseline_is_hardware_max();
+    test::test_memory_pressure_ladder();
+    test::test_memory_pressure_parsers();
     test::test_multilingual_l10n_and_auto_system_locale();
     test::test_anti_starvation_and_greedy_capping();
     test::test_adaptive_c1_c2_cluster_dispersion();

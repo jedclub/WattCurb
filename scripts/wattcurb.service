@@ -11,6 +11,13 @@ RestartSec=3
 KillMode=mixed
 TimeoutStopSec=2
 
+# REF-REQ-112: the daemon must not be the kernel's OOM victim. Its rollback
+# state - captured sysfs baselines, tracked per-process mitigations, cgroup
+# quotas - lives only in its address space. A SIGKILL takes all of it and
+# leaves the machine actuated with nothing left to undo it, which is exactly
+# how an orphaned 1.4 GHz frequency cap outlives a session (REF-TEST-068).
+OOMScoreAdjust=-900
+
 # ---------------------------------------------------------------------------
 # Security hardening (REF-REQ-092 privilege-path audit)
 # ---------------------------------------------------------------------------

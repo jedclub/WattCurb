@@ -1,4 +1,5 @@
 #include "policy/mitigation_engine.hpp"
+#include "policy/memory_pressure_guard.hpp"
 #include "core/posix_fs.hpp"
 #include "core/scoped_profiler.hpp"
 #include "core/event_logger.hpp"
@@ -547,6 +548,25 @@ void MitigationEngine::capture_hardware_baseline() noexcept {
     }
 
     // 5. /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
+    //
+    // REF-REQ-112: the driver's ceiling is captured FIRST, because the observed
+    // scaling_max_freq cannot be trusted as "the user's baseline". A daemon that
+    // exits uncleanly in PowerSaver (1.7 GHz cap) or UltraEndurance (1.4 GHz cap)
+    // leaves that cap in sysfs - it is global hardware state, not process state,
+    // so it survives the exit. The next bootstrap then captures WattCurb's own
+    // leftover as the baseline, and Performance and Balanced spend the rest of
+    // the machine's life "restoring" a cap that no user ever asked for. Because
+    // install.sh restarts the service on every release, this laundering happens
+    // routinely rather than exceptionally.
+    n = 0;
+    std::memset(buf, 0, sizeof(buf));
+    if (core::fs::read_small_file("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq", buf, sizeof(buf) - 1, &n) && n > 0) {
+        const long hw_max = std::strtol(buf, nullptr, 10);
+        s_hardware_baseline.hw_max_freq_khz = (hw_max > 0) ? static_cast<uint32_t>(hw_max) : 0;
+    } else {
+        s_hardware_baseline.hw_max_freq_khz = 0;
+    }
+
     n = 0;
     std::memset(buf, 0, sizeof(buf));
     if (core::fs::read_small_file("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", buf, sizeof(buf) - 1, &n) && n > 0) {
@@ -554,6 +574,34 @@ void MitigationEngine::capture_hardware_baseline() noexcept {
         s_hardware_baseline.scaling_max_freq_khz = (f > 0) ? static_cast<uint32_t>(f) : 1700000;
     } else {
         s_hardware_baseline.scaling_max_freq_khz = 1700000;
+    }
+
+    // A ceiling below the driver's own maximum is repaired rather than recorded.
+    // This does raise a static third-party cap (a boot-time TLP setting, say)
+    // that WattCurb did not impose; that is the deliberate trade. A LIVE
+    // competing manager is handled separately by REF-REQ-109, which refuses to
+    // fight it for the knobs it holds.
+    if (s_hardware_baseline.hw_max_freq_khz > 0 &&
+        s_hardware_baseline.scaling_max_freq_khz < s_hardware_baseline.hw_max_freq_khz) {
+        char detail[192];
+        std::snprintf(detail, sizeof(detail),
+                      "Orphaned CPU frequency cap found at bootstrap: scaling_max_freq=%u kHz "
+                      "below hardware ceiling %u kHz. Treating the ceiling as the baseline "
+                      "(REF-REQ-112).",
+                      s_hardware_baseline.scaling_max_freq_khz,
+                      s_hardware_baseline.hw_max_freq_khz);
+        core::EventLogger::log_alert("REPAIR", detail);
+        s_hardware_baseline.scaling_max_freq_khz = s_hardware_baseline.hw_max_freq_khz;
+        s_hardware_baseline.orphaned_freq_cap_repaired = true;
+    }
+
+    // The boost bit is global hardware state too, and PowerSaver/UltraEndurance
+    // clear it. If it is found clear while the ceiling was also found capped,
+    // both came from the same orphaned actuation, so the boost baseline is
+    // repaired with it. A clear boost bit on an OTHERWISE unrestricted machine
+    // is left alone - that one plausibly is the user's own setting.
+    if (s_hardware_baseline.orphaned_freq_cap_repaired && s_hardware_baseline.cpu_boost == 0) {
+        s_hardware_baseline.cpu_boost = 1;
     }
 
     // 6. /sys/class/drm/card1-eDP-1/amdgpu/panel_power_savings or card0
@@ -863,6 +911,59 @@ bool MitigationEngine::set_cpu_boost(bool enable) noexcept {
     ssize_t w = ::write(fd, val, 2);
     ::close(fd);
     return (w > 0);
+}
+
+bool MitigationEngine::assert_unrestricted_cpu_ceiling() noexcept {
+    // REF-REQ-112. Performance and Balanced promise an unrestricted CPU; this
+    // is what enforces that promise, and it is deliberately idempotent so the
+    // observation cycle can call it every tick. Each CPU is read before it is
+    // written, so on a healthy machine the whole call is N pread()s and zero
+    // writes - no sysfs write storm, no uncoordinated wakeup.
+    uint32_t hw_max = s_hardware_baseline.hw_max_freq_khz;
+    if (hw_max == 0) {
+        char buf[32];
+        size_t n = 0;
+        if (core::fs::read_small_file("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq",
+                                      buf, sizeof(buf) - 1, &n) && n > 0) {
+            buf[n] = '\0';
+            hw_max = static_cast<uint32_t>(std::strtoul(buf, nullptr, 10));
+        }
+        if (hw_max == 0) return false;
+    }
+
+    bool repaired = false;
+    char freq_buf[32];
+    const int flen = std::snprintf(freq_buf, sizeof(freq_buf), "%u\n", hw_max);
+    const int total_cpus = get_total_online_cpus();
+
+    for (int i = 0; i < total_cpus && i < 256; ++i) {
+        char path[128];
+        std::snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_max_freq", i);
+        char cur[32];
+        size_t cn = 0;
+        if (core::fs::read_small_file(path, cur, sizeof(cur) - 1, &cn) && cn > 0) {
+            cur[cn] = '\0';
+            if (static_cast<uint32_t>(std::strtoul(cur, nullptr, 10)) >= hw_max) continue;
+        }
+        int fd = hw_open_write(path, O_WRONLY | O_CLOEXEC);
+        if (fd < 0) continue;
+        if (::write(fd, freq_buf, static_cast<size_t>(flen)) > 0) repaired = true;
+        ::close(fd);
+    }
+
+    // The boost bit gates the P-state above the table's top entry. On acpi-cpufreq
+    // (AMD CPB) cpuinfo_max_freq is the BASE clock, so a restored ceiling alone
+    // still leaves the part pinned at base until this bit is set.
+    {
+        char cur[32];
+        size_t cn = 0;
+        if (core::fs::read_small_file("/sys/devices/system/cpu/cpufreq/boost", cur, sizeof(cur) - 1, &cn) &&
+            cn > 0 && cur[0] == '0') {
+            if (set_cpu_boost(true)) repaired = true;
+        }
+    }
+
+    return repaired;
 }
 
 bool MitigationEngine::set_cpu_scaling_max_freq(uint32_t khz) noexcept {
@@ -1214,9 +1315,10 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_platform_profile("performance");
         set_cpu_governor("performance");
         set_cpu_boost(true);
-        if (s_hardware_baseline.scaling_max_freq_khz > 0) {
-            set_cpu_scaling_max_freq(s_hardware_baseline.scaling_max_freq_khz);
-        }
+        // REF-REQ-112: the hardware ceiling, not the captured value. See
+        // HardwareBaselineState::hw_max_freq_khz for why the captured value is
+        // not trustworthy as "what the user had".
+        assert_unrestricted_cpu_ceiling();
         set_pcie_aspm_policy("performance");
         set_panel_power_savings(0);
         set_cpu_epp_policy("performance");
@@ -1260,9 +1362,7 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_platform_profile("balanced");
         set_cpu_governor("schedutil");
         set_cpu_boost(true);
-        if (s_hardware_baseline.scaling_max_freq_khz > 0) {
-            set_cpu_scaling_max_freq(s_hardware_baseline.scaling_max_freq_khz);
-        }
+        assert_unrestricted_cpu_ceiling(); // REF-REQ-112
         set_pcie_aspm_policy(s_hardware_baseline.aspm_policy);
         set_panel_power_savings(1);
         set_cpu_epp_policy("balance_performance");
@@ -2520,7 +2620,7 @@ bool MitigationEngine::apply_timer_slack(int32_t pid, uint64_t slack_ns) noexcep
     return (written > 0);
 }
 
-bool MitigationEngine::apply_memory_reclaim(int32_t pid, uint64_t bytes) noexcept {
+bool MitigationEngine::apply_memory_reclaim(int32_t pid, uint64_t bytes, bool file_only) noexcept {
     if (pid <= 1 || bytes == 0) return false;
 
     char cg_path[256];
@@ -2534,9 +2634,22 @@ bool MitigationEngine::apply_memory_reclaim(int32_t pid, uint64_t bytes) noexcep
     int fd = hw_open_write(reclaim_path, O_WRONLY | O_CLOEXEC);
     if (fd < 0) return false;
 
-    char num_buf[32];
-    int len = std::snprintf(num_buf, sizeof(num_buf), "%lu\n", static_cast<unsigned long>(bytes));
+    // REF-REQ-112: "swappiness=0" restricts the reclaim to file-backed pages.
+    // Without it the kernel is free to satisfy the request by writing anonymous
+    // pages to swap, which is the opposite of what the caller wants when swap
+    // is the resource running out.
+    char num_buf[48];
+    int len = file_only
+                  ? std::snprintf(num_buf, sizeof(num_buf), "%lu swappiness=0\n", static_cast<unsigned long>(bytes))
+                  : std::snprintf(num_buf, sizeof(num_buf), "%lu\n", static_cast<unsigned long>(bytes));
     ssize_t written = ::write(fd, num_buf, static_cast<size_t>(len));
+
+    // Kernels before 6.4 reject the swappiness argument outright. Fall back to
+    // a plain reclaim rather than losing the tier entirely.
+    if (written < 0 && file_only) {
+        len = std::snprintf(num_buf, sizeof(num_buf), "%lu\n", static_cast<unsigned long>(bytes));
+        written = ::write(fd, num_buf, static_cast<size_t>(len));
+    }
     ::close(fd);
 
     return (written > 0);
@@ -3072,7 +3185,9 @@ void MitigationEngine::trigger_3tier_vram_gc() noexcept {
                         comm == "code" || comm == "slack" || comm == "discord" ||
                         comm == "chatgpt" || comm == "electron") {
                         // Request 100MB cgroups v2 memory reclaim
-                        apply_memory_reclaim(pid, 100ULL * 1024 * 1024);
+                        // REF-REQ-112: file-only while the guard holds swap back.
+                        apply_memory_reclaim(pid, 100ULL * 1024 * 1024,
+                                             MemoryPressureGuard::swap_feeding_suspended());
                     }
                 }
             }
@@ -3377,6 +3492,22 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
 
     status.current_profile = m_current_profile;
 
+    // REF-REQ-112: apply_power_profile() only runs on a TRANSITION, so nothing
+    // re-asserted the ceiling while the profile sat still. Anything that caps
+    // the CPU behind WattCurb's back - a competing tool, a suspend/resume that
+    // resets cpufreq, a leftover from a previous run that outlived a restart -
+    // stayed in force indefinitely and the user saw a CPU that never boosted.
+    // The call reads before it writes, so a healthy machine pays only reads.
+    if (m_current_profile == PowerProfileMode::Performance ||
+        m_current_profile == PowerProfileMode::Balanced) {
+        if (assert_unrestricted_cpu_ceiling()) {
+            core::EventLogger::log_alert(
+                "REPAIR",
+                "CPU frequency ceiling had drifted below the hardware maximum in an "
+                "unrestricted profile; restored (REF-REQ-112).");
+        }
+    }
+
     // Periodically shield all active desktop terminals & shells (REF-REQ-084, REF-ARCH-061)
     if (m_scan_counter++ % 10 == 0) {
         shield_all_interactive_terminals();
@@ -3549,7 +3680,8 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
         if (tier == ProcessSafetyTier::DesktopShell) {
             if (m_current_profile == PowerProfileMode::UltraEndurance && proc.pss_kib > 250 * 1024) {
                 uint64_t reclaim_target = 64ULL * 1024 * 1024; // 64 MB
-                if (apply_memory_reclaim(proc.pid, reclaim_target)) {
+                if (apply_memory_reclaim(proc.pid, reclaim_target,
+                                         MemoryPressureGuard::swap_feeding_suspended())) { // REF-REQ-112
                     status.reclaimed_bytes += reclaim_target;
                     status.estimated_savings_watts += 0.05;
                 }
@@ -3648,7 +3780,8 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
 
         if (should_reclaim) {
             uint64_t reclaim_amount = std::min(proc.pss_kib * 1024ULL / 2, 128ULL * 1024 * 1024);
-            if (reclaim_amount > 0 && apply_memory_reclaim(proc.pid, reclaim_amount)) {
+            if (reclaim_amount > 0 && apply_memory_reclaim(proc.pid, reclaim_amount,
+                                                           MemoryPressureGuard::swap_feeding_suspended())) { // REF-REQ-112
                 status.reclaimed_bytes += reclaim_amount;
                 status.estimated_savings_watts += 0.04;
             }
