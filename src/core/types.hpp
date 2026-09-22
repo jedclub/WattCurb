@@ -174,7 +174,10 @@ struct alignas(64) ProcessHotChunk {
     int64_t cpu_core : 10 {-1};
     uint64_t num_threads : 16 {1};
     int64_t nice : 6 {0};
-    int64_t priority : 8 {0};
+    // Linux /proc/<pid>/stat priority is 0..139 (nice=19 -> 139). A *signed*
+    // 8-bit field truncates 139 to -117, corrupting every niced/RT process.
+    // 8 unsigned bits hold the full range without changing the 64-bit layout.
+    uint64_t priority : 8 {0};
     uint64_t open_sockets : 12 {0};
     uint64_t has_io_perm : 1 {1};
     uint64_t is_kthread : 1 {0};
@@ -211,7 +214,8 @@ struct CompactProcessHot {
     int16_t cpu_core{-1};
     uint16_t num_threads{1};
     int8_t nice{0};
-    int8_t priority{0};
+    // priority is 0..139; int8_t truncates it. uint8_t covers the full range.
+    uint8_t priority{0};
 };
 static_assert(sizeof(CompactProcessHot) == 32, "CompactProcessHot must be exactly 32 bytes (2 per cacheline)");
 static_assert(std::is_trivially_copyable_v<CompactProcessHot>, "CompactProcessHot must be TriviallyCopyable");
@@ -239,7 +243,8 @@ struct alignas(64) ProcessSample {
     int64_t cpu_core : 10 {-1};
     uint64_t num_threads : 16 {1};
     int64_t nice : 6 {0};
-    int64_t priority : 8 {0};
+    // See ProcessHotChunk: priority is 0..139, so this must be unsigned.
+    uint64_t priority : 8 {0};
     uint64_t open_sockets : 12 {0};
     uint64_t has_io_perm : 1 {1};
     uint64_t is_kthread : 1 {0};

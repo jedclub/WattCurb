@@ -71,6 +71,10 @@ static MitigationEngine::AudioStreamState s_audio_state{};
 // REF-REQ-099: Profile in force, published each cycle by the policy driver.
 static PowerProfileMode s_effective_profile = PowerProfileMode::Balanced;
 
+// REF-REQ-104: Whether the last EPP write actually reached a cpufreq policy.
+// The status summary must not claim a CPU EPP setting the host does not expose.
+static bool s_epp_applied = false;
+
 [[nodiscard]] inline int hw_open_write(const char* path, int flags) noexcept {
     if (s_actuation_sandbox) return -1;
     return ::open(path, flags);
@@ -2638,13 +2642,26 @@ bool MitigationEngine::set_pcie_aspm_policy(const char* policy) noexcept {
 
 bool MitigationEngine::set_cpu_epp_policy(const char* policy) noexcept {
     if (!policy) return false;
-    int fd = hw_open_write("/sys/devices/system/cpu/cpu0/power/energy_performance_preference", O_WRONLY | O_CLOEXEC);
-    if (fd < 0) return false;
-
-    size_t len = std::strlen(policy);
-    ssize_t written = ::write(fd, policy, len);
-    ::close(fd);
-    return (written > 0);
+    // The EPP knob lives under the cpufreq policy directory. The previous path
+    // (/sys/devices/system/cpu/cpu0/power/energy_performance_preference) does
+    // not exist on any real driver, so this actuator was a permanent no-op while
+    // the UI still reported "CPU EPP: ...". Write every online CPU's policy and
+    // report the real outcome so the summary cannot claim a change that did not
+    // happen.
+    const int32_t cpus = get_total_online_cpus();
+    bool any = false;
+    for (int32_t c = 0; c < cpus; ++c) {
+        char path[128];
+        std::snprintf(path, sizeof(path),
+                      "/sys/devices/system/cpu/cpu%d/cpufreq/energy_performance_preference", c);
+        int fd = hw_open_write(path, O_WRONLY | O_CLOEXEC);
+        if (fd < 0) continue;
+        ssize_t w = ::write(fd, policy, std::strlen(policy));
+        ::close(fd);
+        if (w > 0) any = true;
+    }
+    s_epp_applied = any;
+    return any;
 }
 
 bool MitigationEngine::set_smt_control(const char* state) noexcept {
@@ -3493,14 +3510,14 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
         if (status.feature_summary_count < status.feature_summaries.size()) {
             status.feature_summaries[status.feature_summary_count++] = "PCIe ASPM: powersave";
         }
-        if (status.feature_summary_count < status.feature_summaries.size()) {
+        if (s_epp_applied && status.feature_summary_count < status.feature_summaries.size()) {
             status.feature_summaries[status.feature_summary_count++] = "CPU EPP: balance_power";
         }
     } else if (m_current_profile == PowerProfileMode::UltraEndurance) {
         if (status.feature_summary_count < status.feature_summaries.size()) {
             status.feature_summaries[status.feature_summary_count++] = "PCIe ASPM: powersave";
         }
-        if (status.feature_summary_count < status.feature_summaries.size()) {
+        if (s_epp_applied && status.feature_summary_count < status.feature_summaries.size()) {
             status.feature_summaries[status.feature_summary_count++] = "CPU EPP: power";
         }
         if (status.feature_summary_count < status.feature_summaries.size()) {
@@ -3590,16 +3607,22 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
 
         // Apply Actuations (Zero-Freeze: Only SchedIdle, TimerSlack, MemoryReclaim)
         if (should_throttle && !already_tracked) {
-            int orig_nice = ::getpriority(PRIO_PROCESS, static_cast<id_t>(proc.pid));
-            int orig_sched = ::sched_getscheduler(proc.pid);
-            cpu_set_t orig_aff;
-            CPU_ZERO(&orig_aff);
-            ::sched_getaffinity(proc.pid, sizeof(cpu_set_t), &orig_aff);
+            // REF-REQ-055: the tracking table is what rollback_all() walks. If it
+            // is full, applying a throttle would produce a mitigation the daemon
+            // can never release, leaving the process at SCHED_IDLE even after it
+            // exits. Refuse rather than leak an irreversible demotion.
+            if (m_tracked.size() >= MAX_TRACKED_MITIGATIONS) {
+                // Saturated: skip this candidate.
+            } else {
+                int orig_nice = ::getpriority(PRIO_PROCESS, static_cast<id_t>(proc.pid));
+                int orig_sched = ::sched_getscheduler(proc.pid);
+                cpu_set_t orig_aff;
+                CPU_ZERO(&orig_aff);
+                ::sched_getaffinity(proc.pid, sizeof(cpu_set_t), &orig_aff);
 
-            if (apply_sched_idle(proc.pid)) {
-                ++status.throttled_count;
-                status.estimated_savings_watts += (proc.cpu_watts * 0.4);
-                if (m_tracked.size() < MAX_TRACKED_MITIGATIONS) {
+                if (apply_sched_idle(proc.pid)) {
+                    ++status.throttled_count;
+                    status.estimated_savings_watts += (proc.cpu_watts * 0.4);
                     m_tracked.push_back(TrackedMitigation{
                         .pid = proc.pid,
                         .tier = tier,

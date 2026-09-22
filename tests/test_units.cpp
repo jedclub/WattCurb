@@ -694,6 +694,28 @@ void test_custom_containers() {
     assert(pool.current()[0] == 300);
     assert(pool.previous().empty() && "Previous buffer must be cleanly cleared for next write cycle");
 
+    // The pool holds self-referential pointers, so it must not be copyable or
+    // movable (a copy would alias the source; a move would dangle).
+    static_assert(!std::is_copy_constructible_v<DoubleBufferedPool<int, 16>>,
+                  "DoubleBufferedPool must not be copy-constructible");
+    static_assert(!std::is_copy_assignable_v<DoubleBufferedPool<int, 16>>,
+                  "DoubleBufferedPool must not be copy-assignable");
+    static_assert(!std::is_move_constructible_v<DoubleBufferedPool<int, 16>>,
+                  "DoubleBufferedPool must not be move-constructible");
+
+    // 6. Priority bitfield range (REF-TEST-065): /proc priority is 0..139, which
+    //    a signed 8-bit field would truncate (139 -> -117). All three packed
+    //    forms must round-trip the maximum without changing their size.
+    wattcurb::ProcessSample ps{};
+    ps.priority = 139;
+    assert(ps.priority == 139 && "ProcessSample.priority must hold 0..139 unsigned");
+    wattcurb::CompactProcessHot cph{};
+    cph.priority = static_cast<uint8_t>(139);
+    assert(cph.priority == 139 && "CompactProcessHot.priority must hold 0..139");
+    static_assert(sizeof(wattcurb::ProcessHotChunk) == 64, "HotChunk layout must stay 64 bytes");
+    static_assert(sizeof(wattcurb::ProcessSample) == 192, "ProcessSample layout must stay 192 bytes");
+    static_assert(sizeof(wattcurb::CompactProcessHot) == 32, "CompactProcessHot layout must stay 32 bytes");
+
     std::cout << " [PASS] test_custom_containers (FixedVector, FixedString, TopKHeap, DoubleBufferedPool, Canary & Guards verified)\n";
 }
 

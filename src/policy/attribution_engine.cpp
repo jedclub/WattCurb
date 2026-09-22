@@ -353,7 +353,8 @@ AnalysisReportData AttributionEngine::compute_attribution(
         int64_t prev_core : 10 {-1};
         uint64_t num_threads : 16 {1};
         int64_t nice : 6 {0};
-        int64_t priority : 8 {0};
+        // priority is 0..139 (see ProcessSample); keep it unsigned.
+        uint64_t priority : 8 {0};
         uint64_t open_sockets : 12 {0};
         uint64_t cross_ccx_migration : 1 {0};
         uint64_t reserved : 1 {0};

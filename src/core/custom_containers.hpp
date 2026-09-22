@@ -434,6 +434,15 @@ public:
         previous_ = &buf_b_;
     }
 
+    // The pool owns self-referential raw pointers into its own storage. The
+    // implicitly generated copy/move would copy those pointers verbatim, so a
+    // copied pool would alias the source and a moved-from source would leave
+    // them dangling. The pool is reference-only: pass it by reference.
+    DoubleBufferedPool(const DoubleBufferedPool&) = delete;
+    DoubleBufferedPool& operator=(const DoubleBufferedPool&) = delete;
+    DoubleBufferedPool(DoubleBufferedPool&&) = delete;
+    DoubleBufferedPool& operator=(DoubleBufferedPool&&) = delete;
+
     // Ping-pong pointer swap
     void swap() noexcept {
         std::swap(current_, previous_);
