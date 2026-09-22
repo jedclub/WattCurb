@@ -87,5 +87,30 @@ sysfs writes):
 6. the >= 60 C rule holds in all four profiles, and the UltraEndurance cold stop
    still applies only there.
 
-The real fan response (RPM at 60 C) is measured on the host after release, since
-it needs `thinkpad_acpi fan_control=1` and a real temperature.
+Live on the host after release (`/proc/acpi/ibm/fan`, 60 s observation):
+
+| `Tctl` (k10temp `temp1_input`) | Level written | Curve expects | RPM |
+| ---: | ---: | ---: | ---: |
+| 70.2 C (steady) | 7 | 7 | 4770 |
+
+## 6. The curve input is Tctl, and that bounds the variable range
+
+Measured while verifying: the daemon's `cpu_temp_c` comes from the `k10temp`
+hwmon `temp1_input`, which on this Renoir part is labelled **Tctl** (not a
+chassis sensor - `/sys/class/thermal/thermal_zone0` is `iwlwifi_1`, and the
+`thinkpad` hwmon reads ~53 C).
+
+Tctl is the SMU's control temperature and REF-REQ-123 established that the
+firmware holds it at its 70 C ceiling under any real load. Consequence, stated
+plainly rather than discovered later:
+
+- **At or above 60 C the fan is at level 7, and on this host Tctl sits at ~70 C
+  whenever the machine is doing work.** The practical behaviour of this change is
+  therefore "full fan whenever the CPU is warm", which is what was asked for, but
+  the 35-60 C ramp only engages when the CPU is genuinely idle and cool.
+- The ramp was verified by unit test and by the level-vs-temperature match above,
+  not by observing the fan sweep across 35-60 C on a loaded machine. That sweep
+  needs an idle host.
+- If the intent is for the ramp to engage earlier, the input sensor is the lever
+  (e.g. the EC's `thinkpad` sensor, which reads ~53 C in the same conditions).
+  That is a separate decision and is NOT part of this change.
