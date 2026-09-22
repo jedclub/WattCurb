@@ -80,23 +80,55 @@ were already correct. The log line read like a successful repair while nothing
 changed. That is the second defect: a repair that cannot reach the binding limit
 must not describe itself as a repair.
 
-### 2.4 The Tctl ceiling is EC-owned
+### 2.4 The Tctl ceiling is EC-owned and is 70 C in every thermal mode
 
-`ryzenadj --tctl-temp=85` reports success, but the value reverts immediately:
+Asked directly: *"70 이상으로 올라 갈수 있게 최대 85 까지 올라가게끔 수정 요청 했는데
+작동이 안된건가 뭔가 충돌이 발생했나?"* - is the 85 C raise broken, or is
+something fighting it?
 
-| Time after write | `THM LIMIT CORE` |
-| :--- | ---: |
-| +0 s | 70.000 |
-| +1 s | 70.000 |
-| +2 s | 70.000 |
-| +4 s | 70.000 |
-| +8 s | 70.000 |
+It is neither broken nor a conflict with software. Four measurements settle it:
 
-The EC re-imposes 70 C. Under load `THM VALUE CORE` sits at 70.0-71.0 C, i.e. the
-die is thermally saturated at that ceiling. `dytc_lapmode` (ThinkPad Dynamic
-Thermal Control) reads `1` and is read-only (`-r--r--r--`), so the EC's lap-mode
-thermal table - which is where both the 6 W STAPM and the 70 C Tctl come from -
-cannot be switched off from the OS.
+**(a) The write reaches the SMU.** Writing a value *below* the ceiling sticks and
+has the expected physical effect:
+
+| Write | `THM LIMIT CORE` after | Under 8-thread load |
+| :--- | ---: | :--- |
+| `--tctl-temp=60` | 60.000 (stable at +0/+2/+5 s) | `THM VALUE CORE` 59.945 C, 9.87 W, **1.48 GHz** |
+| `--tctl-temp=70` | 70.000 | throttles at 70 C |
+| `--tctl-temp=83` | **70.000** | - |
+| `--tctl-temp=85` | **70.000** | - |
+
+So the option name, the field mapping and the mailbox path are all correct - the
+CPU really does throttle at 60 C when told to. Only the *upward* direction is
+refused.
+
+**(b) The ceiling is 70 C in every platform profile.** Writing each profile and
+reading the limit back:
+
+| `platform_profile` | `THM LIMIT CORE` | STAPM LIMIT |
+| :--- | ---: | ---: |
+| `low-power` | 70.000 | 10.000 W |
+| `balanced` | 70.000 | 12.000 W |
+| `performance` | 70.000 | 6.000 W |
+
+70 C is the firmware's cap, not an artefact of the selected thermal mode. (The
+STAPM column also explains the 6 W: the EC's *performance* table is the one that
+sets 6 W of sustained power - short boosts are allowed, sustained power is not.)
+
+**(c) WattCurb is not the reverter.** With `wattcurb.service` **stopped**, writing
+83 C still reverts to 70 C.
+
+**(d) power-profiles-daemon is not the reverter either.** With
+`power-profiles-daemon` **stopped**, writing 83 C still reverts to 70 C. The ACPI
+thermal zone on this host is `iwlwifi_1` with no valid trip points, so the kernel
+is not doing it.
+
+The reverter is the EC. The OS may lower Tctl; it may not raise it past the
+firmware ceiling. **The 85 C target of REF-REQ-115 is therefore unreachable on
+this machine by any software means** - it would need a firmware/BIOS change (or
+different hardware). What *is* reachable, and is what actually fixed the 600 MHz
+state, is the STAPM raise: 6-10 W -> 25 W took the same load from 600 MHz to
+2.2-2.8 GHz.
 
 ## 3. The 4.1 GHz boost question
 
@@ -125,10 +157,12 @@ entirely the SMU's autonomous decision within those two limits.
 **Not measured:** a true single-core 4.1 GHz burst on an *idle* host. Every
 measurement in this report was taken while an unrelated project held the machine
 at load 8-18, which keeps the package hot and removes the headroom a 4.1 GHz
-single-core boost needs. The claim "4.1 GHz works when the machine is idle" is
-neither confirmed nor refuted here. What is established is that with a hot package
-and the EC's 70 C ceiling it is not reachable, and that the previous 600 MHz state
-was the STAPM limit.
+single-core boost needs. What IS established, and bounds the answer: the
+firmware's Tctl ceiling is 70 C in every thermal mode (section 2.4), and it cannot
+be raised from the OS. A single core boosting to 4.1 GHz would have to stay under
+that ceiling while dissipating its boost power into the same die; a brief burst on
+a cold die may reach it, sustained 4.1 GHz cannot. The previous 600 MHz state, by
+contrast, was not a thermal effect at all - it was the STAPM limit.
 
 ## 4. Requirements (regression prevention)
 
@@ -154,6 +188,11 @@ was the STAPM limit.
   actuation sandbox suppresses the SMU write, that a restore with nothing modified
   is a clean no-op, and that the limit set is internally consistent
   (REF-TEST-079).
+- **REQ-123.7 (A clamped write is reported)** After applying the SMU limits the
+  daemon shall read the effective Tctl limit back once and, when the firmware
+  clamped it below the requested target, log an `INFO` naming both values. A
+  successful mailbox write must never be reported as a raised limit
+  (REF-REQ-115.4).
 
 ## 5. Blast Radius & Failure Modes
 

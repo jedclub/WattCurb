@@ -3125,6 +3125,45 @@ bool MitigationEngine::ryzenadj_available() noexcept {
     return find_ryzenadj() != nullptr;
 }
 
+// REF-REQ-115.4: read back the thermal limit the SMU is actually enforcing.
+//
+// The SMU mailbox ACCEPTS --tctl-temp above the firmware ceiling and reports
+// success, so a successful write is not evidence that the limit moved. Measured
+// on the reference host (2026-09-22):
+//   * 60 C sticks and the CPU really throttles there (THM VALUE CORE 59.9 C,
+//     1.48 GHz under 8-thread load) - so the field mapping and the write path
+//     are correct;
+//   * 83 C and 85 C revert to 70 C before they can be read back;
+//   * 70 C is the ceiling in EVERY platform_profile (low-power, balanced,
+//     performance), so it is the firmware's cap, not a thermal-mode artefact;
+//   * the reverter is the EC: the value still reverts with wattcurb.service AND
+//     power-profiles-daemon stopped, and the ACPI thermal zone on this host is
+//     iwlwifi_1 with no valid trip points.
+// The OS may lower Tctl but may not raise it past the firmware ceiling.
+[[nodiscard]] static uint32_t read_back_tctl_limit() noexcept {
+    const char* tool = find_ryzenadj();
+    if (tool == nullptr) return 0;
+    char cmd[128];
+    std::snprintf(cmd, sizeof(cmd), "%s -i 2>/dev/null", tool);
+    FILE* p = ::popen(cmd, "r");
+    if (p == nullptr) return 0;
+    uint32_t limit = 0;
+    char line[256];
+    while (::fgets(line, sizeof(line), p) != nullptr) {
+        if (std::strstr(line, "THM LIMIT CORE") == nullptr) continue;
+        const char* bar = std::strchr(line, '|');
+        if (bar != nullptr) {
+            ++bar;
+            while (*bar != '\0' && !((*bar >= '0' && *bar <= '9') || *bar == '-')) ++bar;
+            const double c = std::strtod(bar, nullptr);
+            if (c > 0.0) limit = static_cast<uint32_t>(c + 0.5);
+        }
+        break;
+    }
+    ::pclose(p);
+    return limit;
+}
+
 bool MitigationEngine::apply_smu_performance_limits() noexcept {
     if (s_actuation_sandbox) return false;
     const char* tool = find_ryzenadj();
@@ -3145,6 +3184,26 @@ bool MitigationEngine::apply_smu_performance_limits() noexcept {
                   SMU_SLOW_PERF_MW, SMU_SLOW_PERF_MW);
     if (hw_system(cmd) != 0) return false;
     s_hardware_baseline.smu_limits_modified = true;
+
+    // REF-REQ-115.4: a successful write is not evidence the limit moved. Report a
+    // firmware clamp ONCE so "the SMU raise is configured" is never mistaken for
+    // "the SMU raise happened" - the exact confusion that produced the 600 MHz
+    // report. The read-back costs one `ryzenadj -i` in the daemon's lifetime.
+    static bool s_tctl_clamp_reported = false;
+    if (!s_tctl_clamp_reported) {
+        s_tctl_clamp_reported = true;
+        const uint32_t effective = read_back_tctl_limit();
+        if (effective != 0 && effective < SMU_TCTL_PERF_C) {
+            char detail[256];
+            std::snprintf(detail, sizeof(detail),
+                          "Firmware clamps the SMU thermal limit: requested %u C, effective %u C. "
+                          "The power (STAPM) raise was applied; the temperature ceiling is the "
+                          "firmware's and cannot be raised from the OS on this host "
+                          "(REF-REQ-115.4)",
+                          SMU_TCTL_PERF_C, effective);
+            core::EventLogger::log_alert("INFO", detail);
+        }
+    }
     return true;
 }
 
