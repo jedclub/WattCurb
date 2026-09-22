@@ -30,18 +30,18 @@ fi
 
 # 2. Install Binaries
 echo "[1/4] Installing binaries to /usr/local/bin..."
-${SUDO} install -m 755 "${BIN_DIR}/wattcurb" /usr/local/bin/wattcurb
-${SUDO} install -m 755 "${BIN_DIR}/wattcurb-tray" /usr/local/bin/wattcurb-tray
+${SUDO} install -m 755 -p "${BIN_DIR}/wattcurb" /usr/local/bin/wattcurb
+${SUDO} install -m 755 -p "${BIN_DIR}/wattcurb-tray" /usr/local/bin/wattcurb-tray
 if [ -f "${BIN_DIR}/wattcurb-dashboard" ]; then
-    ${SUDO} install -m 755 "${BIN_DIR}/wattcurb-dashboard" /usr/local/bin/wattcurb-dashboard
+    ${SUDO} install -m 755 -p "${BIN_DIR}/wattcurb-dashboard" /usr/local/bin/wattcurb-dashboard
 fi
 
 # Also link into ~/.local/bin if directory exists
 if [ -d "${HOME}/.local/bin" ]; then
-    install -m 755 "${BIN_DIR}/wattcurb" "${HOME}/.local/bin/wattcurb"
-    install -m 755 "${BIN_DIR}/wattcurb-tray" "${HOME}/.local/bin/wattcurb-tray"
+    install -m 755 -p "${BIN_DIR}/wattcurb" "${HOME}/.local/bin/wattcurb"
+    install -m 755 -p "${BIN_DIR}/wattcurb-tray" "${HOME}/.local/bin/wattcurb-tray"
     if [ -f "${BIN_DIR}/wattcurb-dashboard" ]; then
-        install -m 755 "${BIN_DIR}/wattcurb-dashboard" "${HOME}/.local/bin/wattcurb-dashboard"
+        install -m 755 -p "${BIN_DIR}/wattcurb-dashboard" "${HOME}/.local/bin/wattcurb-dashboard"
     fi
 fi
 
@@ -67,7 +67,7 @@ for cand in "${HOME}/.local/bin/ryzenadj" "/usr/local/bin/ryzenadj" "/usr/bin/ry
 done
 if [ -n "${RYZENADJ_SRC}" ]; then
     if [ "${RYZENADJ_SRC}" != "/usr/local/bin/ryzenadj" ]; then
-        ${SUDO} install -m 755 "${RYZENADJ_SRC}" /usr/local/bin/ryzenadj
+        ${SUDO} install -m 755 -p "${RYZENADJ_SRC}" /usr/local/bin/ryzenadj
         echo "  • ryzenadj: installed ${RYZENADJ_SRC} -> /usr/local/bin/ryzenadj (root-owned, REF-REQ-115.1)"
     else
         echo "  • ryzenadj: already at /usr/local/bin/ryzenadj"
@@ -86,7 +86,7 @@ if [ ! -f "${UNIT_SRC}" ]; then
     echo "[!] Error: ${UNIT_SRC} not found; refusing to install an unhardened unit."
     exit 1
 fi
-${SUDO} install -m 644 "${UNIT_SRC}" /etc/systemd/system/wattcurb.service
+${SUDO} install -m 644 -p "${UNIT_SRC}" /etc/systemd/system/wattcurb.service
 
 ${SUDO} systemctl daemon-reload
 ${SUDO} systemctl enable --now wattcurb.service

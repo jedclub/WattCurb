@@ -1,6 +1,6 @@
 # [REF-RES-004] WattCurb PGO & PMU Hardware Performance Audit Report
 
-- **Date**: 2026-09-22 14:54:51 UTC
+- **Date**: 2026-09-22 16:53:35 UTC
 - **Architecture**: x86_64 / AMD Ryzen 7 PRO 4750U with Radeon Graphics
 - **Compiler**: GCC 16 with C++23, Link-Time Optimization (-flto=auto), and Native Tuning (-march=native)
 - **Profile-Guided Optimization**: Active (-fprofile-use -fprofile-correction, 35 merged .gcda counter files from 7 representative workloads)
@@ -32,7 +32,7 @@
  [ORACLE GATE] Verifying Process Full Name & Interactive Tooltip Integrity (REF-REQ-083)...
  [PASS] test_process_full_name_and_interactive_tooltips (REF-TEST-047: Full name & cyber tooltips verified)
  [ORACLE GATE] Running Deep Battery Drain History Analytics Suite...
-   * Analysis Latency (120 pts): 38.111 us
+   * Analysis Latency (120 pts): 68.549 us
  [PASS] test_deep_battery_drain_report_oracle_gate (REF-TEST-043: Full SHM sweep, hardware decomposition, process attribution verified)
  [ORACLE GATE] Verifying Power Profile Telemetry Filtering & Comparisons (REF-TEST-050)...
  [PASS] test_power_profile_filtering_and_comparisons (REF-TEST-050: Filter & comparison matrix verified)
@@ -43,21 +43,21 @@
  [PASS] test_modeset_flapping_elimination_and_test_isolation (REF-TEST-036: Subshell bypass, Idempotent DRRS & KWin effects verified)
  [INFO] CPU Features detected: AVX2=1 BMI1=1 BMI2=1 POPCNT=1 AVX512F=0
  [PASS] test_cpu_features
- [PASS] test_hw_isa_primitives (Core ID=4, TSC=19491282271575)
+ [PASS] test_hw_isa_primitives (Core ID=0, TSC=31576977184788)
  [PASS] test_ifunc_and_nttp_dispatch (GNU IFUNC & C++23 NTTP verified)
  [PASS] test_simd_scanner
  [PASS] test_custom_containers (FixedVector, FixedString, TopKHeap, DoubleBufferedPool, Canary & Guards verified)
  [PASS] test_memory_sequence_probe_and_cache_chunking (64B HotChunk, 32B CompactHot, 0-crossing Hot loop)
  [PASS] test_deep_battery_telemetry (ThinkPad BAT0 uevent, Degradation, Thresholds & Peripherals verified)
  [ORACLE GATE] Dense Battery Telemetry Profiling Benchmark (50000 iters):
-   * SIMD uevent parse      : 0.1602 us/op (271.9 cycles/op)
-   * Battery physics calc   : 0.0715 us/op
-   * Full-scope E2E pipeline: 0.2974 us/op (504.7 cycles/op)
+   * SIMD uevent parse      : 0.2474 us/op (419.7 cycles/op)
+   * Battery physics calc   : 0.0852 us/op
+   * Full-scope E2E pipeline: 0.4587 us/op (778.2 cycles/op)
  [PASS] test_battery_telemetry_profiling_scopes (Dense Full-Scope REF-TEST-009)
 --- [REF-TEST-011] Branchless SIMD & BMI2 PDEP Oracle Gate Verification ---
  [ORACLE GATE] Branchless SIMD & BMI2 PDEP parse_proc_stat (50000 iters):
-   * Average Parse Latency : 0.1438 us/op
-   * Average CPU Cycles    : 244.0 cycles/op
+   * Average Parse Latency : 0.1820 us/op
+   * Average CPU Cycles    : 308.8 cycles/op
  [PASS] test_branchless_simd_and_bmi2_pdep (REF-TEST-011)
 --- [REF-TEST-012] C++23 Zero-Cost Environment Abstraction & Policy Verification ---
  [INFO] Detected Host Environment Profile:
@@ -68,20 +68,20 @@
    * AMD Zen        : true
    * Bound Specialization: ISA=AMD-Zen-CLZERO-Specialized | Platform=Mobile-Laptop
  [ORACLE GATE] Zero-Cost Dispatch Latency (50000 iters):
-   * Average Latency : 24.77 ns/op
-   * Average Cycles  : 42.0 cycles/op
+   * Average Latency : 29.42 ns/op
+   * Average Cycles  : 49.9 cycles/op
  [PASS] test_zero_cost_environment_abstraction (REF-TEST-012)
 --- [REF-TEST-013] Syscall Storm Suppression & Lazy FD Bypass Verification ---
  [ORACLE GATE] Lazy FD Bypass Latency (50000 iters):
-   * Average Latency : 0.17 ns/op
+   * Average Latency : 0.20 ns/op
    * Average Cycles  : 0.3 cycles/op
  [PASS] test_syscall_storm_suppression_and_lazy_fd_bypass (REF-TEST-013)
  [PASS] test_tray_binary_shared_state (128B Seqlock, Zero-Copy POD serialization verified)
- [PASS] test_window_aware_governor (Non-Halting Graceful Throttle, Always-Alive Invariant verified: 3us)
- [PASS] test_unified_rapid_rollback (AC Plug-in / Charge event full-sweep restoration verified: 1261us, idem: 0us)
+ [PASS] test_window_aware_governor (Non-Halting Graceful Throttle, Always-Alive Invariant verified: 4us)
+ [PASS] test_unified_rapid_rollback (AC Plug-in / Charge event full-sweep restoration verified: 2591us, idem: 0us)
  [ORACLE GATE] ThinkPower ToolTip Render Latency (50000 iters):
-   * Average Latency : 0.0347 us/op
-   * Average Cycles  : 59.0 cycles/op
+   * Average Latency : 0.0436 us/op
+   * Average Cycles  : 74.1 cycles/op
  [PASS] test_thinkpower_tray_client (REF-TEST-018: Zero-heap stack formatting, Icon states verified: 0.0 us/op)
 
 --- [REF-TEST-074] Effective Total Power Fallback (REF-REQ-116) ---
@@ -98,32 +98,32 @@
    * Average Latency : 0.00 ns/op
    * Average Cycles  : 0.0 cycles/op
  [ORACLE GATE] 500ms Hover Hysteresis Zero-Syscall Bypass Latency (100000 iters):
-   * Average Latency : 32.13 ns/op
-   * Average Cycles  : 54.5 cycles/op
+   * Average Latency : 40.48 ns/op
+   * Average Cycles  : 68.7 cycles/op
  [ORACLE GATE] ToolTip Render Latency with BAR_LUT & Fast Sanitizer (20000 iters):
-   * Average Latency : 0.040 us/op
-   * Average Cycles  : 68.6 cycles/op
+   * Average Latency : 0.053 us/op
+   * Average Cycles  : 89.7 cycles/op
  [PASS] test_tray_top10_extreme_optimization_oracle_gate (REF-TEST-038: 500ms timegate, BAR_LUT, ICON_LUT verified)
 
 --- [REF-TEST-039] Dashboard Matrix Profiling & Zero-Copy Ingestion (REF-REQ-074) ---
  [ORACLE GATE] Matrix Dashboard Telemetry Benchmark:
-   * Full JSON Ingestion (1000 iters) : 516.07 us/op (875667.86 cycles/op)
-   * Poll Loop Delta Gate (5000 iters) : 13.89 us/op (23570.36 cycles/op)
+   * Full JSON Ingestion (1000 iters) : 759.98 us/op (1289538.89 cycles/op)
+   * Poll Loop Delta Gate (5000 iters) : 19.94 us/op (33839.93 cycles/op)
  [PASS] test_dashboard_matrix_profiling_audit (REF-TEST-039: Dashboard Scopes, Zero-Copy Shares & Delta Gate verified)
 
 --- [REF-TEST-053] Matrix Dashboard Expanded Power Shares (11 Procs), Full Hardware Visibility & Typography Scaling (REF-REQ-089, REF-ARCH-066) ---
  [ORACLE GATE] 12-Process & Decomposed HW Share Poll Benchmark (50000 iters):
-   * Poll + Decomposition Latency: 13.89 us/op (23572.78 cycles/op)
+   * Poll + Decomposition Latency: 19.67 us/op (33378.27 cycles/op)
  [PASS] test_matrix_dashboard_expanded_power_shares_and_typography (REF-TEST-053: Top 11 Procs + Other, Full Hardware Visibility, QML Layout & Typography verified)
 
 --- [REF-TEST-054] Process C-State Affinity Classification & Cyber Badge Telemetry (REF-REQ-090, REF-ARCH-067) ---
  [ORACLE GATE] Process C-State Classification Benchmark (100000 iters):
-   * Heuristic Latency: 2.18 ns/op (3.69 cycles/op)
+   * Heuristic Latency: 3.25 ns/op (5.51 cycles/op)
  [PASS] test_process_cstate_affinity_and_badges (REF-TEST-054: Heuristic, Table Badges, QML Layout & Hover Diagnostics verified)
 
 --- [REF-TEST-055] Bi-Directional Power Profile Coherence & Seqlock Synchronization (REF-REQ-091, REF-ARCH-068) ---
  [ORACLE GATE] Seqlock Power Profile Coherence Benchmark (100000 iters):
-   * Seqlock Update + Read Latency: 2.98 ns/op (5.06 cycles/op)
+   * Seqlock Update + Read Latency: 3.99 ns/op (6.78 cycles/op)
  [PASS] test_bi_directional_power_profile_coherence (REF-TEST-055: Seqlock Versioning, Ingestion & Coherence verified)
 
 --- [REF-TEST-056] Ultimate Performance Unleash Full-Silicon Actuation Oracle Gate (REF-REQ-092, REF-ARCH-069) ---
@@ -133,20 +133,20 @@
    * Wi-Fi Power Save Disabled          : NO
    * Transition-Path Ordering Invariant   : VERIFIED (PowerSaver -> Performance -> Balanced)
  [ORACLE GATE] Ultimate Performance Actuation Benchmark (10000 iters):
-   * PM QoS + GPU Profile Switch Latency: 1.15 ns/op (1.93 cycles/op)
+   * PM QoS + GPU Profile Switch Latency: 0.79 ns/op (1.33 cycles/op)
  [PASS] test_ultimate_performance_unleash_actuation (REF-TEST-056: C0 Clamp, GPU 3D, APST 0, Rollback verified)
 
 --- [REF-TEST-058] Watt-Reactive Tray Icon Rendering (REF-REQ-095, REF-ARCH-071) ---
    * Dial fill increment       : 0.0->0.5 lights x=14.4px (136px), 0.5->1.0 lights x=33.4px (122px)
    * Badge hue (R-G)           : -163.0 (green) -> 196.0 (red), source=font
  [ORACLE GATE] Procedural Icon Render (300 iters @48px):
-   * Average Latency : 34.6 us/op
+   * Average Latency : 43.1 us/op
  [PASS] test_watt_reactive_tray_icon (REF-TEST-058: bands, ramp, frame warning, 4 distinct badges, needle deflection verified)
 
 --- [REF-TEST-059] Audio Continuity Guarantee (REF-REQ-096) ---
    * Host cpuidle exit latency : 1 us (shallowest) .. 350 us (deepest)
    * Audio latency ceiling     : 100 us
-   * PCM probe                 : 50.1 us/op, active=no, owners=0
+   * PCM probe                 : 63.7 us/op, active=no, owners=0
    * Tier shielding            : interactive=open, background worker=open
    * Live-daemon command path   : refused (test isolation enforced at IPC layer)
  [PASS] test_audio_continuity_guarantee (REF-TEST-059: latency band, probe cost, owner immunity, floor lifecycle verified)
@@ -169,7 +169,7 @@
  [PASS] test_profile_throughput_and_liveness_guarantees (REF-TEST-061: no C0 clamp in Performance, playback-independent stall shield, bounded writeback verified)
 
 --- [REF-TEST-062] Audit Defect Remediation (REF-REQ-111, REF-RES-029) ---
-   * Process identity readable (start_time=60886173 ticks)
+   * Process identity readable (start_time=61598423 ticks)
    * DEF-2 ordering invariant verified by inspection, not by this suite
    * FeatureManager destructor releases tracked process state
  [PASS] test_audit_defect_remediation (REF-TEST-062: process identity, tracking bound, shutdown release verified)
@@ -179,7 +179,9 @@
    - Production path re-asserted the ceiling (1 invocation)
  [PASS] test_cpu_ceiling_baseline_is_hardware_max (REF-TEST-068: baseline >= cpuinfo_max_freq, sandboxed assertion writes nothing, production path re-asserts)
 --- [REF-TEST-072] Load-Aware Frequency Starvation Watchdog ---
- [PASS] test_frequency_starvation_watchdog (REF-TEST-072: loaded-low trips, loaded-boost/idle clean, degenerate safe)
+ [PASS] test_frequency_starvation_watchdog (REF-TEST-072: loaded-low trips, P-state-floor pin trips (REF-REQ-126), loaded-boost/idle clean, degenerate safe)
+--- [REF-TEST-080] SMU Power-Limit Clawback Verification (REF-REQ-126) ---
+ [PASS] test_smu_limit_clawback_verification (REF-TEST-080: parser reads the right row, clawback trips, accepted write and failed read do not)
 --- [REF-TEST-079] SMU Raise Guardrails (REF-REQ-115.3) ---
  [PASS] test_smu_raise_is_guarded (REF-TEST-079: sandboxed raise refuses, restore is a no-op, limits internally consistent)
 --- [REF-TEST-073] ThinkPad Thermal-Assist Fan Curve & SMU Limits ---
@@ -192,1029 +194,1030 @@
  [PASS] test_memory_pressure_parsers (REF-TEST-070: line-anchored meminfo fields, truncation safety, PSI avg10 extraction verified)
 
 --- [REF-TEST-071] Performance Swap Expansion Policy (REF-REQ-113) ---
- [PASS] test_performance_swap_expansion_policy (REF-TEST-071: growth thresholds, disk floor and file ceiling, release safety, Performance brake-only-when-exhausted, sandbox containment verified)
---- [REF-TEST-041] Multilingual L10n & Auto System Locale Verificat[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (konsole) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 () | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864770 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-[2026-09-22 23:54:45] [WATTCURB][MITIGATION] Mitigation Actuated: PID 3864771 (sandbox-probe) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
-ion ---
+ [PAS[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (konsole) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 () | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77177 (bench) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][MITIGATION] Mitigation Actuated: PID 77180 (sandbox-probe) | Action: ACTIVE_WINDOW_C0_GUARANTEE | Details: Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp
+[2026-09-23 01:53:28] [WATTCURB][ALERT:WARN] CPU frequency starved under load: max core 0 MHz vs ceiling 1700 MHz, load1=12.06, profile=Performance; ceiling/profile were already at target, SMU re-apply refused (baseline not captured); SMU baseline STAPM 0 mW (REF-REQ-112.10, REF-REQ-115.2)
+S] test_performance_swap_expansion_policy (REF-TEST-071: growth thresholds, disk floor and file ceiling, release safety, Performance brake-only-when-exhausted, sandbox containment verified)
+--- [REF-TEST-041] Multilingual L10n & Auto System Locale Verification ---
  [ORACLE GATE] O(1) L10n Translation Latency (100000 iters):
-   * Average Latency : 3.5 ns/op
+   * Average Latency : 12.7 ns/op
  [PASS] test_multilingual_l10n_and_auto_system_locale (REF-TEST-041: 13 languages, 46 strings, POSIX auto-detect verified)
  [ORACLE GATE] Headroom Mask Computation Benchmark (50000 iters):
-   * Average Latency : 0.0030 us/op
-   * Average Cycles  : 5.2 cycles/op
+   * Average Latency : 0.0054 us/op
+   * Average Cycles  : 9.1 cycles/op
  [PASS] test_anti_starvation_and_greedy_capping (REF-TEST-019: Cores 0..13 allowed, 2 reserved for audio/compositor, 0.0 us/op)
 --- [REF-TEST-048] Adaptive C1/C2 Dual-Cluster Spatial Load Dispersion & Terminal Shield Verification ---
  [ORACLE GATE] Adaptive C1/C2 Cluster Benchmark (50000 iters):
-   * Average Latency : 0.0067 us/op
-   * Average Cycles  : 11.4 cycles/op
+   * Average Latency : 0.0079 us/op
+   * Average Cycles  : 13.4 cycles/op
  [PASS] test_adaptive_c1_c2_cluster_dispersion (REF-TEST-048: C1=0..7, C2=8..15, Terminal Shield Active, 0.0 us/op)
 --- [REF-TEST-049] KDE Active Window Resource Guarantee & PM QoS C0 Pinning Verification ---
  [ORACLE GATE] Active Window Guarantee Benchmark:
    * Total Iterations: 2000
-   * Total Time      : 22893.2 us
-   * Average Latency : 11.4466 us/op
- [PASS] test_active_window_resource_guarantee_and_c0_qos (REF-TEST-049: C0 Pinning, C1 Spatial Affinity, 11.4466 us/op)
+   * Total Time      : 28198.7 us
+   * Average Latency : 14.0994 us/op
+ [PASS] test_active_window_resource_guarantee_and_c0_qos (REF-TEST-049: C0 Pinning, C1 Spatial Affinity, 14.0994 us/op)
 --- [REF-TEST-063] Desktop Session Token Shell-Safety Verification ---
  [PASS] test_desktop_session_token_shell_safety (REF-TEST-063: 16 hostile socket names + 11 hostile runtime dirs rejected)
 --- [REF-TEST-064] Actuation Sandbox vs Window Governor Live-Write Verification ---
@@ -1228,18 +1231,18 @@ ion ---
    * Scaling Max Freq  : 1700000 kHz
    * Panel Power Level : 0
  [PASS] test_state_journaling_and_faithful_restoration (REF-TEST-020: Dual-domain snapshot & 100% faithful restoration verified)
- [ORACLE GATE] EventLogger Stack Formatting (50k iters): 0.5678 us/op
- [ORACLE GATE] HistoryRingBuffer Append Latency (100k iters): 8.6262 ns/op
+ [ORACLE GATE] EventLogger Stack Formatting (50k iters): 0.7510 us/op
+ [ORACLE GATE] HistoryRingBuffer Append Latency (100k iters): 11.4427 ns/op
  [PASS] test_zero_disk_wakeup_logging_and_history_ring_buffer (REF-TEST-024 & REF-TEST-035: 7-Day 60,480-sample wrap, < 50ns append verified)
- [ORACLE GATE] Power Share Decomposition Math (100k iters): 0.0003 ns/op
+ [ORACLE GATE] Power Share Decomposition Math (100k iters): 0.0004 ns/op
  [PASS] test_circular_power_share_visualization (REF-TEST-025: Sum-invariant 100%, zero-division safety, < 100ns math verified)
- [ORACLE GATE] UltraEndurance Profile Actuation & 100% Roundtrip: 5.2117 ms
+ [ORACLE GATE] UltraEndurance Profile Actuation & 100% Roundtrip: 6.5643 ms
  [PASS] test_ultra_endurance_extensions (REF-TEST-028: SMT, Bluetooth, Backlight Cap, DRRS, KWin Effects & Baloo verified)
  [ORACLE GATE] Platform Loss Decomposition (12.5W System -> 3.8W Plat): DRAM=1.3641W, VRM=1.6864W, Wi-Fi=0.5247W, MB/IO=0.2249W (Invariant Sum=3.8000W)
  [PASS] test_wifi_txpower_and_platform_loss_decomposition (REF-TEST-029 verified)
 --- [REF-TEST-057] Deterministic Battery Threshold Demotion (REF-REQ-094) ---
  [PASS] test_battery_low_performance_lockout (REF-TEST-057: 30/20/5% one-shot demotion, AC & above-30% stability verified)
- [ORACLE GATE] Tier 2 Ultra-Lightweight Probe Latency: 1229.7089 us/op
+ [ORACLE GATE] Tier 2 Ultra-Lightweight Probe Latency: 1649.9895 us/op
  [PASS] test_adaptive_three_tier_cadence (REF-TEST-033: On-Demand 2s, 10s light, 60s deep verified)
 --- [REF-TEST-034] Smart Adaptive Trigger & Temporal Sync Verification ---
  [PASS] test_smart_adaptive_trigger_and_temporal_sync (REF-TEST-034: Spike trigger <= 10s, 15s cooldown, 1x timebase scale verified)
@@ -1260,15 +1263,15 @@ ion ---
  [PASS] test_windowed_attribution_engine
  [PASS] test_singleton_lock
  [INFO] Hardware Probe Sample Captured:
-   - CPU Temp: 70.250000 C
-   - CPU Cores Online: 16, Avg Freq: 2902 MHz
-   - C-State POLL=29448768965us, C1=45870233451us, C2=479563733621us, C3=4215795866761us
-   - GPU Power: 9.000000 W
-   - GPU Busy: 5%
-   - Fan RPM: 5360
+   - CPU Temp: 70.000000 C
+   - CPU Cores Online: 16, Avg Freq: 2767 MHz
+   - C-State POLL=29448768965us, C1=48081075144us, C2=502504773084us, C3=4261538028130us
+   - GPU Power: 15.000000 W
+   - GPU Busy: 21%
+   - Fan RPM: 5365
    - Battery Discharging: false, AC Online: true
    - Battery Health: 94.191696%
-   - NVMe Status: active, Read sectors: 1581641978
+   - NVMe Status: active, Read sectors: 1625352871
  [PASS] test_persistent_hw_probe
  [PASS] test_peripheral_battery_fd_lifecycle (REF-TEST-067: peripheral fd reopened, 42% Charging)
  [PASS] test_pmu_perf_event_telemetry (Instructions counted: 0)
@@ -1276,25 +1279,25 @@ ion ---
  [PASS] test_pcie_binary_config_decoder (Gen4 x16 binary decode verified)
  [PASS] test_scoped_profiler (Zero-overhead release purity verified)
  [ORACLE GATE] Running micro-benchmark on zero-allocation parser...
- [ORACLE GATE] 100k stat parses completed in 14799 us (0.1480 us/op)
+ [ORACLE GATE] 100k stat parses completed in 16180 us (0.1618 us/op)
  [ORACLE GATE PASS] Performance within extreme efficiency threshold (< 1.0 us/op)
 === ALL TESTS & ORACLE GATE PASSED SUCCESSFULLY ===
 
  Performance counter stats for '/home/jedclub/Develop/WattCurb/build_pgo/wattcurb_tests':
 
-          1,697.33 msec task-clock:u                                                          
-     4,303,033,483      cycles:u                                                                (85.73%)
-     9,264,471,607      instructions:u                                                          (85.60%)
-         8,015,267      cache-misses:u                                                          (85.68%)
-        62,648,283      L1-dcache-load-misses:u                                                 (85.69%)
-           512,840      dTLB-load-misses:u                                                      (85.74%)
-     2,178,216,339      branches:u                                                              (85.84%)
-        12,202,658      branch-misses:u                                                         (85.76%)
+          2,455.01 msec task-clock:u                                                          
+     4,700,452,077      cycles:u                                                                (85.63%)
+     9,301,481,535      instructions:u                                                          (85.59%)
+        10,446,304      cache-misses:u                                                          (85.80%)
+        62,569,617      L1-dcache-load-misses:u                                                 (85.74%)
+           662,177      dTLB-load-misses:u                                                      (85.70%)
+     2,181,512,407      branches:u                                                              (85.80%)
+        15,044,609      branch-misses:u                                                         (85.78%)
 
-       1.803278238 seconds time elapsed
+       2.599478875 seconds time elapsed
 
-       1.335989000 seconds user
-       0.336717000 seconds sys
+       1.961788000 seconds user
+       0.423356000 seconds sys
 ```
 
 ---
@@ -1306,82 +1309,82 @@ ion ---
 [1m[36m================================================================================================================
                              WattCurb High-Fidelity Executive & Physical Power Briefing                         
 ================================================================================================================
-[0m[2m Observation Scope    : [0m[1m6043 ms[0m[2m (3 continuous intervals)[0m[2m | Energy Consumption: [0m[1m134.26 Joules[0m[2m | Monitored Processes: [0m[1m200[0m[2m | Wakeups: [0m[1m2309 /sec[0m
+[0m[2m Observation Scope    : [0m[1m6053 ms[0m[2m (3 continuous intervals)[0m[2m | Energy Consumption: [0m[1m120.84 Joules[0m[2m | Monitored Processes: [0m[1m199[0m[2m | Wakeups: [0m[1m1941 /sec[0m
 
 [1m [1] System Battery & Power Supply Deep Telemetry[0m
-  - Total System Drain      : [1m[33m22.21 Watts[0m
+  - Total System Drain      : [1m[33m19.96 Watts[0m
   - Power Supply State      : [32mAC Connected (Line Power / Charging)[0m[2m [USB-PD Input: 0.0W (C [PD] PD_PPS)][0m
-  - Battery Capacity        : [1m41%[0m [Normal] ([1m1.1h to limit[0m) | Health: 94.2% (108 cycles)
+  - Battery Capacity        : [1m47%[0m [Normal] ([1m1.1h to limit[0m) | Health: 94.2% (108 cycles)
   - Battery Hardware ID     : [1mSMP LNV-5B10W13895[0m (S/N: 3502) [Li-poly]
-  - Voltage & Current Flow  : 11.766 V (Design Nominal: 11.10 V) | Flow: [0m0.000 A[0m
-  - Energy & Degradation    : 17.42 Wh now / 42.65 Wh full (Design: 45.28 Wh) | [1m[32m5.8% wear (2.63 Wh lost)[0m
+  - Voltage & Current Flow  : 11.875 V (Design Nominal: 11.10 V) | Flow: [0m0.000 A[0m
+  - Energy & Degradation    : 19.98 Wh now / 42.65 Wh full (Design: 45.28 Wh) | [1m[32m5.8% wear (2.63 Wh lost)[0m
 
 [1m [2] Physical Hardware Domain Power & State Breakdown[0m
-  * CPU Package (RAPL)    :   6.86 W ( 30.9%) [2mTemp: 70°C, 2014 MHz avg (performance)[0m
-    └─ [2mC-State Sleep Residency : [0mC0 (Active): [1m19.0%[0m, C1: 3.5%, C2: 18.7%, C3 (Deep Sleep): [1m[33m58.8%[0m
-  * GPU Silicon (DRM)     :   0.52 W (  2.3%) [2mBusy: 5%, 452 MB VRAM, 8.0 GT/s PCIe x16[0m
-  * Display Backlight     :   1.49 W (  6.7%) [2mBrightness: 25%[0m
-  * Storage / NVMe APST   :   0.44 W (  2.0%) [2mNVMe: active (Read 0.0 MB/s, Write 7.2 MB/s)[0m
-  * Mechanical Fan        :   3.58 W ( 16.1%) [2m5360 RPM[0m
-  * Uncore & Platform Loss:   9.33 W ( 42.0%) [2mASPM: default [performance] powersave[0m
+  * CPU Package (RAPL)    :   8.84 W ( 44.3%) [2mTemp: 70°C, 2327 MHz avg (performance)[0m
+    └─ [2mC-State Sleep Residency : [0mC0 (Active): [1m30.2%[0m, C1: 1.6%, C2: 21.5%, C3 (Deep Sleep): [1m[33m46.8%[0m
+  * GPU Silicon (DRM)     :   2.54 W ( 12.7%) [2mBusy: 21%, 469 MB VRAM, 8.0 GT/s PCIe x16[0m
+  * Display Backlight     :   0.87 W (  4.4%) [2mBrightness: 3%[0m
+  * Storage / NVMe APST   :   0.39 W (  2.0%) [2mNVMe: active (Read 0.1 MB/s, Write 3.3 MB/s)[0m
+  * Mechanical Fan        :   3.59 W ( 18.0%) [2m5365 RPM[0m
+  * Uncore & Platform Loss:   3.73 W ( 18.7%) [2mASPM: default [performance] powersave[0m
 
 [1m [3] Top Battery Drain Culprits & Physical Causation Breakdown[0m
-  1. [1mpython3[0m (PID: 3864683, [36mTier 5 (Runaway)[0m, 1 thr, Nice: -3)
-     Drain: [1m[31m4.03 W[0m (18.2% of system, WDI: 36.6) | Primary Domain: [35mCPU Compute[0m
-     Causation Mechanism: [1mCore Execution (599 ticks, 50% CPU)[0m
-     Physical Metrics   : [2mWakeups: 39/s, RAM PSS: 17MB, Faults: 1127 min/s 0 maj/s, Sockets: 0[0m
-  2. [1mkwin_wayland[0m (PID: 1116, [36mTier 1 (Compositor)[0m, 41 thr, Nice: -10)
-     Drain: [1m[33m0.95 W[0m (4.3% of system, WDI: 24.7) | Primary Domain: [35mCPU C-State Wakeup[0m
-     Causation Mechanism: [1mC3 Sleep Breaker (416 wakeups/s)[0m
-     Physical Metrics   : [2mWakeups: 416/s, RAM PSS: 60MB, Faults: 5863 min/s 0 maj/s, Sockets: 0[0m
-  3. [1mfoot[0m (PID: 1811, [36mTier 1 (Compositor)[0m, 5 thr, Nice: -5)
-     Drain: [1m[33m0.70 W[0m (3.2% of system, WDI: 18.1) | Primary Domain: [35mCPU C-State Wakeup[0m
-     Causation Mechanism: [1mC3 Sleep Breaker (298 wakeups/s)[0m
-     Physical Metrics   : [2mWakeups: 298/s, RAM PSS: 11MB, Faults: 0 min/s 0 maj/s, Sockets: 3[0m
-  4. [1mfoot[0m (PID: 1689, [36mTier 1 (Compositor)[0m, 5 thr, Nice: -5)
-     Drain: [1m[33m0.62 W[0m (2.8% of system, WDI: 15.4) | Primary Domain: [35mNVMe Storage[0m
+  1. [1mChatGPT[0m (PID: 2724838, [36mTier 3 (User App)[0m, 28 thr, Nice: 0)
+     Drain: [1m[31m1.79 W[0m (9.0% of system, WDI: 29.4) | Primary Domain: [35mWiFi Radio CAM[0m
+     Causation Mechanism: [1mActive Network Sockets (18 skt, CAM Mode)[0m
+     Physical Metrics   : [2mWakeups: 311/s, RAM PSS: 39MB, Faults: 624 min/s 0 maj/s, Sockets: 18[0m
+  2. [1mvector_compiler[0m (PID: 77077, [36mTier 5 (Runaway)[0m, 1 thr, Nice: 16)
+     Drain: [1m[31m2.57 W[0m (12.9% of system, WDI: 24.7) | Primary Domain: [35mCPU Compute[0m
+     Causation Mechanism: [1mCore Execution (597 ticks, 25% CPU)[0m
+     Physical Metrics   : [2mWakeups: 62/s, RAM PSS: 30MB, Faults: 338554 min/s 0 maj/s, Sockets: 2[0m
+  3. [1mChatGPT[0m (PID: 2724773, [36mTier 3 (User App)[0m, 56 thr, Nice: 0)
+     Drain: [1m[33m1.19 W[0m (6.0% of system, WDI: 21.7) | Primary Domain: [35mWiFi Radio CAM[0m
+     Causation Mechanism: [1mActive Network Sockets (32 skt, CAM Mode)[0m
+     Physical Metrics   : [2mWakeups: 267/s, RAM PSS: 170MB, Faults: 915 min/s 0 maj/s, Sockets: 32[0m
+  4. [1mChatGPT[0m (PID: 2724967, [36mTier 3 (User App)[0m, 23 thr, Nice: 0)
+     Drain: [1m[33m1.48 W[0m (7.4% of system, WDI: 19.9) | Primary Domain: [35mWiFi Radio CAM[0m
+     Causation Mechanism: [1mActive Network Sockets (14 skt, CAM Mode)[0m
+     Physical Metrics   : [2mWakeups: 169/s, RAM PSS: 889MB, Faults: 1292 min/s 0 maj/s, Sockets: 14[0m
+  5. [1mkwin_wayland[0m (PID: 1116, [36mTier 1 (Compositor)[0m, 41 thr, Nice: -10)
+     Drain: [1m[33m0.65 W[0m (3.3% of system, WDI: 19.9) | Primary Domain: [35mCPU C-State Wakeup[0m
+     Causation Mechanism: [1mC3 Sleep Breaker (359 wakeups/s)[0m
+     Physical Metrics   : [2mWakeups: 359/s, RAM PSS: 60MB, Faults: 26 min/s 0 maj/s, Sockets: 0[0m
+  6. [1mchrome[0m (PID: 77189, [36mTier 3 (User App)[0m, 25 thr, Nice: 5)
+     Drain: [1m[31m1.74 W[0m (8.7% of system, WDI: 15.4) | Primary Domain: [35mCPU Compute[0m
+     Causation Mechanism: [1mCore Execution (434 ticks, 18% CPU)[0m
+     Physical Metrics   : [2mWakeups: 10/s, RAM PSS: 287MB, Faults: 44815 min/s 0 maj/s, Sockets: 5[0m
+  7. [1mcodex[0m (PID: 2724987, [36mTier 3 (User App)[0m, 42 thr, Nice: -3)
+     Drain: [1m[33m1.38 W[0m (6.9% of system, WDI: 15.2) | Primary Domain: [35mNVMe Storage / MajFlt[0m
+     Causation Mechanism: [1mMajor Page Faults (3 flt/s, NVMe Active)[0m
+     Physical Metrics   : [2mWakeups: 0/s, RAM PSS: 230MB, Faults: 3841 min/s 3 maj/s, Sockets: 29[0m
+  8. [1mopencode[0m (PID: 3515949, [36mTier 1 (Compositor)[0m, 17 thr, Nice: -5)
+     Drain: [1m[33m0.91 W[0m (4.6% of system, WDI: 14.0) | Primary Domain: [35mNVMe Storage[0m
      Causation Mechanism: [1mNVMe Active (0.00 MB/s)[0m
-     Physical Metrics   : [2mWakeups: 248/s, RAM PSS: 9MB, Faults: 0 min/s 0 maj/s, Sockets: 3[0m
-  5. [1mbun[0m (PID: 3840049, [36mTier 5 (Runaway)[0m, 27 thr, Nice: 16)
-     Drain: [1m[33m0.76 W[0m (3.4% of system, WDI: 14.4) | Primary Domain: [35mWiFi Radio CAM[0m
-     Causation Mechanism: [1mActive Network Sockets (9 skt, CAM Mode)[0m
-     Physical Metrics   : [2mWakeups: 189/s, RAM PSS: 160MB, Faults: 83 min/s 0 maj/s, Sockets: 9[0m
-  6. [1mopencode[0m (PID: 3153420, [36mTier 1 (Compositor)[0m, 20 thr, Nice: -5)
-     Drain: [1m[33m0.85 W[0m (3.8% of system, WDI: 13.7) | Primary Domain: [35mWiFi Radio CAM[0m
-     Causation Mechanism: [1mActive Network Sockets (6 skt, CAM Mode)[0m
-     Physical Metrics   : [2mWakeups: 152/s, RAM PSS: 194MB, Faults: 238 min/s 0 maj/s, Sockets: 6[0m
-  7. [1mopencode[0m (PID: 3515949, [36mTier 1 (Compositor)[0m, 20 thr, Nice: -5)
-     Drain: [1m[33m0.72 W[0m (3.2% of system, WDI: 12.4) | Primary Domain: [35mNVMe Storage[0m
-     Causation Mechanism: [1mNVMe Active (0.00 MB/s)[0m
-     Physical Metrics   : [2mWakeups: 149/s, RAM PSS: 231MB, Faults: 51 min/s 0 maj/s, Sockets: 4[0m
-  8. [1mbun[0m (PID: 3844175, [36mTier 5 (Runaway)[0m, 10 thr, Nice: 16)
-     Drain: [1m[32m0.49 W[0m (2.2% of system, WDI: 11.1) | Primary Domain: [35mPlatform/Idle[0m
-     Causation Mechanism: [1mBackground Poll (169 w/s)[0m
-     Physical Metrics   : [2mWakeups: 169/s, RAM PSS: 35MB, Faults: 5 min/s 0 maj/s, Sockets: 2[0m
+     Physical Metrics   : [2mWakeups: 150/s, RAM PSS: 275MB, Faults: 1214 min/s 0 maj/s, Sockets: 4[0m
 
 [1m [4] Modular Battery Optimization Features Execution Status[0m
   - Overall Status      : [1m[2mOptimal baseline (No intrusive throttling needed)[0m
     * All optimization features running in passive baseline observation mode.
 
 [1m [5] Actionable Engineering Recommendations[0m
-  * [C-State Breaker] Wakeup frequency (2309 wakeups/sec) is impeding CPU C3 deep sleep. Enabling TimerSlackCoalescing will bundle timers.
+  * [C-State Breaker] Wakeup frequency (1941 wakeups/sec) is impeding CPU C3 deep sleep. Enabling TimerSlackCoalescing will bundle timers.
 ================================================================================================================
 
 
  Performance counter stats for '/home/jedclub/Develop/WattCurb/output/wattcurb --duration 6 -i 2':
 
-             56.84 msec task-clock:u                                                          
-         8,841,832      cycles:u                                                              
-         9,765,917      instructions:u                                                        
-           110,034      L1-dcache-load-misses:u                                               
-             3,381      dTLB-load-misses:u                                                    
-            91,433      branch-misses:u                                                       
-               301      page-faults:u                                                         
+             68.97 msec task-clock:u                                                          
+        10,184,981      cycles:u                                                              
+        10,112,834      instructions:u                                                        
+           110,319      L1-dcache-load-misses:u                                               
+             3,463      dTLB-load-misses:u                                                    
+            95,419      branch-misses:u                                                       
+               303      page-faults:u                                                         
 
-       6.061116949 seconds time elapsed
+       6.073297038 seconds time elapsed
 
-       0.001932000 seconds user
-       0.055188000 seconds sys
+       0.003960000 seconds user
+       0.065036000 seconds sys
 ```
 
 ---
