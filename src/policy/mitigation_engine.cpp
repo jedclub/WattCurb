@@ -494,6 +494,10 @@ MitigationEngine::MitigationEngine() noexcept {
     }
 }
 
+// REF-REQ-115: defined with the SMU actuators below; forward-declared for the
+// bootstrap capture, which runs before it in the file.
+static const char* find_ryzenadj() noexcept;
+
 void MitigationEngine::capture_hardware_baseline() noexcept {
     if (s_hardware_baseline.captured) {
         return;
@@ -753,6 +757,74 @@ void MitigationEngine::capture_hardware_baseline() noexcept {
     if (detect_wireless_ifname(wifi_ifname, sizeof(wifi_ifname)) &&
         nl80211_get_power_save(wifi_ifname, &ps_enabled)) {
         s_hardware_baseline.wifi_power_save_baseline = ps_enabled;
+    }
+
+    // 13. ThinkPad fan level (REF-REQ-114) and SMU limits (REF-REQ-115)
+    std::strncpy(s_hardware_baseline.fan_level_baseline, "auto",
+                 sizeof(s_hardware_baseline.fan_level_baseline) - 1);
+    {
+        int rfd = ::open("/proc/acpi/ibm/fan", O_RDONLY | O_CLOEXEC);
+        if (rfd >= 0) {
+            char fbuf[256];
+            ssize_t fn = ::read(rfd, fbuf, sizeof(fbuf) - 1);
+            ::close(rfd);
+            if (fn > 0) {
+                fbuf[fn] = '\0';
+                const char* lv = std::strstr(fbuf, "level:");
+                if (lv != nullptr) {
+                    lv += 6;
+                    while (*lv == ' ' || *lv == '\t') ++lv;
+                    size_t i = 0;
+                    while (i < sizeof(s_hardware_baseline.fan_level_baseline) - 1 &&
+                           lv[i] != '\0' && lv[i] != '\n' && lv[i] != '\r' && lv[i] != ' ') {
+                        s_hardware_baseline.fan_level_baseline[i] = lv[i];
+                        ++i;
+                    }
+                    s_hardware_baseline.fan_level_baseline[i] = '\0';
+                    if (i == 0) std::strncpy(s_hardware_baseline.fan_level_baseline, "auto", 15);
+                }
+            }
+        }
+    }
+    if (const char* tool = find_ryzenadj(); tool != nullptr) {
+        char cmd[128];
+        std::snprintf(cmd, sizeof(cmd), "%s -i 2>/dev/null", tool);
+        FILE* p = ::popen(cmd, "r");
+        if (p != nullptr) {
+            char line[256];
+            // ryzenadj -i prints pipe-separated rows. The first '|' followed by
+            // the value; parse the leading number of the second column.
+            auto parse_field = [](const char* l) -> double {
+                const char* bar = std::strchr(l, '|');
+                if (bar == nullptr) return 0.0;
+                ++bar;
+                while (*bar != '\0' && !((*bar >= '0' && *bar <= '9') || *bar == '-')) ++bar;
+                return std::strtod(bar, nullptr);
+            };
+            auto parse_power_mw = [&](const char* l) -> uint32_t {
+                const double w = parse_field(l);
+                if (w <= 0.0) return 0;
+                return static_cast<uint32_t>(w * 1000.0 + 0.5);
+            };
+            while (::fgets(line, sizeof(line), p) != nullptr) {
+                // Power rows are in watts; the thermal row is already Celsius and
+                // must NOT be scaled by 1000. Reading Tctl as mW would make the
+                // restore write --tctl-temp=95000 instead of 95.
+                if (std::strstr(line, "STAPM LIMIT") != nullptr) {
+                    s_hardware_baseline.smu_stapm_mw = parse_power_mw(line);
+                } else if (std::strstr(line, "PPT LIMIT FAST") != nullptr) {
+                    s_hardware_baseline.smu_fast_mw = parse_power_mw(line);
+                } else if (std::strstr(line, "PPT LIMIT SLOW") != nullptr) {
+                    s_hardware_baseline.smu_slow_mw = parse_power_mw(line);
+                } else if (std::strstr(line, "APU SLOW LIMIT") != nullptr) {
+                    s_hardware_baseline.smu_apu_slow_mw = parse_power_mw(line);
+                } else if (std::strstr(line, "THM LIMIT CORE") != nullptr) {
+                    const double c = parse_field(line);
+                    if (c > 0.0) s_hardware_baseline.smu_tctl_c = static_cast<uint32_t>(c + 0.5);
+                }
+            }
+            ::pclose(p);
+        }
     }
 
     s_hardware_baseline.captured = true;
@@ -1306,6 +1378,14 @@ void MitigationEngine::release_performance_unleash() noexcept {
     restore_nvme_apst_baseline();
     restore_wifi_powersave_baseline();
     restore_sched_migration_cost_baseline();
+    // REF-REQ-114/115: the raised SMU thermal limit and its thermal-assist fan
+    // curve belong to Performance and Balanced only. Every transition out of
+    // Performance (and the Balanced cleanup path below, which re-applies the SMU
+    // raise) passes through here, so both are returned to the captured baseline
+    // before a saving profile takes over. The next Performance/Balanced cycle
+    // re-applies the fan curve from the temperature.
+    restore_smu_limits();
+    restore_fan_level();
     s_hardware_baseline.performance_unleash_engaged = false;
 }
 
@@ -1410,6 +1490,10 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_nvme_power_control("on");                 // Hold NVMe controllers runtime-active
         set_wifi_powersave(false);                    // Eliminate Wi-Fi power-save jitter
         set_sched_migration_cost(5000000);            // 5ms CPU cache warmth affinity
+        // REF-REQ-115: raise the SMU thermal limit (85 C) and power ceilings so
+        // the part can boost instead of throttling at the EC's conservative
+        // default. The fan boost at 70 C (REF-REQ-114) keeps it below the limit.
+        apply_smu_performance_limits();
         s_hardware_baseline.performance_unleash_engaged = true;
 
         // Restore UltraEndurance modifications if any
@@ -1432,6 +1516,9 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_cpu_governor("schedutil");
         set_cpu_boost(true);
         assert_unrestricted_cpu_ceiling(); // REF-REQ-112
+        // REF-REQ-115: Balanced also raises the SMU thermal limit to 85 C so it
+        // throttles on temperature rather than on the EC's conservative default.
+        apply_smu_performance_limits();
         set_pcie_aspm_policy(s_hardware_baseline.aspm_policy);
         set_panel_power_savings(1);
         set_cpu_epp_policy("balance_performance");
@@ -2854,6 +2941,212 @@ bool MitigationEngine::set_smt_control(const char* state) noexcept {
     (void)::write(fd, "\n", 1);
     ::close(fd);
     return (w > 0);
+}
+
+// ---------------------------------------------------------------------------
+// REF-REQ-114: ThinkPad thermal-assist fan curve (Performance / Balanced)
+// ---------------------------------------------------------------------------
+namespace {
+// Last level the curve actually wrote. A per-cycle write would be a needless
+// sysfs storm on a 1-3 s observation loop, so the curve only writes on a
+// change. It is reset by restore_fan_level(), otherwise returning to the
+// captured baseline and then re-entering Performance at the same temperature
+// would be mistaken for "no change" and leave the EC in control.
+int g_last_fan_level = -1;
+// REF-TEST-073: counts evaluations from the production entry point so a wiring
+// that only runs under test is falsifiable, exactly like ceiling_assertion_count.
+uint64_t g_fan_curve_application_count = 0;
+} // namespace
+
+int MitigationEngine::fan_level_for_temp(double cpu_temp_c) noexcept {
+    if (cpu_temp_c <= 0.0) return -1; // no temperature reading
+    if (cpu_temp_c >= FAN_FULL_TEMP_C) return 7; // full speed
+    if (cpu_temp_c <= FAN_CURVE_MIN_TEMP_C) return 1; // 0.2 -> level 1
+    // Linear between (35 C, 0.2) and (70 C, 1.0), mapped onto the 0..7 steps.
+    const double frac = FAN_CURVE_MIN_FRACTION +
+                        (cpu_temp_c - FAN_CURVE_MIN_TEMP_C) /
+                            (FAN_FULL_TEMP_C - FAN_CURVE_MIN_TEMP_C) *
+                            (1.0 - FAN_CURVE_MIN_FRACTION);
+    int lvl = static_cast<int>(frac * 7.0 + 0.5);
+    if (lvl < 1) lvl = 1;
+    if (lvl > 7) lvl = 7;
+    return lvl;
+}
+
+int MitigationEngine::apply_fan_for_temp(double cpu_temp_c) noexcept {
+    ++g_fan_curve_application_count;
+    const int lvl = fan_level_for_temp(cpu_temp_c);
+    if (lvl < 0) return -1;
+
+    // Write only on a level change: the observation cycle runs every 1-3 s and a
+    // per-cycle fan write would be a needless sysfs storm.
+    if (lvl == g_last_fan_level) return lvl;
+
+    char level[16];
+    if (lvl >= 7) {
+        std::strncpy(level, "full-speed", sizeof(level) - 1);
+        level[sizeof(level) - 1] = '\0';
+    } else {
+        std::snprintf(level, sizeof(level), "%d", lvl);
+    }
+    if (!set_fan_level(level)) return -1;
+    g_last_fan_level = lvl;
+    return lvl;
+}
+
+uint64_t MitigationEngine::fan_curve_application_count() noexcept {
+    return g_fan_curve_application_count;
+}
+
+bool MitigationEngine::set_fan_level(const char* level) noexcept {
+    if (!level || *level == '\0') return false;
+
+    // Capture the pre-boost level once, so restore puts back what the EC or the
+    // user had rather than a hard-coded "auto".
+    if (!s_hardware_baseline.fan_level_modified) {
+        int rfd = ::open("/proc/acpi/ibm/fan", O_RDONLY | O_CLOEXEC);
+        if (rfd >= 0) {
+            char buf[256];
+            ssize_t n = ::read(rfd, buf, sizeof(buf) - 1);
+            ::close(rfd);
+            if (n > 0) {
+                buf[n] = '\0';
+                const char* lv = std::strstr(buf, "level:");
+                if (lv != nullptr) {
+                    lv += 6;
+                    while (*lv == ' ' || *lv == '\t') ++lv;
+                    size_t i = 0;
+                    while (i < sizeof(s_hardware_baseline.fan_level_baseline) - 1 &&
+                           lv[i] != '\0' && lv[i] != '\n' && lv[i] != '\r' && lv[i] != ' ') {
+                        s_hardware_baseline.fan_level_baseline[i] = lv[i];
+                        ++i;
+                    }
+                    s_hardware_baseline.fan_level_baseline[i] = '\0';
+                    if (i == 0) std::strncpy(s_hardware_baseline.fan_level_baseline, "auto", 15);
+                }
+            }
+        }
+    }
+
+    int fd = hw_open_write("/proc/acpi/ibm/fan", O_WRONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+    char buf[48];
+    int len = std::snprintf(buf, sizeof(buf), "level %s\n", level);
+    ssize_t w = ::write(fd, buf, static_cast<size_t>(len));
+    ::close(fd);
+    if (w > 0) {
+        s_hardware_baseline.fan_level_modified = true;
+        return true;
+    }
+    return false;
+}
+
+bool MitigationEngine::restore_fan_level() noexcept {
+    if (!s_hardware_baseline.fan_level_modified) return true;
+    const char* lv = (s_hardware_baseline.fan_level_baseline[0] != '\0')
+                         ? s_hardware_baseline.fan_level_baseline
+                         : "auto";
+    int fd = hw_open_write("/proc/acpi/ibm/fan", O_WRONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+    char buf[48];
+    int len = std::snprintf(buf, sizeof(buf), "level %s\n", lv);
+    ssize_t w = ::write(fd, buf, static_cast<size_t>(len));
+    ::close(fd);
+    if (w > 0) {
+        s_hardware_baseline.fan_level_modified = false;
+        // The EC owns the fan again; forget the last written level so the curve
+        // re-applies on the next Performance/Balanced cycle even at the same
+        // temperature.
+        g_last_fan_level = -1;
+    }
+    return (w > 0);
+}
+
+// ---------------------------------------------------------------------------
+// REF-REQ-115: SMU thermal/power limits via ryzenadj (optional tool)
+// ---------------------------------------------------------------------------
+static const char* find_ryzenadj() noexcept {
+    static const char* cached = nullptr;
+    static bool checked = false;
+    if (checked) return cached;
+    checked = true;
+    const char* const candidates[] = {
+        "/usr/local/bin/ryzenadj",
+        "/usr/bin/ryzenadj",
+    };
+    for (const char* c : candidates) {
+        if (::access(c, X_OK) == 0) {
+            cached = c;
+            break;
+        }
+    }
+    return cached;
+}
+
+bool MitigationEngine::ryzenadj_available() noexcept {
+    return find_ryzenadj() != nullptr;
+}
+
+bool MitigationEngine::apply_smu_performance_limits() noexcept {
+    if (s_actuation_sandbox) return false;
+    const char* tool = find_ryzenadj();
+    if (tool == nullptr) return false;
+    // Refuse to raise a limit that could not be put back. If the bootstrap
+    // capture did not read real values (tool absent, or no permission to the SMU
+    // table), raising the ceiling would create exactly the orphaned-actuation
+    // state REF-REQ-112 had to repair for cpufreq. Leave the firmware alone.
+    if (s_hardware_baseline.smu_stapm_mw == 0 || s_hardware_baseline.smu_tctl_c == 0) {
+        return false;
+    }
+
+    char cmd[320];
+    std::snprintf(cmd, sizeof(cmd),
+                  "%s --tctl-temp=%u --stapm-limit=%u --fast-limit=%u --slow-limit=%u "
+                  "--apu-slow-limit=%u >/dev/null 2>&1",
+                  tool, SMU_TCTL_PERF_C, SMU_STAPM_PERF_MW, SMU_FAST_PERF_MW,
+                  SMU_SLOW_PERF_MW, SMU_SLOW_PERF_MW);
+    if (hw_system(cmd) != 0) return false;
+    s_hardware_baseline.smu_limits_modified = true;
+    return true;
+}
+
+bool MitigationEngine::restore_smu_limits() noexcept {
+    if (!s_hardware_baseline.smu_limits_modified) return true;
+    const char* tool = find_ryzenadj();
+    // Without the tool we cannot restore, but clearing the flag would hide that;
+    // keep it set so a later cycle with the tool present can still restore.
+    if (tool == nullptr) return false;
+    if (s_hardware_baseline.smu_stapm_mw == 0 || s_hardware_baseline.smu_tctl_c == 0) {
+        s_hardware_baseline.smu_limits_modified = false;
+        return false; // nothing captured to restore
+    }
+
+    const uint32_t apu_slow = (s_hardware_baseline.smu_apu_slow_mw != 0)
+                                  ? s_hardware_baseline.smu_apu_slow_mw
+                                  : s_hardware_baseline.smu_slow_mw;
+
+    // Restore only the fields that were actually captured, so an absent row can
+    // never be written back as a literal zero limit.
+    char cmd[320];
+    int n = std::snprintf(cmd, sizeof(cmd), "%s --tctl-temp=%u",
+                          tool, s_hardware_baseline.smu_tctl_c);
+    struct Field { const char* flag; uint32_t value; };
+    const Field fields[] = {
+        {" --stapm-limit=", s_hardware_baseline.smu_stapm_mw},
+        {" --fast-limit=", s_hardware_baseline.smu_fast_mw},
+        {" --slow-limit=", s_hardware_baseline.smu_slow_mw},
+        {" --apu-slow-limit=", apu_slow},
+    };
+    for (const auto& f : fields) {
+        if (f.value == 0 || n <= 0 || static_cast<size_t>(n) >= sizeof(cmd)) continue;
+        n += std::snprintf(cmd + n, sizeof(cmd) - static_cast<size_t>(n), "%s%u", f.flag, f.value);
+    }
+    if (n > 0 && static_cast<size_t>(n) < sizeof(cmd)) {
+        std::snprintf(cmd + n, sizeof(cmd) - static_cast<size_t>(n), " >/dev/null 2>&1");
+    }
+    if (hw_system(cmd) != 0) return false;
+    s_hardware_baseline.smu_limits_modified = false;
+    return true;
 }
 
 static bool execute_user_desktop_cmd(const char* cmd_body) noexcept;

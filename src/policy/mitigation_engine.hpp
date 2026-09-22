@@ -147,6 +147,24 @@ public:
         bool sched_migration_cost_modified{false};
         bool wifi_power_save_baseline{true};
         bool wifi_power_save_disabled{false};
+        // REF-REQ-114: ThinkPad fan level for the Performance unleash. The EC's
+        // automatic curve tops out around 4.3k RPM on this model; the fan can do
+        // ~5.4k, which is the headroom the raised thermal limit needs. The level
+        // is only touched when /proc/acpi/ibm/fan is writable (thinkpad_acpi
+        // fan_control=1); otherwise set_fan_level() is a no-op.
+        char fan_level_baseline[16]{"auto"};
+        bool fan_level_modified{false};
+        // REF-REQ-115: captured SMU limits from `ryzenadj -i` (0 = not captured /
+        // ryzenadj absent). Restored verbatim when the saving profiles resume.
+        // smu_tctl_c is in Celsius; the power fields are milliwatts. Each field
+        // is only restored when it was actually captured (non-zero), so an
+        // unrecognised column can never be written back as a guessed value.
+        uint32_t smu_stapm_mw{0};
+        uint32_t smu_fast_mw{0};
+        uint32_t smu_slow_mw{0};
+        uint32_t smu_apu_slow_mw{0};
+        uint32_t smu_tctl_c{0};
+        bool smu_limits_modified{false};
         // True while the full-silicon unleash is the *last* actuation applied.
         // Transition-path ordering invariant for REF-TEST-056: a profile switch
         // into Performance must leave this engaged, i.e. rollback_all() must run
@@ -206,6 +224,45 @@ public:
     static bool restore_gpu_max_clock() noexcept;
     static bool set_gpu_dpm_level(const char* level) noexcept;
     static bool set_smt_control(const char* state) noexcept;
+
+    // REF-REQ-114: ThinkPad thermal-assist fan curve. It is scoped to the two
+    // profiles that RAISE the SMU thermal limit (Performance and Balanced,
+    // REF-REQ-115). The EC's automatic curve on this model tops out around
+    // 4.3k RPM while the fan itself does ~5.4k, so under the raised ceiling the
+    // part would sit against a thermal limit with cooling headroom unused. The
+    // curve is linear between FAN_CURVE_MIN_TEMP_C (fraction
+    // FAN_CURVE_MIN_FRACTION) and FAN_FULL_TEMP_C (full speed); at or above
+    // FAN_FULL_TEMP_C the fan is pinned to full speed. Saving profiles keep the
+    // EC's own quiet curve, and release/exit restores the captured baseline.
+    // Levels are the thinkpad_acpi discrete steps 0..7. Writing needs
+    // thinkpad_acpi fan_control=1; without it the write is refused (no-op).
+    static constexpr double FAN_CURVE_MIN_TEMP_C = 35.0;
+    static constexpr double FAN_CURVE_MIN_FRACTION = 0.2;
+    static constexpr double FAN_FULL_TEMP_C = 70.0;
+    [[nodiscard]] static int fan_level_for_temp(double cpu_temp_c) noexcept;
+    static bool set_fan_level(const char* level) noexcept;
+    static bool restore_fan_level() noexcept;
+    // Applies the curve for one temperature reading. Returns the level in force
+    // (0..7) or -1 when the fan is not controllable / no reading. Writes only on
+    // a level change, so a steady temperature costs no sysfs write.
+    static int apply_fan_for_temp(double cpu_temp_c) noexcept;
+    // Number of times the curve was evaluated from the PRODUCTION entry point
+    // (FeatureManager::evaluate_and_actuate). Mirrors ceiling_assertion_count()
+    // so REF-TEST-073 can falsify a wiring that exists only under test.
+    [[nodiscard]] static uint64_t fan_curve_application_count() noexcept;
+
+    // REF-REQ-115: SMU thermal/power limits via ryzenadj. Performance and
+    // Balanced raise the core thermal limit to SMU_TCTL_PERF_C so throttling only
+    // starts there, with the fan at full speed keeping the part below it. Saving
+    // profiles and exit restore the captured baseline. ryzenadj is optional:
+    // when it is not on a system path these calls are no-ops.
+    static constexpr uint32_t SMU_TCTL_PERF_C = 85;
+    static constexpr uint32_t SMU_STAPM_PERF_MW = 25000;
+    static constexpr uint32_t SMU_FAST_PERF_MW = 35000;
+    static constexpr uint32_t SMU_SLOW_PERF_MW = 30000;
+    [[nodiscard]] static bool ryzenadj_available() noexcept;
+    static bool apply_smu_performance_limits() noexcept;
+    static bool restore_smu_limits() noexcept;
     static bool set_bluetooth_blocked(bool block) noexcept;
     static bool cap_display_backlight(double max_pct) noexcept;
     static bool restore_display_backlight() noexcept;

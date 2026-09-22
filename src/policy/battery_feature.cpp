@@ -437,6 +437,15 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
             s_freq_starved_streak = 0;
             s_freq_starved_logged = false;
         }
+
+        // REF-REQ-114: thermal-assist fan curve for the raised SMU ceiling. The
+        // EC's automatic curve on this model tops out around 4.3k RPM while the
+        // fan can do ~5.4k, so under the 85 C limit of REF-REQ-115 the part would
+        // sit against its thermal limit with cooling headroom unused. This runs
+        // every cycle - the curve must track temperature, and apply_power_profile
+        // only runs on a profile TRANSITION - while apply_fan_for_temp() writes
+        // only when the level changes. Saving profiles keep the EC's quiet curve.
+        (void)MitigationEngine::apply_fan_for_temp(report.hardware.cpu_temp_c);
     }
 
     // REF-REQ-102: A profile change releases everything the previous profile

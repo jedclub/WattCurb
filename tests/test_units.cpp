@@ -4550,6 +4550,90 @@ void test_frequency_starvation_watchdog() {
               << "loaded-low trips, loaded-boost/idle clean, degenerate safe)\n";
 }
 
+// Implements REF-TEST-073 & REF-REQ-114/REF-REQ-115: the ThinkPad thermal-assist
+// fan curve and the SMU thermal/power limit raise.
+//
+// Two risks are falsified here without touching the machine:
+//   1. The curve itself - a mapping that over-cools at idle or under-cools at the
+//      limit would be a silent power/noise regression. It is pure, so every
+//      branch is exercised on synthetic temperatures.
+//   2. The wiring - the curve must run from the PRODUCTION entry point
+//      (FeatureManager::evaluate_and_actuate), in the two raised-SMU profiles
+//      (Performance, Balanced) only, and must NOT run in the saving profiles.
+//      The application counter makes a test-only wiring visible, mirroring the
+//      lesson of REF-TEST-068.
+void test_thinkpad_fan_thermal_assist_and_smu_limits() {
+    using namespace wattcurb;
+
+    std::cout << "--- [REF-TEST-073] ThinkPad Thermal-Assist Fan Curve & SMU Limits ---\n";
+
+    const bool prev_sandbox = policy::MitigationEngine::actuation_sandboxed();
+    policy::MitigationEngine::set_actuation_sandbox(true);
+
+    // --- 1. Pure curve mapping -------------------------------------------
+    assert(policy::MitigationEngine::fan_level_for_temp(0.0) == -1); // no reading
+    assert(policy::MitigationEngine::fan_level_for_temp(-5.0) == -1);
+    assert(policy::MitigationEngine::fan_level_for_temp(20.0) == 1); // below floor -> 1
+    assert(policy::MitigationEngine::fan_level_for_temp(35.0) == 1); // floor
+    assert(policy::MitigationEngine::fan_level_for_temp(70.0) == 7); // full speed
+    assert(policy::MitigationEngine::fan_level_for_temp(95.0) == 7);
+
+    int prev = 0;
+    for (int t = 1; t <= 120; ++t) {
+        const int lvl = policy::MitigationEngine::fan_level_for_temp(static_cast<double>(t));
+        assert(lvl >= 1 && lvl <= 7); // always a valid discrete step
+        assert(lvl >= prev);          // monotonic non-decreasing
+        prev = lvl;
+    }
+    // Half-way (52.5 C) the linear curve is at fraction 0.6 -> level 4.
+    assert(policy::MitigationEngine::fan_level_for_temp(52.5) == 4);
+
+    // --- 2. Sandboxed writes are refused, never actuated -----------------
+    assert(!policy::MitigationEngine::set_fan_level("3"));
+    assert(!policy::MitigationEngine::hardware_baseline().fan_level_modified);
+    assert(policy::MitigationEngine::restore_fan_level()); // no-op success
+
+    // --- 3. SMU constants are coherent; the raise is sandboxed -----------
+    assert(policy::MitigationEngine::SMU_TCTL_PERF_C == 85);
+    assert(policy::MitigationEngine::SMU_STAPM_PERF_MW <=
+           policy::MitigationEngine::SMU_SLOW_PERF_MW);
+    assert(policy::MitigationEngine::SMU_SLOW_PERF_MW <=
+           policy::MitigationEngine::SMU_FAST_PERF_MW);
+    assert(!policy::MitigationEngine::apply_smu_performance_limits()); // sandboxed no-op
+    assert(!policy::MitigationEngine::hardware_baseline().smu_limits_modified);
+
+    // --- 4. Production wiring: Performance and Balanced only -------------
+    {
+        policy::FeatureManager mgr;
+        mgr.set_override_profile(PowerProfileMode::Performance);
+        AnalysisReportData rpt{};
+        rpt.hardware.cpu_temp_c = 65.0;
+        const uint64_t before = policy::MitigationEngine::fan_curve_application_count();
+        mgr.evaluate_and_actuate(rpt, /*on_battery=*/false, /*battery_pct=*/80.0);
+        const uint64_t after = policy::MitigationEngine::fan_curve_application_count();
+        assert(after > before &&
+               "REF-REQ-114: the production path must evaluate the fan curve in Performance");
+    }
+    {
+        // A saving profile must leave the fan to the EC: the same report and a
+        // battery state that resolve to PowerSaver must not evaluate the curve.
+        policy::FeatureManager mgr;
+        AnalysisReportData rpt{};
+        rpt.hardware.cpu_temp_c = 65.0;
+        const uint64_t before = policy::MitigationEngine::fan_curve_application_count();
+        const auto st = mgr.evaluate_and_actuate(rpt, /*on_battery=*/true, /*battery_pct=*/15.0);
+        const uint64_t after = policy::MitigationEngine::fan_curve_application_count();
+        assert(st.current_profile == PowerProfileMode::PowerSaver);
+        assert(after == before &&
+               "REF-REQ-114: saving profiles must not override the EC fan curve");
+    }
+
+    policy::MitigationEngine::set_actuation_sandbox(prev_sandbox);
+    std::cout << " [PASS] test_thinkpad_fan_thermal_assist_and_smu_limits (REF-TEST-073: "
+                 "curve monotonic/sandboxed, SMU constants ordered, production wiring "
+                 "Performance-only)\n";
+}
+
 // Implements REF-TEST-069 & REF-REQ-112: the memory pressure ladder.
 //
 // The risk this change introduces is acting on the wrong process, or acting at
@@ -5609,6 +5693,7 @@ int main() {
     test::test_audit_defect_remediation();
     test::test_cpu_ceiling_baseline_is_hardware_max();
     test::test_frequency_starvation_watchdog();
+    test::test_thinkpad_fan_thermal_assist_and_smu_limits();
     test::test_memory_pressure_ladder();
     test::test_memory_pressure_parsers();
     test::test_performance_swap_expansion_policy();
