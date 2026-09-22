@@ -99,7 +99,7 @@ bool WindowAwareGovernor::engage_active_window(int32_t pid, const char* comm) no
     if (m_active_snapshot.is_guarantee_active) {
         if (m_active_snapshot.pid == pid) {
             // Already active, re-affirm PM QoS lock
-            m_pm_qos.pin_c0_latency(0);
+            if (!MitigationEngine::actuation_sandboxed()) m_pm_qos.pin_c0_latency(0);
             return true;
         }
         // Focus changed: release previous window
@@ -136,23 +136,29 @@ bool WindowAwareGovernor::engage_active_window(int32_t pid, const char* comm) no
     m_active_snapshot.has_original_state = (aff_ret == 0);
     m_active_snapshot.is_guarantee_active = true;
 
+    // REF-REQ-092: the raw syscalls below deliberately bypass the
+    // MitigationEngine wrappers, so the sandbox must be consulted explicitly.
+    // The test suite and sandboxed CLI runs get the bookkeeping and the log
+    // line, but must not renice, pin or PM-QoS-clamp a live process.
+    const bool actuate = !MitigationEngine::actuation_sandboxed();
+
     // 2. Actuate CFS priority elevation (nice -10 for instantaneous preemption)
-    ::setpriority(PRIO_PROCESS, static_cast<id_t>(pid), -10);
+    if (actuate) ::setpriority(PRIO_PROCESS, static_cast<id_t>(pid), -10);
 
     // 3. Actuate Spatial Core Pinning to Cluster 1 (C1: Cores 0..7 or Headroom 0..3)
     cpu_set_t c1_mask = MitigationEngine::get_c1_cpuset();
-    ::sched_setaffinity(pid, sizeof(c1_mask), &c1_mask);
+    if (actuate) ::sched_setaffinity(pid, sizeof(c1_mask), &c1_mask);
 
     // 4. Actuate precision timer slack (10µs for zero-stutter frame delivery)
-    MitigationEngine::apply_timer_slack(pid, 10'000ULL);
+    if (actuate) MitigationEngine::apply_timer_slack(pid, 10'000ULL);
 
     // 5. Actuate Block I/O priority: Best-Effort Priority 0
 #if defined(SYS_ioprio_set)
-    ::syscall(SYS_ioprio_set, 1 /* IOPRIO_WHO_PROCESS */, pid, (2 << 13) | 0 /* BE class, prio 0 */);
+    if (actuate) ::syscall(SYS_ioprio_set, 1 /* IOPRIO_WHO_PROCESS */, pid, (2 << 13) | 0 /* BE class, prio 0 */);
 #endif
 
     // 6. Actuate PM QoS C0 Latency Pinning (/dev/cpu_dma_latency -> 0µs exit latency)
-    m_pm_qos.pin_c0_latency(0);
+    if (actuate) m_pm_qos.pin_c0_latency(0);
 
     // 7. Ensure uninhibited state if previously tracked
     unthrottle_immediate(pid);
@@ -166,19 +172,26 @@ void WindowAwareGovernor::release_active_window() noexcept {
     if (!m_active_snapshot.is_guarantee_active) return;
 
     if (m_active_snapshot.has_original_state && m_active_snapshot.pid > 1) {
+        // REF-REQ-092: nothing was applied under the sandbox, so nothing may be
+        // written back either - a restore of a value we never changed would
+        // still be a live syscall.
+        const bool actuate = !MitigationEngine::actuation_sandboxed();
+
         // 1. Restore baseline nice
-        ::setpriority(PRIO_PROCESS, static_cast<id_t>(m_active_snapshot.pid), m_active_snapshot.original_nice);
+        if (actuate) ::setpriority(PRIO_PROCESS, static_cast<id_t>(m_active_snapshot.pid), m_active_snapshot.original_nice);
 
         // 2. Restore baseline scheduler policy
-        struct sched_param sp{};
-        sp.sched_priority = 0;
-        ::sched_setscheduler(m_active_snapshot.pid, m_active_snapshot.original_sched_policy, &sp);
+        if (actuate) {
+            struct sched_param sp{};
+            sp.sched_priority = 0;
+            ::sched_setscheduler(m_active_snapshot.pid, m_active_snapshot.original_sched_policy, &sp);
+        }
 
         // 3. Restore baseline core affinity
-        ::sched_setaffinity(m_active_snapshot.pid, sizeof(cpu_set_t), &m_active_snapshot.original_affinity);
+        if (actuate) ::sched_setaffinity(m_active_snapshot.pid, sizeof(cpu_set_t), &m_active_snapshot.original_affinity);
 
         // 4. Restore baseline timer slack
-        MitigationEngine::apply_timer_slack(m_active_snapshot.pid, m_active_snapshot.original_timerslack_ns);
+        if (actuate) MitigationEngine::apply_timer_slack(m_active_snapshot.pid, m_active_snapshot.original_timerslack_ns);
     }
 
     // 5. Close PM QoS file descriptor -> Kernel automatically restores C2/C3/C6 deep C-states

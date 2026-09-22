@@ -2179,6 +2179,13 @@ void test_active_window_resource_guarantee_and_c0_qos() {
 
     std::cout << "--- [REF-TEST-049] KDE Active Window Resource Guarantee & PM QoS C0 Pinning Verification ---\n";
 
+    // REF-REQ-092: this test verifies REAL actuation, but only against a
+    // forked child process and a mock PM QoS character device - never the
+    // developer's session. The process-wide actuation sandbox engaged by main()
+    // is therefore lifted for the duration and restored before returning.
+    const bool prev_sandbox_049 = MitigationEngine::actuation_sandboxed();
+    MitigationEngine::set_actuation_sandbox(false);
+
     // 1. PM QoS Controller Unit Verification via mock character device
     const char* mock_qos_path = "/tmp/wattcurb_mock_cpu_dma_latency";
     int mfd = ::open(mock_qos_path, O_CREAT | O_WRONLY | O_TRUNC, 0666);
@@ -2302,6 +2309,9 @@ void test_active_window_resource_guarantee_and_c0_qos() {
     ::waitpid(child, nullptr, 0);
     ::unlink(mock_qos_path);
     PmQosController::reset_device_path();
+
+    // Restore the process-wide sandbox for the remaining suites (REF-REQ-092).
+    MitigationEngine::set_actuation_sandbox(prev_sandbox_049);
 
     std::cout << " [PASS] test_active_window_resource_guarantee_and_c0_qos (REF-TEST-049: C0 Pinning, C1 Spatial Affinity, "
               << avg_us_op << " us/op)\n";

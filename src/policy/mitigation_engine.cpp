@@ -55,8 +55,15 @@ static MitigationEngine::HardwareBaselineState s_hardware_baseline{};
 //
 // Production default is OFF; the branch is a single predictable load on a
 // syscall-bound path, never on the monitoring hot loop.
-// ---------------------------------------------------------------------------
-static bool s_actuation_sandbox = false;
+//
+// REF-REQ-092: a non-interactive CLI run (the PGO training workloads in
+// scripts/build_pgo.sh, CI, benchmarking) must also be able to guarantee it
+// never touches live hardware. WATTCURB_ACTUATION_SANDBOX=1 engages the sandbox
+// at startup so those runs have no path to /sys, /proc/sys or another process.
+static bool s_actuation_sandbox = []() noexcept {
+    const char* env = ::getenv("WATTCURB_ACTUATION_SANDBOX");
+    return env != nullptr && env[0] != '\0' && env[0] != '0';
+}();
 
 // REF-REQ-096: Last observed PCM playback state, refreshed once per cycle.
 static MitigationEngine::AudioStreamState s_audio_state{};
@@ -2758,6 +2765,39 @@ struct DesktopSession {
     bool  valid{false};
 };
 
+// REF-REQ-071 privilege-path audit: WAYLAND_DISPLAY and XDG_RUNTIME_DIR are
+// interpolated into a /bin/sh command line that this root daemon executes. A
+// user owns their /run/user/<uid> directory, so the compositor socket name is
+// attacker-controlled: a file named "wayland-0;chmod 4755 /bin/bash;#" would
+// otherwise be handed verbatim to a root shell and run as root. Accept only the
+// characters a real Wayland socket component uses.
+[[nodiscard]] static bool is_shell_safe_component(const char* s) noexcept {
+    if (!s || *s == '\0') return false;
+    for (const unsigned char* p = reinterpret_cast<const unsigned char*>(s); *p; ++p) {
+        const unsigned char c = *p;
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-') {
+            continue;
+        }
+        return false;
+    }
+    return true;
+}
+
+// XDG_RUNTIME_DIR must be exactly /run/user/<digits>, never a path that could
+// escape /run/user or smuggle shell syntax into the command line.
+[[nodiscard]] static bool is_run_user_dir(const char* s) noexcept {
+    constexpr char prefix[] = "/run/user/";
+    constexpr size_t plen = sizeof(prefix) - 1;
+    if (!s || std::strncmp(s, prefix, plen) != 0) return false;
+    const char* d = s + plen;
+    if (*d == '\0') return false;
+    for (; *d; ++d) {
+        if (*d < '0' || *d > '9') return false;
+    }
+    return true;
+}
+
 static DesktopSession detect_desktop_session() noexcept {
     DesktopSession best{};
     DesktopSession fallback{};
@@ -2768,6 +2808,17 @@ static DesktopSession detect_desktop_session() noexcept {
     struct dirent* entry = nullptr;
     while ((entry = ::readdir(dir)) != nullptr) {
         if (entry->d_name[0] < '0' || entry->d_name[0] > '9') continue;
+
+        // The directory name becomes a shell word below; accept digits only so
+        // a crafted entry such as "1000;id" cannot survive into the command.
+        bool digits_only = true;
+        for (const char* d = entry->d_name; *d; ++d) {
+            if (*d < '0' || *d > '9') {
+                digits_only = false;
+                break;
+            }
+        }
+        if (!digits_only) continue;
 
         DesktopSession cand{};
         int n = std::snprintf(cand.runtime_dir, sizeof(cand.runtime_dir), "/run/user/%s", entry->d_name);
@@ -2791,6 +2842,7 @@ static DesktopSession detect_desktop_session() noexcept {
         while ((sock = ::readdir(rt)) != nullptr) {
             if (std::strncmp(sock->d_name, "wayland-", 8) != 0) continue;
             if (std::strstr(sock->d_name, ".lock") != nullptr) continue;
+            if (!is_shell_safe_component(sock->d_name)) continue;
             std::strncpy(cand.wayland_display, sock->d_name, sizeof(cand.wayland_display) - 1);
             cand.wayland_display[sizeof(cand.wayland_display) - 1] = '\0';
             has_compositor = true;
@@ -2823,6 +2875,12 @@ static bool execute_user_desktop_cmd(const char* cmd_body) noexcept {
 
     const DesktopSession session = detect_desktop_session();
     if (!session.valid) return false;
+
+    // Defense in depth: even if detection changes, nothing reaches the shell
+    // that is not a plain Wayland socket name or a /run/user/<digits> path.
+    if (!is_shell_safe_component(session.wayland_display) || !is_run_user_dir(session.runtime_dir)) {
+        return false;
+    }
 
     char cmd[512];
     int n;
