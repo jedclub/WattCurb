@@ -50,9 +50,13 @@ def ninja_jobs():
     v = os.environ.get("WATTCURB_JOBS") or os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL")
     if v and v.isdigit() and int(v) > 0:
         return ["-j", v]
-    # Half the CPU count: the build shares the machine with whatever else the
-    # developer is running.
-    return ["-j", str(max(1, (os.cpu_count() or 2) // 2))]
+    # Half the CPUs available to this process. os.cpu_count() reports the SMT
+    # total and ignores affinity, so use sched_getaffinity to match `nproc`.
+    try:
+        cpus = len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        cpus = os.cpu_count() or 2
+    return ["-j", str(max(1, cpus // 2))]
 
 
 def cmd_build(args):
