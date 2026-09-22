@@ -39,6 +39,10 @@ ProcessClassification ProcessClassifierDB::classify(std::string_view comm) noexc
         comm == "foot" || comm == "kitty" || comm == "alacritty" ||
         comm == "konsole" || comm == "wezterm" || comm == "gnome-terminal" ||
         comm == "ptyxis" || comm == "xterm" || comm == "rxvt" ||
+        // REF-REQ-117: kmscon is a kernel-console terminal emulator and an input
+        // sink in its own right. It was previously unlisted, so it fell to Tier 5
+        // (RunawayCandidate) and was put on SCHED_IDLE - typing into it stalled.
+        comm == "kmscon" ||
         comm == "bash" || comm == "zsh" || comm == "fish" ||
         comm == "tmux" || comm == "screen" || comm == "ssh" ||
         comm == "opencode" || comm == "agy" || comm == "code" ||
@@ -84,11 +88,30 @@ ProcessClassification ProcessClassifierDB::classify(std::string_view comm) noexc
     }
 
     // 5. Tier 3: Heavy User Interactive Applications (USER_INTERACTIVE)
+    // REF-REQ-117: this allowlist is matched against /proc/<pid>/comm, which the
+    // kernel truncates to 15 bytes. A desktop application not listed here falls
+    // through to Tier 5 (RunawayCandidate, default action SCHED_IDLE), and every
+    // one of its threads - including the renderer and GPU process that carry its
+    // input and paint path - becomes eligible for SCHED_IDLE and the
+    // anti-starvation cap. That is how typing and scrolling into the ChatGPT/
+    // Codex desktop app stalled while the machine was in Balanced.
+    //
+    // Electron/Chromium-family apps spawn several processes whose thread names
+    // differ from the launcher's ("MainThread", "ThreadPoolForegound", ...), so
+    // matching only the launcher name is not enough to protect the app. Known
+    // launchers are listed explicitly; unrecognised processes that nevertheless
+    // belong to a user app tree are protected by parent-tree exemption in
+    // FeatureManager::evaluate_and_actuate() (REF-REQ-117.3).
     if (comm == "chrome" || comm == "firefox" || comm == "zen-browser" ||
         comm == "brave" || comm == "edge" || comm == "chromium" ||
         comm == "claude" || comm == "clion" || comm == "pycharm" ||
         comm == "slack" || comm == "discord" || comm == "telegram-deskto" ||
-        comm == "teams" || comm == "spotify" || comm == "steam" || comm == "obs") {
+        comm == "teams" || comm == "spotify" || comm == "steam" || comm == "obs" ||
+        comm == "ChatGPT" || comm == "codex" || comm == "code" ||
+        comm == "electron" || comm == "MainThread" || comm == "vscode" ||
+        comm == "code-insiders" || comm == "anki" || comm == "signal-desktop" ||
+        comm == "element" || comm == "mattermost" || comm == "zulip" ||
+        comm == "notion" || comm == "obsidian" || comm == "kdeconnectd") {
         return ProcessClassification{
             .tier = ProcessSafetyTier::UserInteractive,
             .default_action = MitigationAction::RelaxTimerSlack,

@@ -1,5 +1,6 @@
 #include "policy/battery_feature.hpp"
 #include "policy/memory_pressure_guard.hpp"
+#include "policy/process_classifier.hpp"
 #include "core/posix_fs.hpp"
 #include "policy/mitigation_engine.hpp"
 #include "core/event_logger.hpp"
@@ -232,7 +233,79 @@ bool same_process(int32_t pid, uint64_t recorded_ticks) noexcept {
     return read_proc_start_ticks(pid) == recorded_ticks;
 }
 
+// REF-REQ-117 (DEF-1): parent pid from field 4 of /proc/<pid>/stat, parsed after
+// the ')' that closes comm for the same reason as the start ticks above.
+int32_t read_proc_ppid(int32_t pid) noexcept {
+    if (pid <= 1) return 0;
+    char path[64];
+    std::snprintf(path, sizeof(path), "/proc/%d/stat", pid);
+    char buf[512];
+    size_t n = 0;
+    if (!core::fs::read_small_file(path, buf, sizeof(buf), &n) || n == 0) return 0;
+    buf[n < sizeof(buf) ? n : sizeof(buf) - 1] = '\0';
+
+    const char* p = std::strrchr(buf, ')');
+    if (p == nullptr) return 0;
+    ++p; // at the space before state
+
+    // Skip state(3), then ppid(4) is the next token.
+    while (*p == ' ') ++p;
+    while (*p != ' ' && *p != '\0') ++p; // consume state
+    while (*p == ' ') ++p;
+    if (*p == '\0') return 0;
+    const long ppid = std::strtol(p, nullptr, 10);
+    return (ppid > 1 && ppid < INT32_MAX) ? static_cast<int32_t>(ppid) : 0;
+}
+
 } // namespace
+
+// REF-REQ-117 (DEF-3): a process belongs to a user desktop application when its
+// ancestry reaches a session/desktop ancestor before it reaches init. This is the
+// fallback the allowlist cannot provide: an Electron app spawns renderer, GPU and
+// utility processes whose thread names ("MainThread", "ThreadPoolForegound", ...)
+// are not in any name list, yet they carry the app's input and paint path. The
+// daemon cannot learn the focused window (KWin's queryWindowInfo is an
+// interactive, user-click API and Wayland exposes no focus protocol), so the app
+// TREE is the self-contained signal it can actually observe.
+//
+// The walk is bounded and reads only /proc. It deliberately stops at any
+// background-worker ancestor so an indexer's children are NOT protected by
+// virtue of having been launched from a shell.
+bool FeatureManager::is_user_app_tree(int32_t pid) noexcept {
+    if (pid <= 1) return false;
+    constexpr int MAX_DEPTH = 8;
+    int32_t cur = pid;
+    for (int depth = 0; depth < MAX_DEPTH; ++depth) {
+        const int32_t ppid = read_proc_ppid(cur);
+        if (ppid <= 1) return false;
+
+        char comm_path[64];
+        std::snprintf(comm_path, sizeof(comm_path), "/proc/%d/comm", ppid);
+        char comm_buf[64]{};
+        size_t n = 0;
+        if (!core::fs::read_small_file(comm_path, comm_buf, sizeof(comm_buf) - 1, &n) || n == 0) {
+            return false;
+        }
+        comm_buf[n] = '\0';
+        while (n > 0 && (comm_buf[n - 1] == '\n' || comm_buf[n - 1] == '\r')) comm_buf[--n] = '\0';
+        const std::string_view comm(comm_buf, n);
+
+        // A background worker's descendants are background work, not an app.
+        const auto cls = ProcessClassifierDB::classify(comm);
+        if (cls.tier == ProcessSafetyTier::BackgroundWorker ||
+            cls.tier == ProcessSafetyTier::RunawayCandidate) {
+            return false;
+        }
+        // Reaching a user-app ancestor means everything under it is that app.
+        if (cls.tier == ProcessSafetyTier::UserInteractive) {
+            return true;
+        }
+        // init(1)/systemd is the stopping point; its direct children are not apps.
+        if (comm == "systemd" || comm == "init") return false;
+        cur = ppid;
+    }
+    return false;
+}
 
 bool FeatureManager::actuate_anti_starvation_cap(int32_t pid, PowerProfileMode mode, const char* comm) noexcept {
     // REF-REQ-104: Performance mode applies NO process throttling at all.
@@ -497,6 +570,18 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
         if (proc.pid <= 1) continue;
 
         auto tier = static_cast<ProcessSafetyTier>(proc.safety_tier);
+
+        // REF-REQ-117 (DEF-2): a Tier 3 (UserInteractive) application is a user
+        // input consumer. Putting any of its threads on SCHED_IDLE, raising its
+        // nice, or masking its CPUs adds latency directly to typing and scrolling,
+        // and a "memory reclaim" on a renderer costs it its page cache. The
+        // allowlist in ProcessClassifierDB is matched on comm, which for an
+        // Electron app covers only some of its processes, so the ancestry check
+        // closes the gap. Performance mode already imposes nothing (REF-REQ-104);
+        // this makes Balanced/PowerSaver equally hands-off for user apps.
+        if (tier == ProcessSafetyTier::UserInteractive || is_user_app_tree(proc.pid)) {
+            continue;
+        }
 
         // Strict Immunity for Tier 0 (CriticalImmune) & Proactive Latency Shield for Tier 1 (DesktopCore)
         if (tier == ProcessSafetyTier::DesktopCore) {

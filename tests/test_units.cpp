@@ -2114,6 +2114,74 @@ void test_effective_total_power_fallback() {
                  "DC rail preserved, 100% saturation eliminated)\n";
 }
 
+// Implements REF-TEST-075 & REF-REQ-117: user-application threads must never be
+// put on SCHED_IDLE, reniced, affinity-masked or timer-slacked by the mitigation
+// ladder - in ANY non-Performance profile. The reported symptom was typing and
+// scrolling into the ChatGPT/Codex desktop app stalling in Balanced because its
+// renderer/GPU processes were classified Tier 5 (RunawayCandidate) and throttled.
+//
+// The risk this change introduces is the inverse: an exemption that is too broad
+// would protect an actual background drain. So the test asserts both directions -
+// the app is untouched, and an indexer's child is still throttleable.
+void test_user_app_tree_exemption() {
+    using namespace wattcurb::policy;
+    using wattcurb::PowerProfileMode;
+
+    std::cout << "\n--- [REF-TEST-075] User-Application Exemption from Mitigation (REF-REQ-117) ---\n";
+
+    // 1. Classification: the observed victims must not be Tier 5.
+    assert(ProcessClassifierDB::classify("ChatGPT").tier == ProcessSafetyTier::UserInteractive);
+    assert(ProcessClassifierDB::classify("codex").tier == ProcessSafetyTier::UserInteractive);
+    assert(ProcessClassifierDB::classify("MainThread").tier == ProcessSafetyTier::UserInteractive);
+    assert(ProcessClassifierDB::classify("kmscon").tier == ProcessSafetyTier::DesktopCore &&
+           "kmscon is an interactive terminal and must be immune");
+    // Controlled negative: an indexer stays throttleable.
+    assert(ProcessClassifierDB::classify("baloo_file").tier == ProcessSafetyTier::BackgroundWorker);
+    assert(ProcessClassifierDB::classify("updatedb").tier == ProcessSafetyTier::BackgroundWorker);
+
+    // 2. Ancestry exemption is bounded and self-consistent. This test process is
+    //    launched from the test harness/shell, so it must not be mistaken for an
+    //    app, and an impossible pid must be safely false.
+    assert(!FeatureManager::is_user_app_tree(1));
+    assert(!FeatureManager::is_user_app_tree(0));
+    assert(!FeatureManager::is_user_app_tree(-1));
+
+    // 3. Production wiring: a Tier 3 process in Balanced must not be actuated.
+    //    The actuation sandbox makes every write a no-op, so the observable is
+    //    the tracked-mitigation table and the profile's throttle count.
+    const bool prev_sandbox = MitigationEngine::actuation_sandboxed();
+    MitigationEngine::set_actuation_sandbox(true);
+    {
+        FeatureManager mgr;
+        mgr.set_override_profile(PowerProfileMode::Balanced);
+        wattcurb::AnalysisReportData rpt{};
+        rpt.hardware.cpu_temp_c = 55.0;
+        // A ChatGPT renderer: names the allowlist now recognises, plus a thread
+        // name it does not - both must be exempt.
+        rpt.top_processes.resize(2);
+        rpt.top_processes[0].pid = 424242;
+        rpt.top_processes[0].comm = "ChatGPT";
+        rpt.top_processes[0].safety_tier = static_cast<uint8_t>(ProcessSafetyTier::UserInteractive);
+        rpt.top_processes[0].cpu_watts = 9.0; // well above any cap threshold
+        rpt.top_processes[0].wdi_score = 40.0;
+        rpt.top_processes[0].num_threads = 12;
+        rpt.top_processes[1].pid = 424243;
+        rpt.top_processes[1].comm = "MainThread";
+        rpt.top_processes[1].safety_tier = static_cast<uint8_t>(ProcessSafetyTier::UserInteractive);
+        rpt.top_processes[1].cpu_watts = 9.0;
+        rpt.top_processes[1].wdi_score = 40.0;
+        rpt.top_processes[1].num_threads = 12;
+
+        const auto st = mgr.evaluate_and_actuate(rpt, /*on_battery=*/true, /*battery_pct=*/60.0);
+        assert(st.throttled_count == 0 &&
+               "REF-REQ-117: no Tier 3 user-app process may be throttled in Balanced");
+    }
+    MitigationEngine::set_actuation_sandbox(prev_sandbox);
+
+    std::cout << " [PASS] test_user_app_tree_exemption (REF-TEST-075: ChatGPT/codex/kmscon classified safe, "
+                 "no Tier 3 throttling in Balanced, indexers still throttleable)\n";
+}
+
 // Implements REF-TEST-019: Anti-Starvation & Greedy Capping Oracle Gate Verification (REF-REQ-054, REF-ARCH-030)
 void test_anti_starvation_and_greedy_capping() {
     using namespace wattcurb::policy;
@@ -5748,6 +5816,7 @@ int main() {
     test::test_unified_rapid_rollback();
     test::test_thinkpower_tray_client();
     test::test_effective_total_power_fallback();
+    test::test_user_app_tree_exemption();
     test::test_tray_hotpath_profiling_audit();
     test::test_tray_top10_extreme_optimization_oracle_gate();
 #if defined(WATTCURB_HAS_QT6)

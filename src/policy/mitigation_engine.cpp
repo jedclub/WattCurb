@@ -1,5 +1,7 @@
 #include "policy/mitigation_engine.hpp"
 #include "policy/memory_pressure_guard.hpp"
+#include "policy/process_classifier.hpp"
+#include "policy/battery_feature.hpp"
 #include "core/posix_fs.hpp"
 #include "core/scoped_profiler.hpp"
 #include "core/event_logger.hpp"
@@ -3937,6 +3939,15 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
 
         // Tier 0 (CriticalImmune) is strictly untouchable! (REF-REQ-031 Sec 3.1)
         if (tier == ProcessSafetyTier::CriticalImmune) {
+            continue;
+        }
+
+        // REF-REQ-117 (DEF-2): Tier 3 user applications are input consumers. This
+        // path (MitigationEngine::evaluate_and_actuate) is not the daemon's, but
+        // the same rule must hold wherever mitigation is decided, or the two
+        // ladders disagree about who may be throttled. See FeatureManager for the
+        // full rationale and the ancestry fallback for Electron subprocesses.
+        if (tier == ProcessSafetyTier::UserInteractive || FeatureManager::is_user_app_tree(proc.pid)) {
             continue;
         }
 

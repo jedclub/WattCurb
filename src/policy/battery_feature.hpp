@@ -70,6 +70,11 @@ public:
         double battery_pct
     ) noexcept;
 
+    // REF-REQ-117 (DEF-3): true when the process's ancestry reaches a user
+    // desktop application before init. Protects Electron/Chromium subprocesses
+    // whose thread names are not in any allowlist.
+    [[nodiscard]] static bool is_user_app_tree(int32_t pid) noexcept;
+
     // Individual Feature Actuation Primitives
     static bool actuate_sched_idle(int32_t pid) noexcept;
     static bool actuate_timer_slack(int32_t pid, uint64_t slack_ns) noexcept;
