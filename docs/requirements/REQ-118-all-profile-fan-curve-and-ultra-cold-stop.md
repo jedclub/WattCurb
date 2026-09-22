@@ -34,6 +34,12 @@ thermal reason.
 - **REQ-118.2 (Common mapping)** The mapping shall be:
   - `>= 70 C` → level **7** (full speed)
   - `35 C .. 70 C` → linear, **20 % .. 100 %**, mapped onto steps `1..7`
+
+> **Revised by [REF-REQ-124](REQ-124-fan-curve-60c-full-speed.md) (2026-09-22):**
+> the full-speed threshold is now **60 C** and the ramp spans **60 C -> 35 C**.
+> 70 C is the firmware's Tctl ceiling (REF-REQ-123), so reaching full fan only
+> there left no margin before throttling. The UltraEndurance cold stop at <= 45 C
+> is unchanged.
   - `<= 35 C` → level **1** (20 %; never 0 by the common rule)
   - no reading (non-positive) → no write, report `-1`
 - **REQ-118.3 (UltraEndurance cold stop)** In `UltraEndurance` only, at or below
@@ -52,7 +58,7 @@ thermal reason.
 | Profile-aware mapping | `MitigationEngine::fan_level_for_temp_in_profile()` |
 | Common mapping | `MitigationEngine::fan_level_for_temp()` |
 | Cycle driver | `FeatureManager::evaluate_and_actuate()` (`src/policy/battery_feature.cpp`) |
-| Constants | `FAN_CURVE_MIN_TEMP_C=35`, `FAN_CURVE_MIN_FRACTION=0.2`, `FAN_FULL_TEMP_C=70`, `FAN_ULTRA_STOP_TEMP_C=45` |
+| Constants | `FAN_CURVE_MIN_TEMP_C=35`, `FAN_CURVE_MIN_FRACTION=0.2`, `FAN_FULL_TEMP_C=60` (was 70, REF-REQ-124), `FAN_ULTRA_STOP_TEMP_C=45` |
 
 The call was moved out of the `Performance || Balanced` block so it runs before
 that branch, once per observation cycle, for all four profiles.
@@ -81,7 +87,7 @@ authority and may reduce a requested level under its own thermal policy.
 
 Extended in `test_thinkpad_fan_thermal_assist_and_smu_limits()`:
 
-1. `>= 70 C` is level 7 in **all four** profiles;
+1. `>= 60 C` is level 7 in **all four** profiles (REF-REQ-124.1);
 2. no reading is `-1` in all four;
 3. the 35 C floor is level 1 in `Performance`/`Balanced`/`PowerSaver`;
 4. `UltraEndurance` at 30 C, 35 C and 45 C is level 0, and above the threshold it

@@ -225,9 +225,9 @@ public:
     static bool set_gpu_dpm_level(const char* level) noexcept;
     static bool set_smt_control(const char* state) noexcept;
 
-    // REF-REQ-114 / REF-REQ-118: ThinkPad fan curve. It applies in ALL power
-    // profiles - it is a thermal-safety mapping, not a performance perk:
-    //   * at or above FAN_FULL_TEMP_C (70 C)      -> level 7 (full speed)
+    // REF-REQ-114 / REF-REQ-118 / REF-REQ-124: ThinkPad fan curve. It applies in
+    // ALL power profiles - it is a thermal-safety mapping, not a performance perk:
+    //   * at or above FAN_FULL_TEMP_C (60 C)      -> level 7 (full speed)
     //   * between FAN_FULL_TEMP_C and FAN_CURVE_MIN_TEMP_C (35 C) -> linear
     //     100% .. FAN_CURVE_MIN_FRACTION*100 % (20%), mapped onto steps 1..7
     //   * at or below FAN_CURVE_MIN_TEMP_C (35 C) -> level 1 (20%, never 0)
@@ -236,13 +236,23 @@ public:
     // that profile exists to minimise every load and the EC's floor keeps the fan
     // turning for no thermal reason.
     //
+    // REF-REQ-124 (2026-09-22): the full-speed threshold was lowered from 70 C to
+    // 60 C and the ramp now spans 60 C -> 35 C instead of 70 C -> 35 C. The reason
+    // is measured: the firmware clamps the SMU thermal limit (Tctl) to 70 C in
+    // every platform profile and the OS cannot raise it (REF-REQ-123 2.4), so
+    // 70 C is not "the temperature at which cooling should start" - it is the
+    // temperature at which the part is already at its hard ceiling and begins
+    // throttling. Reaching full fan only at the ceiling leaves no margin to hold
+    // the clock; starting at 60 C gives 10 C of headroom, which is where the
+    // boost budget now lives.
+    //
     // Levels are the thinkpad_acpi discrete steps 0..7. The top step MUST be the
     // numeric 7: on this host `level full-speed` is accepted but resolves to
     // `disengaged` (see apply_fan_for_temp). Writing needs thinkpad_acpi
     // fan_control=1; without it the write is refused (no-op).
     static constexpr double FAN_CURVE_MIN_TEMP_C = 35.0;
     static constexpr double FAN_CURVE_MIN_FRACTION = 0.2;
-    static constexpr double FAN_FULL_TEMP_C = 70.0;
+    static constexpr double FAN_FULL_TEMP_C = 60.0;
     // REF-REQ-118.3: UltraEndurance-only cold stop threshold.
     static constexpr double FAN_ULTRA_STOP_TEMP_C = 45.0;
     [[nodiscard]] static int fan_level_for_temp(double cpu_temp_c) noexcept;

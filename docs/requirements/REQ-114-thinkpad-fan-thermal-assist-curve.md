@@ -33,7 +33,8 @@ two profiles that raise the SMU limit**, and nothing else.
   own curve; forcing a minimum fan speed there would spend battery for cooling the
   profile is deliberately not using.
 - **REQ-114.2 (Curve)** The requested level shall be linear between
-  **35 °C** (fraction **0.2**) and **70 °C** (full speed), mapped onto the
+  **35 °C** (fraction **0.2**) and **60 °C** (full speed, was 70 °C - see
+[REF-REQ-124](REQ-124-fan-curve-60c-full-speed.md)), mapped onto the
   `thinkpad_acpi` discrete steps `0..7`, clamped to `1..7`. At or above 70 °C the
   fan shall be pinned to `full-speed`. Below the floor the level is `1`, not `0`.
 - **REQ-114.3 (No reading, no action)** A missing or non-positive CPU temperature
@@ -67,7 +68,7 @@ two profiles that raise the SMU limit**, and nothing else.
 | Write form | `level <0-7\|auto\|disengaged\|full-speed>\n` |
 | Read-back | `level:` line of the same node |
 | Curve floor | 35 °C → level 1 (fraction 0.2) |
-| Curve ceiling | 70 °C → `full-speed` (level 7) |
+| Curve ceiling | 60 °C → level 7 (was 70 °C; REF-REQ-124) |
 | Prerequisite | `thinkpad_acpi` module option `fan_control=1` (operator-set) |
 
 Curve implementation: `MitigationEngine::fan_level_for_temp()`,

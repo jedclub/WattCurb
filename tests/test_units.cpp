@@ -4755,11 +4755,15 @@ void test_thinkpad_fan_thermal_assist_and_smu_limits() {
     policy::MitigationEngine::set_actuation_sandbox(true);
 
     // --- 1. Pure curve mapping -------------------------------------------
+    // REF-REQ-124 (2026-09-22): full speed from 60 C (was 70 C) and the ramp
+    // spans 60 C (100%) -> 35 C (20%). 70 C is the firmware's Tctl ceiling, so
+    // waiting until 70 C to reach full fan left no margin before throttling.
     assert(policy::MitigationEngine::fan_level_for_temp(0.0) == -1); // no reading
     assert(policy::MitigationEngine::fan_level_for_temp(-5.0) == -1);
     assert(policy::MitigationEngine::fan_level_for_temp(20.0) == 1); // below floor -> 1
-    assert(policy::MitigationEngine::fan_level_for_temp(35.0) == 1); // floor
-    assert(policy::MitigationEngine::fan_level_for_temp(70.0) == 7); // full speed
+    assert(policy::MitigationEngine::fan_level_for_temp(35.0) == 1); // floor = 20%
+    assert(policy::MitigationEngine::fan_level_for_temp(60.0) == 7); // full speed
+    assert(policy::MitigationEngine::fan_level_for_temp(70.0) == 7); // above ceiling
     assert(policy::MitigationEngine::fan_level_for_temp(95.0) == 7);
 
     int prev = 0;
@@ -4769,8 +4773,14 @@ void test_thinkpad_fan_thermal_assist_and_smu_limits() {
         assert(lvl >= prev);          // monotonic non-decreasing
         prev = lvl;
     }
-    // Half-way (52.5 C) the linear curve is at fraction 0.6 -> level 4.
-    assert(policy::MitigationEngine::fan_level_for_temp(52.5) == 4);
+    // Half-way through the new ramp (47.5 C) the fraction is 0.6 -> level 4.
+    assert(policy::MitigationEngine::fan_level_for_temp(47.5) == 4);
+    // Just under the full-speed threshold is NOT full speed yet: the ramp has to
+    // be a ramp, or the threshold change would just be a step function at 60 C.
+    // Level 7 is reserved for the threshold, so 59 C is the top of the ramp (6).
+    assert(policy::MitigationEngine::fan_level_for_temp(59.0) == 6);
+    assert(policy::MitigationEngine::fan_level_for_temp(59.9) == 6);
+    assert(policy::MitigationEngine::fan_level_for_temp(60.0) == 7);
 
     // --- 1b. REF-REQ-114 defect: the top step must be a numeric level -----
     // The regression was that >=70 C produced the string "full-speed", which
@@ -4805,14 +4815,14 @@ void test_thinkpad_fan_thermal_assist_and_smu_limits() {
     assert(!policy::MitigationEngine::hardware_baseline().smu_limits_modified);
 
     // --- 4. REF-REQ-118: the curve applies in EVERY profile --------------
-    // The 70 C full-speed rule is a thermal-safety floor and must hold in all
-    // four profiles; the UltraEndurance cold stop (<= 45 C -> level 0) is the one
-    // profile-specific exception, and it must not leak into the others.
+    // The 60 C full-speed rule (REF-REQ-124) is a thermal-safety floor and must
+    // hold in all four profiles; the UltraEndurance cold stop (<= 45 C -> level 0)
+    // is the one profile-specific exception, and it must not leak into the others.
     using policy::MitigationEngine;
     for (const PowerProfileMode m : {PowerProfileMode::Performance, PowerProfileMode::Balanced,
                                      PowerProfileMode::PowerSaver, PowerProfileMode::UltraEndurance}) {
         assert(MitigationEngine::fan_level_for_temp_in_profile(75.0, m) == 7 &&
-               "REF-REQ-118.1: >= 70 C must be full speed in every profile");
+               "REF-REQ-118.1: >= 60 C must be full speed in every profile");
         assert(MitigationEngine::fan_level_for_temp_in_profile(0.0, m) == -1);
     }
     // The 35 C floor maps to level 1 in every profile EXCEPT UltraEndurance, where

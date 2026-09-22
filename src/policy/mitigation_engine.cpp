@@ -2988,14 +2988,20 @@ int MitigationEngine::fan_level_for_temp(double cpu_temp_c) noexcept {
     // here (measured ~5.3k RPM), so the curve stays inside 1..7.
     if (cpu_temp_c >= FAN_FULL_TEMP_C) return 7; // full speed (numeric)
     if (cpu_temp_c <= FAN_CURVE_MIN_TEMP_C) return 1; // 0.2 -> level 1
-    // Linear between (35 C, 0.2) and (70 C, 1.0), mapped onto the 0..7 steps.
+    // Linear between (35 C, 0.2) and (60 C, 1.0) - REF-REQ-124 lowered the top
+    // from 70 C so the ramp starts below the firmware's Tctl ceiling.
     const double frac = FAN_CURVE_MIN_FRACTION +
                         (cpu_temp_c - FAN_CURVE_MIN_TEMP_C) /
                             (FAN_FULL_TEMP_C - FAN_CURVE_MIN_TEMP_C) *
                             (1.0 - FAN_CURVE_MIN_FRACTION);
     int lvl = static_cast<int>(frac * 7.0 + 0.5);
     if (lvl < 1) lvl = 1;
-    if (lvl > 7) lvl = 7;
+    // REF-REQ-124.2: level 7 IS "100%", and the 100% reference is the threshold.
+    // Nearest-rounding reaches 7 at ~57.8 C because 7 discrete steps span a
+    // 0.2..1.0 fraction, which would silently turn "full speed from 60 C" into
+    // "full speed from ~58 C". The top step is therefore reserved for
+    // FAN_FULL_TEMP_C and above; the last stretch of the ramp is level 6.
+    if (lvl > 6) lvl = 6;
     return lvl;
 }
 
