@@ -39,6 +39,13 @@ Every knob the OS owns was already correct, and the clock was *below*
 | PPT LIMIT APU | 25.000 W | - |
 | **THM LIMIT CORE** (Tctl) | **70.000 C** | 85 C |
 
+The EC's STAPM is **not a constant**: the first reading above was 6.000 W, and at
+the daemon's next bootstrap the capture read 10.000 W (verified by switching to a
+saving profile, which restores the captured baseline verbatim, and reading back
+10.000 W). The EC moves it with its own power state. What matters for this defect
+is not the exact figure but that it sits far below the 25 W Performance target and
+that nothing in the OS was reaching it.
+
 ### 2.1 The decisive experiment
 
 Same 8-thread load, only STAPM changed:
