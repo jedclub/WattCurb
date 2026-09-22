@@ -604,6 +604,56 @@ static bool user_dashboard_path(char* out, size_t cap) noexcept {
     return (n > 0 && static_cast<size_t>(n) < cap);
 }
 
+// REF-REQ-120.2: close the GUI window that is already open before opening the
+// other one, because the dashboard binary is now single-instance across both
+// modes (REF-REQ-120.1) and would otherwise refuse to start.
+//
+// The pattern is anchored to the start of the command line and to the executable
+// name token. The previous `pkill -f wattcurb-dashboard` matched ANY command line
+// containing that substring - including a shell whose argument mentioned the
+// path, or this repository's own diagnostic scripts (observed: a probe script
+// killed itself). Anchoring makes the match mean "the program itself".
+static void close_existing_gui() noexcept {
+    // Matches: "wattcurb-dashboard ..." (as the tray execs it, argv[0] is the
+    // bare name), "/usr/local/bin/wattcurb-dashboard ..." and
+    // "/home/<user>/.local/bin/wattcurb-dashboard ..." (a shell launch).
+    const char* pattern =
+        "^(/usr/local/bin/|/home/[^/]+/\\.local/bin/)?wattcurb-dashboard( |$)";
+    char cmd[320];
+    std::snprintf(cmd, sizeof(cmd), "pkill -f '%s' 2>/dev/null", pattern);
+    (void)::system(cmd);
+}
+
+// REF-REQ-121: resolve the dashboard binary to launch, in AUTHORITY order.
+//
+// REF-REQ-111 makes the daemon accept a PROFILE command only from a root-owned
+// installed client binary (/usr/local/bin or /usr/bin). The tray used to prefer
+// "$HOME/.local/bin/wattcurb-dashboard", so every profile change made from the
+// dashboard was refused:
+//     [ALERT:DENY] Rejected PROFILE command from wattcurb-dashbo[pid] uid=1000
+// and the window's buttons appeared to do nothing. The system binary must be
+// tried first; the per-user copy is only a fallback for hosts that have no
+// system install (where a profile change will be refused by design - the daemon
+// will not take orders from a user-writable directory).
+static bool resolve_dashboard_bin(char* out, size_t cap) noexcept {
+    static const char* const CANDIDATES[] = {
+        "/usr/local/bin/wattcurb-dashboard",
+        "/usr/bin/wattcurb-dashboard",
+    };
+    for (const char* c : CANDIDATES) {
+        if (::access(c, X_OK) == 0) {
+            const int n = std::snprintf(out, cap, "%s", c);
+            return (n > 0 && static_cast<size_t>(n) < cap);
+        }
+    }
+    if (user_dashboard_path(out, cap) && ::access(out, X_OK) == 0) {
+        return true;
+    }
+    // Last resort: PATH lookup by execlp() in the caller.
+    out[0] = '\0';
+    return false;
+}
+
 static void apply_hardware_profile(const char* mode) noexcept {
     if (!mode) return;
     const char* home = ::getenv("HOME");
@@ -1199,18 +1249,12 @@ int TrayClient::dbusmenu_method_event(sd_bus_message* msg, void* userdata, sd_bu
             pid_t pid = ::fork();
             if (pid == 0) {
                 ::setsid();
-                ::system("pkill -f wattcurb-dashboard 2>/dev/null");
+                close_existing_gui();
                 char dash_bin[256];
-                if (user_dashboard_path(dash_bin, sizeof(dash_bin)) && ::access(dash_bin, X_OK) == 0) {
+                if (resolve_dashboard_bin(dash_bin, sizeof(dash_bin))) {
                     ::execl(dash_bin, "wattcurb-dashboard", nullptr);
-                } else {
-                    const char* usr_bin = "/usr/local/bin/wattcurb-dashboard";
-                    if (::access(usr_bin, X_OK) == 0) {
-                        ::execl(usr_bin, "wattcurb-dashboard", nullptr);
-                    } else {
-                        ::execlp("wattcurb-dashboard", "wattcurb-dashboard", nullptr);
-                    }
                 }
+                ::execlp("wattcurb-dashboard", "wattcurb-dashboard", nullptr);
                 ::_exit(0);
             }
 
@@ -1223,18 +1267,12 @@ int TrayClient::dbusmenu_method_event(sd_bus_message* msg, void* userdata, sd_bu
             pid_t pid = ::fork();
             if (pid == 0) {
                 ::setsid();
-                ::system("pkill -f 'wattcurb-dashboard.*--report' 2>/dev/null");
+                close_existing_gui();
                 char dash_bin[256];
-                if (user_dashboard_path(dash_bin, sizeof(dash_bin)) && ::access(dash_bin, X_OK) == 0) {
+                if (resolve_dashboard_bin(dash_bin, sizeof(dash_bin))) {
                     ::execl(dash_bin, "wattcurb-dashboard", "--report", nullptr);
-                } else {
-                    const char* usr_bin = "/usr/local/bin/wattcurb-dashboard";
-                    if (::access(usr_bin, X_OK) == 0) {
-                        ::execl(usr_bin, "wattcurb-dashboard", "--report", nullptr);
-                    } else {
-                        ::execlp("wattcurb-dashboard", "wattcurb-dashboard", "--report", nullptr);
-                    }
                 }
+                ::execlp("wattcurb-dashboard", "wattcurb-dashboard", "--report", nullptr);
                 ::_exit(0);
             }
         } else if (id == 12) {
