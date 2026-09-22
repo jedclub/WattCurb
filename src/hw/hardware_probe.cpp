@@ -265,10 +265,11 @@ HardwareProbe::HardwareProbe(HardwareProbe&& other) noexcept
       wifi_status_fd_(std::exchange(other.wifi_status_fd_, -1)),
       wifi_temp_fd_(std::exchange(other.wifi_temp_fd_, -1)),
       aspm_policy_fd_(std::exchange(other.aspm_policy_fd_, -1)),
-      pmu_instructions_fd_(std::exchange(other.pmu_instructions_fd_, -1)),
-      pmu_cycles_fd_(std::exchange(other.pmu_cycles_fd_, -1)),
-      pmu_llc_misses_fd_(std::exchange(other.pmu_llc_misses_fd_, -1)),
-      pmu_branch_misses_fd_(std::exchange(other.pmu_branch_misses_fd_, -1)),
+      pmu_instr_fds_(other.pmu_instr_fds_),
+      pmu_cyc_fds_(other.pmu_cyc_fds_),
+      pmu_llc_fds_(other.pmu_llc_fds_),
+      pmu_branch_fds_(other.pmu_branch_fds_),
+      pmu_cpu_count_(std::exchange(other.pmu_cpu_count_, 0)),
       pcie_gpu_config_fd_(std::exchange(other.pcie_gpu_config_fd_, -1)),
       pcie_nvme_config_fd_(std::exchange(other.pcie_nvme_config_fd_, -1)),
       cpu0_msr_fd_(std::exchange(other.cpu0_msr_fd_, -1)) {}
@@ -367,10 +368,11 @@ HardwareProbe& HardwareProbe::operator=(HardwareProbe&& other) noexcept {
         wifi_status_fd_ = std::exchange(other.wifi_status_fd_, -1);
         wifi_temp_fd_ = std::exchange(other.wifi_temp_fd_, -1);
         aspm_policy_fd_ = std::exchange(other.aspm_policy_fd_, -1);
-        pmu_instructions_fd_ = std::exchange(other.pmu_instructions_fd_, -1);
-        pmu_cycles_fd_ = std::exchange(other.pmu_cycles_fd_, -1);
-        pmu_llc_misses_fd_ = std::exchange(other.pmu_llc_misses_fd_, -1);
-        pmu_branch_misses_fd_ = std::exchange(other.pmu_branch_misses_fd_, -1);
+        pmu_instr_fds_ = other.pmu_instr_fds_;
+        pmu_cyc_fds_ = other.pmu_cyc_fds_;
+        pmu_llc_fds_ = other.pmu_llc_fds_;
+        pmu_branch_fds_ = other.pmu_branch_fds_;
+        pmu_cpu_count_ = std::exchange(other.pmu_cpu_count_, 0);
         pcie_gpu_config_fd_ = std::exchange(other.pcie_gpu_config_fd_, -1);
         pcie_nvme_config_fd_ = std::exchange(other.pcie_nvme_config_fd_, -1);
         cpu0_msr_fd_ = std::exchange(other.cpu0_msr_fd_, -1);
@@ -454,10 +456,13 @@ void HardwareProbe::close_fds() noexcept {
     safe_close(wifi_temp_fd_);
     safe_close(aspm_policy_fd_);
 
-    safe_close(pmu_instructions_fd_);
-    safe_close(pmu_cycles_fd_);
-    safe_close(pmu_llc_misses_fd_);
-    safe_close(pmu_branch_misses_fd_);
+    for (size_t i = 0; i < pmu_cpu_count_; ++i) {
+        safe_close(pmu_instr_fds_[i]);
+        safe_close(pmu_cyc_fds_[i]);
+        safe_close(pmu_llc_fds_[i]);
+        safe_close(pmu_branch_fds_[i]);
+    }
+    pmu_cpu_count_ = 0;
     safe_close(pcie_gpu_config_fd_);
     safe_close(pcie_nvme_config_fd_);
     safe_close(cpu0_msr_fd_);
@@ -595,24 +600,47 @@ void HardwareProbe::close_fds() noexcept {
 }
 
 void HardwareProbe::init_pmu_counters() {
+    pmu_cpu_count_ = 0;
+
+    // System-wide counters need (pid=-1, cpu=N) and one fd per CPU. (pid=0,
+    // cpu=-1) measures only the calling task, so the previous code reported the
+    // daemon's own instructions as if they were the machine's.
+    const long cpus = ::sysconf(_SC_NPROCESSORS_ONLN);
+    if (cpus <= 0) return;
+    const size_t n = std::min(static_cast<size_t>(cpus), MAX_PMU_CPUS);
+
     struct perf_event_attr pe{};
     pe.size = sizeof(struct perf_event_attr);
     pe.disabled = 0;
     pe.exclude_kernel = 1;
     pe.exclude_hv = 1;
-
     pe.type = PERF_TYPE_HARDWARE;
-    pe.config = PERF_COUNT_HW_INSTRUCTIONS;
-    pmu_instructions_fd_ = static_cast<int>(::syscall(__NR_perf_event_open, &pe, 0, -1, -1, 0));
 
-    pe.config = PERF_COUNT_HW_CPU_CYCLES;
-    pmu_cycles_fd_ = static_cast<int>(::syscall(__NR_perf_event_open, &pe, 0, -1, -1, 0));
+    for (size_t c = 0; c < n; ++c) {
+        const int cpu = static_cast<int>(c);
+        pe.config = PERF_COUNT_HW_INSTRUCTIONS;
+        const int fi = static_cast<int>(::syscall(__NR_perf_event_open, &pe, -1, cpu, -1, 0));
+        pe.config = PERF_COUNT_HW_CPU_CYCLES;
+        const int fc = static_cast<int>(::syscall(__NR_perf_event_open, &pe, -1, cpu, -1, 0));
+        pe.config = PERF_COUNT_HW_CACHE_MISSES;
+        const int fl = static_cast<int>(::syscall(__NR_perf_event_open, &pe, -1, cpu, -1, 0));
+        pe.config = PERF_COUNT_HW_BRANCH_MISSES;
+        const int fb = static_cast<int>(::syscall(__NR_perf_event_open, &pe, -1, cpu, -1, 0));
 
-    pe.config = PERF_COUNT_HW_CACHE_MISSES;
-    pmu_llc_misses_fd_ = static_cast<int>(::syscall(__NR_perf_event_open, &pe, 0, -1, -1, 0));
-
-    pe.config = PERF_COUNT_HW_BRANCH_MISSES;
-    pmu_branch_misses_fd_ = static_cast<int>(::syscall(__NR_perf_event_open, &pe, 0, -1, -1, 0));
+        if (fi < 0) {
+            // System-wide profiling not permitted, or the CPU is offline. Stop
+            // rather than publish a partial, misleading per-CPU set.
+            if (fc >= 0) ::close(fc);
+            if (fl >= 0) ::close(fl);
+            if (fb >= 0) ::close(fb);
+            break;
+        }
+        pmu_instr_fds_[c] = fi;
+        pmu_cyc_fds_[c] = fc;
+        pmu_llc_fds_[c] = fl;
+        pmu_branch_fds_[c] = fb;
+        pmu_cpu_count_ = c + 1;
+    }
 }
 
 void HardwareProbe::init_pcie_binary_configs() {
@@ -1352,33 +1380,29 @@ void HardwareProbe::capture_subsystems(HardwareSample& sample) const {
     {
         WATTCURB_PROFILE_SCOPE("hw.syscall_telemetry");
 
-        // PMU Hardware Counters via perf_event_open (Direct single-read syscalls)
-        if (pmu_instructions_fd_ >= 0) {
-            uint64_t inst = 0;
-            if (::read(pmu_instructions_fd_, &inst, sizeof(inst)) == sizeof(inst)) {
-                sample.pmu_instructions = inst;
+        // PMU Hardware Counters via perf_event_open. One system-wide fd per CPU
+        // (pid=-1, cpu=N); the per-CPU values are summed so the telemetry
+        // describes the machine, not just this daemon.
+        for (size_t c = 0; c < pmu_cpu_count_; ++c) {
+            uint64_t v = 0;
+            if (pmu_instr_fds_[c] >= 0 && ::read(pmu_instr_fds_[c], &v, sizeof(v)) == sizeof(v)) {
+                sample.pmu_instructions += v;
             }
-        }
-        if (pmu_cycles_fd_ >= 0) {
-            uint64_t cyc = 0;
-            if (::read(pmu_cycles_fd_, &cyc, sizeof(cyc)) == sizeof(cyc)) {
-                sample.pmu_cycles = cyc;
+            v = 0;
+            if (pmu_cyc_fds_[c] >= 0 && ::read(pmu_cyc_fds_[c], &v, sizeof(v)) == sizeof(v)) {
+                sample.pmu_cycles += v;
+            }
+            v = 0;
+            if (pmu_llc_fds_[c] >= 0 && ::read(pmu_llc_fds_[c], &v, sizeof(v)) == sizeof(v)) {
+                sample.pmu_llc_misses += v;
+            }
+            v = 0;
+            if (pmu_branch_fds_[c] >= 0 && ::read(pmu_branch_fds_[c], &v, sizeof(v)) == sizeof(v)) {
+                sample.pmu_branch_misses += v;
             }
         }
         if (sample.pmu_cycles > 0 && sample.pmu_instructions > 0) {
             sample.pmu_ipc = static_cast<double>(sample.pmu_instructions) / static_cast<double>(sample.pmu_cycles);
-        }
-        if (pmu_llc_misses_fd_ >= 0) {
-            uint64_t llc = 0;
-            if (::read(pmu_llc_misses_fd_, &llc, sizeof(llc)) == sizeof(llc)) {
-                sample.pmu_llc_misses = llc;
-            }
-        }
-        if (pmu_branch_misses_fd_ >= 0) {
-            uint64_t bm = 0;
-            if (::read(pmu_branch_misses_fd_, &bm, sizeof(bm)) == sizeof(bm)) {
-                sample.pmu_branch_misses = bm;
-            }
         }
 
         // Standalone Sample PMU Energy Proxy (REF-REQ-024)

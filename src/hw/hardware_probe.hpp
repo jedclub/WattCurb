@@ -56,7 +56,7 @@ public:
     static std::pair<uint8_t, uint8_t> read_pcie_binary_link_status(int config_fd) noexcept;
 
     // Direct PMU counter query (REF-REQ-015, REF-TEST-005)
-    [[nodiscard]] bool has_pmu_counters() const noexcept { return pmu_instructions_fd_ >= 0; }
+    [[nodiscard]] bool has_pmu_counters() const noexcept { return pmu_cpu_count_ > 0; }
 
 private:
     std::filesystem::path sysfs_root_;
@@ -199,10 +199,21 @@ private:
     int aspm_policy_fd_{-1};
 
     // 8. Syscall-Level Direct Hardware Telemetry (REF-REQ-015, REF-REQ-024)
-    int pmu_instructions_fd_{-1};
-    int pmu_cycles_fd_{-1};
-    int pmu_llc_misses_fd_{-1};
-    int pmu_branch_misses_fd_{-1};
+    // System-wide PMU counters. perf_event_open with (pid=0, cpu=-1) measures
+    // only the calling task, which made the "system silicon" telemetry describe
+    // the daemon rather than the machine. A system-wide counter needs one fd per
+    // CPU with (pid=-1, cpu=N); the four events are summed across CPUs.
+    static constexpr size_t MAX_PMU_CPUS = 64;
+    static std::array<int, MAX_PMU_CPUS> make_pmu_fd_array() noexcept {
+        std::array<int, MAX_PMU_CPUS> a{};
+        a.fill(-1);
+        return a;
+    }
+    std::array<int, MAX_PMU_CPUS> pmu_instr_fds_ = make_pmu_fd_array();
+    std::array<int, MAX_PMU_CPUS> pmu_cyc_fds_ = make_pmu_fd_array();
+    std::array<int, MAX_PMU_CPUS> pmu_llc_fds_ = make_pmu_fd_array();
+    std::array<int, MAX_PMU_CPUS> pmu_branch_fds_ = make_pmu_fd_array();
+    size_t pmu_cpu_count_{0};
     int pcie_gpu_config_fd_{-1};
     int pcie_nvme_config_fd_{-1};
     int cpu0_msr_fd_{-1};

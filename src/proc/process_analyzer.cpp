@@ -3,6 +3,7 @@
 #include "core/scoped_profiler.hpp"
 
 #include <array>
+#include <cerrno>
 #include <charconv>
 #include <cstdio>
 #include <cstring>
@@ -27,29 +28,55 @@ struct LinuxDirent64 {
 
 // Fast, zero-allocation stack buffer reader (REF-REQ-007, REF-ARCH-005)
 bool read_file_to_stack_buf(const char* path, char* buf, size_t max_len, size_t& out_bytes) noexcept {
+    if (max_len == 0) return false;
     int fd = ::open(path, O_RDONLY | O_CLOEXEC);
     if (fd < 0) return false;
 
-    ssize_t bytes = ::read(fd, buf, max_len - 1);
+    // A single read() may return short even for a small procfs file. Loop until
+    // EOF or the buffer is full so the parser never sees a half-written buffer.
+    size_t total = 0;
+    const size_t cap = max_len - 1;
+    while (total < cap) {
+        ssize_t n = ::read(fd, buf + total, cap - total);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            ::close(fd);
+            return false;
+        }
+        if (n == 0) break;
+        total += static_cast<size_t>(n);
+    }
     ::close(fd);
 
-    if (bytes <= 0) return false;
-    buf[bytes] = '\0';
-    out_bytes = static_cast<size_t>(bytes);
+    if (total == 0) return false;
+    buf[total] = '\0';
+    out_bytes = total;
     return true;
 }
 
 // Ultra-low overhead openat reader avoiding full VFS path walk from root (REF-REQ-009, REF-ARCH-005)
 inline bool read_fileat_to_stack_buf(int dirfd, const char* rel_path, char* buf, size_t max_len, size_t& out_bytes) noexcept {
+    if (max_len == 0) return false;
     int fd = ::openat(dirfd, rel_path, O_RDONLY | O_CLOEXEC);
     if (fd < 0) return false;
 
-    ssize_t bytes = ::read(fd, buf, max_len - 1);
+    size_t total = 0;
+    const size_t cap = max_len - 1;
+    while (total < cap) {
+        ssize_t n = ::read(fd, buf + total, cap - total);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            ::close(fd);
+            return false;
+        }
+        if (n == 0) break;
+        total += static_cast<size_t>(n);
+    }
     ::close(fd);
 
-    if (bytes <= 0) return false;
-    buf[bytes] = '\0';
-    out_bytes = static_cast<size_t>(bytes);
+    if (total == 0) return false;
+    buf[total] = '\0';
+    out_bytes = total;
     return true;
 }
 
