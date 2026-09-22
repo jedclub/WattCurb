@@ -4390,15 +4390,25 @@ void test_profile_throughput_and_liveness_guarantees() {
     std::cout << "   * Writeback bounded: " << MitigationEngine::ULTRA_DIRTY_WRITEBACK_CS
               << " cs writeback / " << MitigationEngine::ULTRA_DIRTY_EXPIRE_CS << " cs expire\n";
 
-    // 5. REQ-109: a contested knob has one owner. This is conditional on the
-    //    host's actual service state - asserting a fixed answer would make the
-    //    test lie on whichever machine disagrees.
+    // 5. REQ-109 / REF-REQ-112.9: a contested knob has one owner, and for ppd
+    //    that owner is *asked* rather than ignored. Deferring outright left the
+    //    EC on ppd's "balanced" limit, which collapsed the all-core clock under
+    //    load. Unknown competitors are still declined. Conditional on the host's
+    //    service state - asserting a fixed answer would make the test lie on
+    //    whichever machine disagrees.
     const char* competitor = MitigationEngine::competing_power_manager();
     if (competitor != nullptr) {
-        const bool declined = !MitigationEngine::set_platform_profile("balanced");
-        assert(declined && "REQ-109.1: platform_profile write declined while a competitor runs");
-        std::cout << "   * Competing power manager detected (" << competitor
-                  << "); platform_profile write declined\n";
+        const bool ppd = (std::strstr(competitor, "power-profiles-daemon") != nullptr);
+        const bool handled = MitigationEngine::set_platform_profile("balanced");
+        if (ppd) {
+            assert(handled && "REF-REQ-112.9: platform_profile is coordinated through power-profiles-daemon");
+            std::cout << "   * Competing power manager detected (" << competitor
+                      << "); platform_profile coordinated via ppd\n";
+        } else {
+            assert(!handled && "REQ-109.1: platform_profile write declined for an unknown competitor");
+            std::cout << "   * Unknown competing power manager (" << competitor
+                      << "); platform_profile write declined\n";
+        }
     } else {
         std::cout << "   * No competing power manager on this host; platform_profile owned by WattCurb\n";
     }

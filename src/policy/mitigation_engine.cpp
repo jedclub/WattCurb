@@ -1372,7 +1372,14 @@ bool MitigationEngine::apply_power_profile(PowerProfileMode mode) noexcept {
         set_panel_power_savings(0);
         set_cpu_epp_policy("performance");
         restore_gpu_max_clock();
-        set_gpu_dpm_level("high");
+        // REF-REQ-092.9: leave the iGPU dynamic ("auto"), do NOT pin it to "high".
+        // Measured on this Renoir APU: forcing the GPU to its highest level costs
+        // the CPU ~28% of its all-core clock (1.42 GHz vs 1.97 GHz under an
+        // 8-thread load), because the APU shares one power budget and a pinned-idle
+        // iGPU spends it continuously. "auto" still lets the GPU boost to its
+        // maximum on demand, so it is fully usable, without starving the CPU that
+        // this profile exists to feed.
+        set_gpu_dpm_level("auto");
 
         // Ultimate Performance Unleash Full-Silicon Actuations (REF-REQ-092, REF-ARCH-069)
         //
