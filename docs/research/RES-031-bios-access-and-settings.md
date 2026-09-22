@@ -79,7 +79,42 @@ and **no System Firmware (BIOS) update**: the `System Firmware` device reports
 `0.1.40` with no candidate. BIOS 1.40 is the newest available through LVFS for
 this model at this time.
 
-## 5. Other observations from the dump
+## 5. Decision: BIOS writes are declined (2026-09-23)
+
+The write path exists and is technically available, but the owner declined to use
+it after being shown the risks. Recorded here so a later change does not
+re-litigate it silently:
+
+- Lenovo firmware allows only **48 attribute saves** in `save_settings=single`
+  mode. Exceeding that limit is not a soft failure - it requires **entering the
+  BIOS setup screen** to clear, which is not something a background daemon or an
+  agent can do.
+- Mixing up the `save_settings` sequence can leave subsequent attribute writes
+  failing with permission errors.
+- Several attributes are entangled with boot and security behaviour
+  (`SecureBoot`, `SecurityChip`, `BootOrder`, `PhysicalPresenceForTpmClear`); a
+  wrong write there affects booting, not just performance.
+- The payoff was zero for the reported problem anyway: the AC thermal/power
+  settings are already at their most permissive values, so no write would have
+  raised the 70 C ceiling.
+
+**Nothing was written.** Verified after the survey: `pending_reboot = 0`,
+`AdaptiveThermalManagementAC = MaximizePerformance`,
+`AdaptiveThermalManagementBattery = Balanced`,
+`AMDPowerNowTechnologyAC = MaximumPerformance`,
+`AMDPowerNowTechnologyBettery = BatteryOptimized`, `CPUPowerManagement = Enable`,
+and no BIOS password is enabled. Only reads were performed.
+
+### 5.1 WattCurb has no BIOS access path
+
+Checked: `src/` contains no reference to `firmware-attributes`, `thinklmi`,
+`think-lmi` or `current_value`. The daemon's only firmware write is
+`/sys/firmware/acpi/platform_profile`, which is an ACPI runtime interface (the
+same one power-profiles-daemon uses) and not a persistent BIOS setting. A future
+change must not add a BIOS write without an explicit decision, because of the
+48-save limitation above.
+
+## 6. Other observations from the dump
 
 - `SecureBoot = Disable`, `SecureRollBackPrevention = Disable`,
   `TSME = Disable` (Transparent SME memory encryption off).
@@ -87,7 +122,7 @@ this model at this time.
 - `KeyboardLayout = Korean`, `SetupUI = SimpleText`.
 - `WakeOnLAN = ACOnly`, `AlwaysOnUSB = Enable`, `OnByAcAttach = Disable`.
 
-## 6. How to re-run this survey
+## 7. How to re-run this survey
 
 ```sh
 # Identity (no privilege needed)
