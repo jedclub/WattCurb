@@ -259,17 +259,26 @@ bool FeatureManager::actuate_anti_starvation_cap(int32_t pid, PowerProfileMode m
     char det[128];
     std::snprintf(det, sizeof(det), "Nice=%d, %s Mask applied, cgroup quota=%s",
                   nice_val, (c2_dispersed ? "C2-Cluster" : "Headroom"), (mode == PowerProfileMode::UltraEndurance ? "400ms/100ms" : "none"));
-    core::EventLogger::log_mitigation(pid, (comm && *comm) ? comm : "runaway-task",
-                                      (c2_dispersed ? "C2ClusterDispersion" : "AntiStarvationCap"), det);
-    return (aff || batch);
+    // REF-REQ-092: report only what was actually applied. Under the actuation
+    // sandbox every primitive is a no-op, and a log line claiming "Headroom Mask
+    // applied" would be a false record of a hardware change.
+    const bool applied = (aff || batch);
+    if (applied) {
+        core::EventLogger::log_mitigation(pid, (comm && *comm) ? comm : "runaway-task",
+                                          (c2_dispersed ? "C2ClusterDispersion" : "AntiStarvationCap"), det);
+    }
+    return applied;
 }
 
 bool FeatureManager::actuate_anti_starvation_restore(int32_t pid, const cpu_set_t* target_affinity, int orig_policy, int orig_nice, const char* comm) noexcept {
     bool aff = MitigationEngine::restore_core_affinity(pid, target_affinity);
     bool norm = MitigationEngine::restore_sched_normal(pid, orig_policy, orig_nice);
     MitigationEngine::restore_cgroup_cpu_quota(pid);
-    core::EventLogger::log_rollback(pid, (comm && *comm) ? comm : "runaway-task", "Restored baseline CFS nice/affinity/cgroup quota");
-    return (aff || norm);
+    const bool restored = (aff || norm);
+    if (restored) {
+        core::EventLogger::log_rollback(pid, (comm && *comm) ? comm : "runaway-task", "Restored baseline CFS nice/affinity/cgroup quota");
+    }
+    return restored;
 }
 
 void FeatureManager::rollback_all_tracked() noexcept {

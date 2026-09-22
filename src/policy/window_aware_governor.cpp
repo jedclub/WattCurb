@@ -163,8 +163,13 @@ bool WindowAwareGovernor::engage_active_window(int32_t pid, const char* comm) no
     // 7. Ensure uninhibited state if previously tracked
     unthrottle_immediate(pid);
 
-    core::EventLogger::log_mitigation(pid, comm ? comm : "", "ACTIVE_WINDOW_C0_GUARANTEE",
-                                      "Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp");
+    // REF-REQ-092: the log names concrete hardware writes, so it is emitted
+    // only when they were actually issued. A sandboxed run keeps the bookkeeping
+    // and returns success without claiming a clamp it never applied.
+    if (actuate) {
+        core::EventLogger::log_mitigation(pid, comm ? comm : "", "ACTIVE_WINDOW_C0_GUARANTEE",
+                                          "Pinned to C1 cores, nice -10, PM QoS 0us C0 clamp");
+    }
     return true;
 }
 
