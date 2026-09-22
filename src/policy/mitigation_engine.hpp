@@ -176,6 +176,13 @@ public:
     // without turning into a sysfs write storm. Returns true if it had to
     // repair anything.
     static bool assert_unrestricted_cpu_ceiling() noexcept;
+    // Number of times the assertion has been invoked this process. Exists so
+    // REF-TEST-068 can prove the re-assertion is reached from the PRODUCTION
+    // entry point (FeatureManager::evaluate_and_actuate) rather than only from
+    // MitigationEngine::evaluate_and_actuate, which has no production caller.
+    // The first implementation of REF-REQ-112.4 sat in the latter and never ran
+    // outside the test suite.
+    [[nodiscard]] static uint64_t ceiling_assertion_count() noexcept;
     static bool set_panel_power_savings(uint32_t level) noexcept;
     static bool set_pcie_aspm_policy(const char* policy) noexcept;
     static bool set_cpu_epp_policy(const char* policy) noexcept;

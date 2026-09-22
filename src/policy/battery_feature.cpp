@@ -348,6 +348,30 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
     // in force.
     MitigationEngine::set_effective_profile(eff_profile);
 
+    // REF-REQ-112.4: re-assert the unrestricted CPU ceiling every cycle while an
+    // unrestricted profile is in force. apply_power_profile() runs only on a
+    // TRANSITION, so anything that caps the CPU behind WattCurb's back - a
+    // competing tool, a suspend/resume that resets cpufreq, a leftover from a
+    // previous run that outlived a restart - otherwise stays in force
+    // indefinitely and the user sees a CPU that never boosts.
+    //
+    // This lives here, not in MitigationEngine::evaluate_and_actuate(), because
+    // that function has no production caller: the daemon and the CLI both enter
+    // through THIS path. A first implementation put the re-assertion there and
+    // it never executed outside the test suite.
+    //
+    // The call reads before it writes, so a healthy machine pays N reads and no
+    // writes.
+    if (eff_profile == PowerProfileMode::Performance ||
+        eff_profile == PowerProfileMode::Balanced) {
+        if (MitigationEngine::assert_unrestricted_cpu_ceiling()) {
+            core::EventLogger::log_alert(
+                "REPAIR",
+                "CPU frequency ceiling had drifted below the hardware maximum in an "
+                "unrestricted profile; restored (REF-REQ-112)");
+        }
+    }
+
     // REF-REQ-102: A profile change releases everything the previous profile
     // applied, before the new one decides anything. Restrictions must not
     // outlive the profile that imposed them.

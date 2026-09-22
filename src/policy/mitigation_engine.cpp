@@ -913,7 +913,14 @@ bool MitigationEngine::set_cpu_boost(bool enable) noexcept {
     return (w > 0);
 }
 
+static uint64_t s_ceiling_assertion_count = 0;
+
+uint64_t MitigationEngine::ceiling_assertion_count() noexcept {
+    return s_ceiling_assertion_count;
+}
+
 bool MitigationEngine::assert_unrestricted_cpu_ceiling() noexcept {
+    ++s_ceiling_assertion_count;
     // REF-REQ-112. Performance and Balanced promise an unrestricted CPU; this
     // is what enforces that promise, and it is deliberately idempotent so the
     // observation cycle can call it every tick. Each CPU is read before it is
@@ -3491,22 +3498,6 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
     }
 
     status.current_profile = m_current_profile;
-
-    // REF-REQ-112: apply_power_profile() only runs on a TRANSITION, so nothing
-    // re-asserted the ceiling while the profile sat still. Anything that caps
-    // the CPU behind WattCurb's back - a competing tool, a suspend/resume that
-    // resets cpufreq, a leftover from a previous run that outlived a restart -
-    // stayed in force indefinitely and the user saw a CPU that never boosted.
-    // The call reads before it writes, so a healthy machine pays only reads.
-    if (m_current_profile == PowerProfileMode::Performance ||
-        m_current_profile == PowerProfileMode::Balanced) {
-        if (assert_unrestricted_cpu_ceiling()) {
-            core::EventLogger::log_alert(
-                "REPAIR",
-                "CPU frequency ceiling had drifted below the hardware maximum in an "
-                "unrestricted profile; restored (REF-REQ-112).");
-        }
-    }
 
     // Periodically shield all active desktop terminals & shells (REF-REQ-084, REF-ARCH-061)
     if (m_scan_counter++ % 10 == 0) {

@@ -4481,9 +4481,28 @@ void test_cpu_ceiling_baseline_is_hardware_max() {
     const bool repaired_under_sandbox = MitigationEngine::assert_unrestricted_cpu_ceiling();
     assert(!repaired_under_sandbox);
 
+    // The re-assertion must be reached from the PRODUCTION entry point. The
+    // daemon and the CLI both actuate through FeatureManager::evaluate_and_actuate;
+    // MitigationEngine::evaluate_and_actuate has no production caller at all, so
+    // a re-assertion placed there executes only under test. This assertion is
+    // what falsifies that mistake.
+    {
+        FeatureManager mgr;
+        mgr.set_override_profile(wattcurb::PowerProfileMode::Performance);
+        wattcurb::AnalysisReportData rpt{};
+        const uint64_t before = MitigationEngine::ceiling_assertion_count();
+        mgr.evaluate_and_actuate(rpt, /*on_battery=*/false, /*battery_pct=*/80.0);
+        const uint64_t after = MitigationEngine::ceiling_assertion_count();
+        assert(after > before &&
+               "REF-REQ-112.4: the production actuation path must re-assert the CPU ceiling");
+        std::cout << "   - Production path re-asserted the ceiling ("
+                  << (after - before) << " invocation)\n";
+    }
+
     MitigationEngine::set_actuation_sandbox(prev_sandbox_ceiling);
     std::cout << " [PASS] test_cpu_ceiling_baseline_is_hardware_max (REF-TEST-068: "
-                 "baseline >= cpuinfo_max_freq, sandboxed assertion writes nothing)\n";
+                 "baseline >= cpuinfo_max_freq, sandboxed assertion writes nothing, "
+                 "production path re-asserts)\n";
 }
 
 // Implements REF-TEST-069 & REF-REQ-112: the memory pressure ladder.

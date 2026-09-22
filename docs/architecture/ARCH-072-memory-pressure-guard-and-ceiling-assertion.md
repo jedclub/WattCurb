@@ -56,9 +56,19 @@ sysfs write traffic and no uncoordinated wakeups. It is called from two places:
 
 - `apply_power_profile()` for Performance and Balanced, replacing the replay of
   the captured value;
-- `evaluate_and_actuate()` on every cycle while an unrestricted profile is in
-  force, which is what closes the "profile sat still while something else
-  capped the CPU" path.
+- `FeatureManager::evaluate_and_actuate()` on every cycle while an unrestricted
+  profile is in force, which is what closes the "profile sat still while
+  something else capped the CPU" path.
+
+The second call site matters more than it looks. `MitigationEngine` has its own
+`evaluate_and_actuate()`, and it is the obvious-looking home for a per-cycle
+policy assertion - but **it has no production caller**. The daemon
+(`daemon_runner.cpp:543`) and the CLI (`main.cpp:412`, `main.cpp:476`) all enter
+through `FeatureManager::evaluate_and_actuate()`; the engine's own method is
+reached only from the test suite. The first implementation of REQ-112.4 sat in
+the engine method and therefore never executed on a running machine.
+`MitigationEngine::ceiling_assertion_count()` exists so `REF-TEST-068` fails if
+that is ever true again.
 
 ---
 

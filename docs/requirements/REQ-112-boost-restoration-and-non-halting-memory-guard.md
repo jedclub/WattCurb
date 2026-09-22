@@ -62,7 +62,13 @@ suspend/resume that resets cpufreq - persisted indefinitely.
   the boost bit rather than replaying the captured value.
 - **REQ-112.4** The assertion shall be idempotent (read before write, write only
   diverging CPUs) and shall run on every observation cycle while an
-  unrestricted profile is in force.
+  unrestricted profile is in force. It shall be placed on the **production**
+  actuation path, `FeatureManager::evaluate_and_actuate()`.
+  `MitigationEngine::evaluate_and_actuate()` is not that path - it has no
+  production caller and is reached only from the test suite - and the first
+  implementation of this clause was placed there, where it never ran.
+  `REF-TEST-068` asserts the invocation counter advances when the production
+  entry point is driven.
 - **REQ-112.5** The systemd unit shall set `OOMScoreAdjust=-900`. The daemon's
   rollback state exists only in its address space; a SIGKILL destroys it and
   creates exactly the orphaned state above.
