@@ -370,6 +370,14 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
                 "CPU frequency ceiling had drifted below the hardware maximum in an "
                 "unrestricted profile; restored (REF-REQ-112)");
         }
+        // REF-REQ-112.9: the EC platform profile is the other half of "can this
+        // CPU boost at all". A competitor (ppd) can reset it between our cycles,
+        // and on a host left on "balanced" the all-core clock collapses under
+        // load. Re-assert it here: set_platform_profile() is a read when the node
+        // already matches and a ppd request only when it has drifted.
+        const char* want_pp = (eff_profile == PowerProfileMode::Performance) ? "performance"
+                                                                              : "balanced";
+        MitigationEngine::set_platform_profile(want_pp);
     }
 
     // REF-REQ-102: A profile change releases everything the previous profile

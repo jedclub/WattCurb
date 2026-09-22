@@ -854,17 +854,59 @@ const char* MitigationEngine::competing_power_manager() noexcept {
 bool MitigationEngine::set_platform_profile(const char* profile) noexcept {
     if (!profile) return false;
 
-    // REF-REQ-109: defer rather than fight. The competitor re-asserts its own
-    // value on its own schedule, so writing here produces a node whose content
-    // depends on which daemon wrote last - the machine behaves differently from
-    // one moment to the next for no visible reason. WattCurb declines the write
-    // and says so once; the remedy is a deployment decision, not a race.
+    // Cheap idempotence: if the node already reads what we want, do nothing. This
+    // makes the periodic re-assertion in the feature layer a read, not a fork.
+    {
+        char cur[32];
+        size_t n = 0;
+        if (core::fs::read_small_file("/sys/firmware/acpi/platform_profile", cur, sizeof(cur) - 1, &n) && n > 0) {
+            cur[n] = '\0';
+            while (n > 0 && (cur[n - 1] == '\n' || cur[n - 1] == '\r')) cur[--n] = '\0';
+            if (std::strcmp(cur, profile) == 0) return true;
+        }
+    }
+
     static bool s_competitor_checked = false;
     static const char* s_competitor = nullptr;
-    if (!s_competitor_checked) {
+    static uint32_t s_competitor_probe = 0;
+    // Re-probe periodically, not once: a competitor (ppd) can be started after
+    // this daemon, and a cached "no competitor" would then keep us writing the
+    // node directly while ppd re-asserts its own value - an oscillation whose
+    // loser is the user's clock. The probe walks /proc, so it is throttled.
+    if (!s_competitor_checked || (++s_competitor_probe % 100u == 0u)) {
         s_competitor = competing_power_manager();
         s_competitor_checked = true;
-        if (s_competitor != nullptr) {
+    }
+
+    if (s_competitor != nullptr) {
+        // REF-REQ-109 originally declined the write entirely. On a host whose
+        // power-profiles-daemon sat on "balanced" that left the EC power limit at
+        // its balanced value, and under all-core load the CPU collapsed to
+        // ~400 MHz while the UI still reported Performance - the mode's whole
+        // promise is aggressive boost. Deferring is only safe if the competitor
+        // is asked for the same profile; for ppd that is a supported request, and
+        // for anything else we still decline rather than race an unknown writer.
+        if (std::strstr(s_competitor, "power-profiles-daemon") != nullptr) {
+            const char* ppd_name = "balanced";
+            if (std::strcmp(profile, "performance") == 0) ppd_name = "performance";
+            else if (std::strcmp(profile, "low-power") == 0) ppd_name = "power-saver";
+
+            char cmd[96];
+            std::snprintf(cmd, sizeof(cmd), "powerprofilesctl set %s 2>/dev/null", ppd_name);
+            if (hw_system(cmd) == 0) return true;
+
+            char detail[192];
+            std::snprintf(detail, sizeof(detail),
+                          "power-profiles-daemon did not accept platform_profile=%s (ppd '%s'); "
+                          "the EC power limit may stay at its current value (REF-REQ-112.9)",
+                          profile, ppd_name);
+            core::EventLogger::log_alert("CONFLICT", detail);
+            return false;
+        }
+
+        static bool s_logged = false;
+        if (!s_logged) {
+            s_logged = true;
             char detail[192];
             std::snprintf(detail, sizeof(detail),
                           "%s owns /sys/firmware/acpi/platform_profile; WattCurb will not write it. "
@@ -872,8 +914,8 @@ bool MitigationEngine::set_platform_profile(const char* profile) noexcept {
                           s_competitor, s_competitor);
             core::EventLogger::log_alert("CONFLICT", detail);
         }
+        return false;
     }
-    if (s_competitor != nullptr) return false;
 
     int fd = hw_open_write("/sys/firmware/acpi/platform_profile", O_WRONLY | O_CLOEXEC);
     if (fd < 0) return false;
