@@ -3517,112 +3517,30 @@ ActiveMitigationStatus MitigationEngine::evaluate_and_actuate(
             }
         }
 
-        // 2. Adaptive C2 Cluster Dispersion for heavy compute process groups
-        const auto& topo = get_cluster_topology();
-        for (const auto& proc : report.top_processes) {
-            if (proc.pid <= 1) continue;
-            if (!is_heavy_compute_candidate(proc)) continue;
+        // REF-REQ-104: Performance holds nothing back, so the C1/C2 dispersion is
+        // NOT applied here. Confining a compile or render to one cluster (8 of
+        // the 16 threads) and lowering it to SCHED_BATCH is a demotion, and the
+        // mode whose contract is "do not hold anything back" must not throttle
+        // the very workload the user started. Interactive latency is preserved
+        // by the DesktopCore/terminal elevation above and by the active-window
+        // guarantee, not by capping the heavy work. (The cluster topology and
+        // is_heavy_compute_candidate() remain for the saving profiles and tests.)
 
-            bool already_tracked = false;
-            for (auto& tm : m_tracked) {
-                if (tm.pid == proc.pid) {
-                    already_tracked = true;
-                    if (!tm.c2_cluster_dispersed && topo.cluster_count >= 2) {
-                        if (apply_core_affinity_cap(proc.pid, &topo.c2_cpuset)) {
-                            apply_sched_batch(proc.pid, 5);
-                            tm.c2_cluster_dispersed = true;
-                            tm.sched_batch_applied = true;
-                            tm.low_power_ticks = 0;
-                            core::EventLogger::log_mitigation(proc.pid, proc.comm.c_str(), "C2ClusterDispersion", "Confined heavy compute to C2 (Cores 8..15) with SCHED_BATCH (nice 5) to shield terminal interactivity");
-                            ++status.throttled_count;
-                        }
-                    }
-                    break;
-                }
-            }
 
-            if (!already_tracked && m_tracked.size() < MAX_TRACKED_MITIGATIONS) {
-                int orig_nice = ::getpriority(PRIO_PROCESS, static_cast<id_t>(proc.pid));
-                int orig_sched = ::sched_getscheduler(proc.pid);
-                cpu_set_t orig_aff;
-                CPU_ZERO(&orig_aff);
-                ::sched_getaffinity(proc.pid, sizeof(cpu_set_t), &orig_aff);
+        // (No de-escalation loop: nothing is confined in Performance, so there
+        //  is no dispersion state to walk back.)
 
-                const cpu_set_t& target_set = (topo.cluster_count >= 2) ? topo.c2_cpuset : topo.all_cores_cpuset;
-                if (apply_core_affinity_cap(proc.pid, &target_set)) {
-                    apply_sched_batch(proc.pid, 5);
-                    m_tracked.push_back(TrackedMitigation{
-                        .pid = proc.pid,
-                        .tier = static_cast<ProcessSafetyTier>(proc.safety_tier),
-                        .current_action = MitigationAction::AffinityCap,
-                        .applied_timestamp_sec = 0,
-                        .original_nice = orig_nice,
-                        .original_sched_policy = (orig_sched >= 0) ? orig_sched : SCHED_OTHER,
-                        .original_timerslack_ns = proc.timerslack_ns,
-                        .original_affinity = orig_aff,
-                        .affinity_capped = true,
-                        .sched_batch_applied = true,
-                        .sched_idle_applied = false,
-                        .c2_cluster_dispersed = (topo.cluster_count >= 2),
-                        .low_power_ticks = 0
-                    });
-                    core::EventLogger::log_mitigation(proc.pid, proc.comm.c_str(), "C2ClusterDispersion", "Confined heavy compute to C2 (Cores 8..15) with SCHED_BATCH (nice 5) to shield terminal interactivity");
-                    ++status.throttled_count;
-                }
-            }
-        }
-
-        // 3. Dynamic Variable De-Escalation ("가변적 적용")
-        for (size_t i = 0; i < m_tracked.size(); ) {
-            auto& tm = m_tracked[i];
-            if (!tm.c2_cluster_dispersed) {
-                ++i;
-                continue;
-            }
-
-            if (::kill(tm.pid, 0) != 0) {
-                m_tracked[i] = m_tracked.back();
-                m_tracked.pop_back();
-                continue;
-            }
-
-            bool found_active = false;
-            double cur_watts = 0.0;
-            for (const auto& proc : report.top_processes) {
-                if (proc.pid == tm.pid) {
-                    found_active = true;
-                    cur_watts = proc.cpu_watts;
-                    break;
-                }
-            }
-
-            if (!found_active || cur_watts < 0.30) {
-                ++tm.low_power_ticks;
-            } else {
-                tm.low_power_ticks = 0;
-            }
-
-            if (tm.low_power_ticks >= 2) {
-                restore_core_affinity(tm.pid, &tm.original_affinity);
-                restore_sched_normal(tm.pid, tm.original_sched_policy, tm.original_nice);
-                core::EventLogger::log_rollback(tm.pid, "heavy-compute", "Adaptive de-escalation: CPU power subsided below 0.3W, restored all-core affinity");
-                m_tracked[i] = m_tracked.back();
-                m_tracked.pop_back();
-            } else {
-                ++i;
-            }
-        }
 
         if (status.feature_summary_count < status.feature_summaries.size()) {
             status.feature_summaries[status.feature_summary_count++] = "CPU: 4.1GHz Boost (Performance)";
         }
         if (status.feature_summary_count < status.feature_summaries.size()) {
-            status.feature_summaries[status.feature_summary_count++] = "C1/C2 Dual-Cluster Spatial Load Dispersion";
+            status.feature_summaries[status.feature_summary_count++] = "All-Core Compute: no affinity cap, no SCHED_IDLE";
         }
         if (status.feature_summary_count < status.feature_summaries.size()) {
             status.feature_summaries[status.feature_summary_count++] = "Terminal Latency Shield: Active (nice -5, C1)";
         }
-        status.active_summary = "Performance Mode (C1/C2 Cluster Dispersion & Terminal Shield Active)";
+        status.active_summary = "Performance Mode (All-Core Compute, Terminal Shield Active)";
         report.mitigation_status = status;
         return status;
     }

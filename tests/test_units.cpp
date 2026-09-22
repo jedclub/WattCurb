@@ -2241,17 +2241,22 @@ void test_adaptive_c1_c2_cluster_dispersion() {
 
     auto status = engine.evaluate_and_actuate(report, false, 100.0);
     assert(status.current_profile == PowerProfileMode::Performance);
-    assert(status.active_summary.view().find("C1/C2 Cluster Dispersion & Terminal Shield Active") != std::string_view::npos);
+    assert(status.active_summary.view().find("All-Core Compute") != std::string_view::npos);
 
-    bool has_c1_c2_summary = false;
+    bool has_all_core_summary = false;
     bool has_term_shield_summary = false;
+    bool has_c2_dispersion = false;
     for (size_t i = 0; i < status.feature_summary_count; ++i) {
         std::string_view feat = status.feature_summaries[i].view();
-        if (feat.find("C1/C2 Dual-Cluster") != std::string_view::npos) has_c1_c2_summary = true;
+        if (feat.find("All-Core Compute") != std::string_view::npos) has_all_core_summary = true;
         if (feat.find("Terminal Latency Shield") != std::string_view::npos) has_term_shield_summary = true;
+        if (feat.find("C1/C2 Dual-Cluster") != std::string_view::npos) has_c2_dispersion = true;
     }
-    assert(has_c1_c2_summary && "Performance mode must report C1/C2 Dual-Cluster Load Dispersion");
+    assert(has_all_core_summary && "Performance mode must report all-core compute (no affinity cap)");
     assert(has_term_shield_summary && "Performance mode must report Active Terminal Latency Shield");
+    // REF-REQ-104: Performance holds nothing back, so it must NOT confine heavy
+    // compute to one cluster or advertise the dispersion.
+    assert(!has_c2_dispersion && "Performance must not apply or claim C1/C2 dispersion");
 
     // 5. Dynamic Variable De-Escalation Loop (REF-REQ-084 Sec 2.4 "가변적 적용")
     // When compute load subsides below 0.3W for 2 consecutive cycles, restore baseline

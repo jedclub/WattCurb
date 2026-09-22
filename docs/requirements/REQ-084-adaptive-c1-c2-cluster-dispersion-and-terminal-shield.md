@@ -46,6 +46,7 @@ The daemon MUST detect the physical L3 cache / CCX cluster topology at initializ
    - Confine heavy compute workloads to **Cluster 2 (C2: Cores 8..15)** via `sched_setaffinity`.
    - Modulate task scheduler policy to `SCHED_BATCH` with `nice 5`.
    - Preserve clean headroom on C1 (Cores 0..3) strictly for interactive terminal input and UI rendering.
+3. **Profile exception (REF-REQ-104)**: this confinement is **NOT applied in Performance mode**. That profile's contract is that no workload is held back, so a compile or render keeps every core; interactive latency there is protected by priority elevation (terminal/compositor shield and the active-window guarantee), not by capping the heavy work. The dispersion remains in force for Balanced, PowerSaver and UltraEndurance.
 
 ### 2.4 Dynamic & Variable Hysteresis Loop ("가변적 적용")
 1. Confinement MUST NOT be permanent or rigid.

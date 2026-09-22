@@ -65,7 +65,7 @@ During every monitoring tick (both light probe and deep sweep):
 1. **Interactive Shield Sweep**:
    - Traverse active task comms. If matching `konsole`, `alacritty`, `kitty`, `bash`, `zsh`, `kwin_wayland`, elevate priority to `nice -5` ~ `nice -10` and restrict to $\mathcal{M}_{\text{C1}}$.
 2. **Compute Dispersion Sweep**:
-   - In `PowerProfileMode::Performance` (and `Balanced` under contention):
+   - **Performance mode does NOT run this sweep (REF-REQ-104).** That profile holds nothing back, so heavy compute keeps all cores; its interactive latency comes from the elevation in step 1. The sweep runs in `Balanced`/`PowerSaver`/`UltraEndurance` under contention.
    - If a heavy process is detected ($P_{\text{proc}} > 0.8\text{W}$ or $\text{threads} \ge 4$), bind to $\mathcal{M}_{\text{C2}}$ with `SCHED_BATCH` and `nice 5`.
    - Log mitigation action: `EventLogger::log_mitigation(pid, comm, "C2_CLUSTER_DISPERSION", "Confined heavy compute to C2 (Cores 8..15) to shield terminal interactivity")`.
 3. **De-Escalation Sweep**:
