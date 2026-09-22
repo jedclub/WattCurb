@@ -2044,6 +2044,76 @@ void test_thinkpower_tray_client() {
               << avg_us_op << " us/op)\n";
 }
 
+// Implements REF-TEST-074 & REF-REQ-116: the tray's "share of total system
+// drain" denominator must fall back to the domain sum when the battery gas gauge
+// reports no DC rail (AC / not charging). Otherwise system_drain_mw is 0, the
+// bar math uses a 1 mW floor, and both the CPU and GPU progressive bars pin at
+// 100% - the exact symptom observed on AC with POWER_NOW=0.
+void test_effective_total_power_fallback() {
+    using namespace wattcurb;
+
+    std::cout << "\n--- [REF-TEST-074] Effective Total Power Fallback (REF-REQ-116) ---\n";
+
+    // 1. Pure fallback math on the physical breakdown.
+    HardwarePowerBreakdown ac{};
+    ac.total_system_watts = 0.0; // gas gauge reads 0 while on AC
+    ac.is_battery_discharging = false;
+    ac.cpu_package_watts = 2.93;
+    ac.gpu_watts = 0.68;
+    ac.uncore_and_platform_watts = 0.5;
+    assert(ac.effective_total_watts() > 4.10 && ac.effective_total_watts() < 4.12 &&
+           "AC total must be the sum of the measured domains, not 0");
+
+    // Discharging: the DC rail dominates and is preserved.
+    HardwarePowerBreakdown dc = ac;
+    dc.is_battery_discharging = true;
+    dc.total_system_watts = 14.2;
+    assert(dc.effective_total_watts() == 14.2 && "DC rail must be kept while discharging");
+
+    // Nothing measured at all: honest zero, never a fabricated value.
+    HardwarePowerBreakdown unmeasured{};
+    assert(unmeasured.effective_total_watts() == 0.0);
+
+    // 2. The shared state the tray reads must publish the fallback, not the 0 rail.
+    AnalysisReportData r;
+    r.hardware = ac;
+    r.hardware.battery_capacity_percent = 80;
+    r.hardware.is_ac_passthrough = true;
+    ipc::WattCurbSharedState state{};
+    state.update_from_report(r);
+    assert(state.system_drain_mw == 4110 && "AC must publish the domain sum, not 0");
+
+    // 3. Contributions no longer saturate: CPU 2.93/4.11 = 71%, GPU 0.68/4.11 = 16%.
+    //    Only the CPU line prints its percentage (REF-REQ-048); the GPU share is
+    //    carried by the 8-block BAR. A full bar is 8 U+2588 blocks, so its absence
+    //    proves neither domain was pinned at 100%.
+    constexpr std::string_view FULL_BAR = "\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88";
+    char title[128]{};
+    char desc[8192]{};
+    tray::TrayClient::render_tooltip(state, title, sizeof(title), desc, sizeof(desc));
+    assert(std::string_view(title).find("4.1 W") != std::string_view::npos);
+    assert(std::string_view(desc).find("71%") != std::string_view::npos &&
+           "CPU share must reflect the domain-sum denominator, not the 1 mW floor");
+    assert(std::string_view(desc).find(FULL_BAR) == std::string_view::npos &&
+           "no contribution bar may saturate to 100% on AC");
+
+    // 4. Document the pre-fix pathology so a regression that restores the 0 rail
+    //    is caught: with system_drain_mw=0 the tray's 1 mW floor yields full bars.
+    ipc::WattCurbSharedState legacy{};
+    legacy.system_drain_mw = 0;
+    legacy.cpu_drain_mw = 2930;
+    legacy.gpu_drain_mw = 680;
+    legacy.battery_percent = 80;
+    legacy.battery_state = 2;
+    tray::TrayClient::render_tooltip(legacy, title, sizeof(title), desc, sizeof(desc));
+    assert(std::string_view(desc).find(FULL_BAR) != std::string_view::npos &&
+           "guards the invariant: a raw 0 rail is what produced the 100% bars");
+    assert(state.system_drain_mw != 0 && "update_from_report must never emit that state");
+
+    std::cout << " [PASS] test_effective_total_power_fallback (REF-TEST-074: AC domain-sum total, "
+                 "DC rail preserved, 100% saturation eliminated)\n";
+}
+
 // Implements REF-TEST-019: Anti-Starvation & Greedy Capping Oracle Gate Verification (REF-REQ-054, REF-ARCH-030)
 void test_anti_starvation_and_greedy_capping() {
     using namespace wattcurb::policy;
@@ -5677,6 +5747,7 @@ int main() {
     test::test_window_aware_governor();
     test::test_unified_rapid_rollback();
     test::test_thinkpower_tray_client();
+    test::test_effective_total_power_fallback();
     test::test_tray_hotpath_profiling_audit();
     test::test_tray_top10_extreme_optimization_oracle_gate();
 #if defined(WATTCURB_HAS_QT6)

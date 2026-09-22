@@ -39,13 +39,11 @@ void write_bar(std::ostream& out, double percent, int width = 16) {
     out.write(buf, idx);
 }
 
+// REF-REQ-116: single source of truth for the effective total. Kept as a free
+// function for existing callers; the fallback now lives on HardwarePowerBreakdown
+// so the tray shared state cannot diverge from it.
 double get_effective_total_watts(const AnalysisReportData& r) {
-    double hw_sum = r.hardware.cpu_package_watts + r.hardware.gpu_watts + r.hardware.display_watts +
-                    r.hardware.fan_estimated_watts + r.hardware.storage_estimated_watts + r.hardware.uncore_and_platform_watts;
-    if (r.hardware.is_battery_discharging && r.hardware.total_system_watts > 0.0) {
-        return std::max(r.hardware.total_system_watts, hw_sum);
-    }
-    return hw_sum > 0.0 ? hw_sum : r.hardware.total_system_watts;
+    return r.hardware.effective_total_watts();
 }
 
 // Common hardware row printer: eliminates intermediate std::string allocations and duplicate code

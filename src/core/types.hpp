@@ -417,6 +417,23 @@ struct HardwarePowerBreakdown {
     std::optional<uint32_t> cpu_core_vid_mv;
     uint8_t pcie_link_speed_gen{0};
     uint8_t pcie_link_width_lanes{0};
+
+    // REF-REQ-010 / REF-REQ-116: Effective total system power for display and for
+    // contribution shares. The battery gas gauge measures only the DC rail and
+    // reports 0 while on AC (charging / passthrough) or before its counter has
+    // settled, so there the sum of the physical domains is the only usable
+    // reference. report::get_effective_total_watts already used this fallback;
+    // the tray's "share of total" bars and title must use the same definition,
+    // or a 0 rail makes them divide by a 1 mW floor and saturate at 100%.
+    [[nodiscard]] double effective_total_watts() const noexcept {
+        const double hw_sum = cpu_package_watts + gpu_watts + display_watts +
+                              fan_estimated_watts + storage_estimated_watts +
+                              uncore_and_platform_watts;
+        if (is_battery_discharging && total_system_watts > 0.0) {
+            return total_system_watts > hw_sum ? total_system_watts : hw_sum;
+        }
+        return hw_sum > 0.0 ? hw_sum : total_system_watts;
+    }
 };
 
 // Implements REF-REQ-004, REF-REQ-011 & REF-RES-003

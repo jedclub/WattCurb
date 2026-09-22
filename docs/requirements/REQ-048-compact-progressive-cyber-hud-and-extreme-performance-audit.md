@@ -22,7 +22,7 @@ This specification delivers:
 - **Header**: Live Watts, status sign (`+` charging / `-` discharging), real-time pulse indicator (`● LIVE`).
 - **Power Flow & Battery**: Exact SOC %, 12-block gauge, battery health %, AC direct passthrough wear protection, system wakeups/sec, ThinkPad cooling fan RPM.
 - **Silicon Domains**:
-  - **CPU Compute**: Attributed Watts, % of total system drain, 10-block progressive gauge, real-time core temperature (°C) with 4-tier color grading (`#00f0ff` < 55°C, `#10b981` < 70°C, `#fb923c` < 80°C, `#f43f5e` >= 80°C).
+  - **CPU Compute**: Attributed Watts, % of total system drain, 10-block progressive gauge, real-time core temperature (°C) with 4-tier color grading (`#00f0ff` < 55°C, `#10b981` < 70°C, `#fb923c` < 80°C, `#f43f5e` >= 80°C). The total is the effective total: the battery DC rail while discharging, otherwise the sum of the measured hardware domains ([`REF-REQ-116`](REQ-116-effective-total-power-fallback.md)).
   - **GPU Graphics**: Attributed Watts, % contribution, 10-block gauge, runtime power status (`3D 렌더링 활성` / `2D GUI 가속` / `D3Cold 초절전`).
   - **Platform & DRAM/IO**: Attributed Watts, % contribution, 10-block gauge, LPDDR5X bus & NVMe APST telemetry.
   - **C3 Deep Sleep**: Residency percentage, 10-block gauge, sleep state rating.

@@ -321,10 +321,16 @@ void TrayClient::probe_sensors_for_hover(ipc::WattCurbSharedState& state) noexce
                     while (*p && *p != '\n') ++p;
                     if (*p == '\n') ++p;
                 }
-                if (power_now > 0) {
-                    state.system_drain_mw = power_now / 1000;
-                } else if (current_now > 0 && voltage_now > 0) {
-                    state.system_drain_mw = static_cast<uint32_t>((static_cast<uint64_t>(current_now) * voltage_now) / 1'000'000'000ULL);
+                // REF-REQ-116: only the discharge rail is a valid "system drain".
+                // On AC the battery gauge reports the charge power (or 0), which
+                // must not replace the daemon's effective total - otherwise the
+                // tooltip's CPU/GPU shares would flip between AC and hover.
+                if (state.battery_state == 1) {
+                    if (power_now > 0) {
+                        state.system_drain_mw = power_now / 1000;
+                    } else if (current_now > 0 && voltage_now > 0) {
+                        state.system_drain_mw = static_cast<uint32_t>((static_cast<uint64_t>(current_now) * voltage_now) / 1'000'000'000ULL);
+                    }
                 }
             }
         }

@@ -46,7 +46,11 @@ struct alignas(64) WattCurbSharedState {
         uint64_t ver = __atomic_load_n(&seq_version, __ATOMIC_RELAXED);
         __atomic_store_n(&seq_version, ver + 1, __ATOMIC_RELEASE); // Mark writer busy (odd)
 
-        system_drain_mw = static_cast<uint32_t>(r.hardware.total_system_watts * 1000.0);
+        // REF-REQ-116: store the EFFECTIVE total, not the raw DC rail. On AC the
+        // rail reads 0 and the tooltip's contribution bars would divide by the
+        // 1 mW floor and pin CPU and GPU at 100%. effective_total_watts() falls
+        // back to the domain sum exactly like report::get_effective_total_watts.
+        system_drain_mw = static_cast<uint32_t>(r.hardware.effective_total_watts() * 1000.0);
         battery_percent = static_cast<uint8_t>(std::clamp(static_cast<int>(r.hardware.battery_capacity_percent), 0, 100));
         battery_state = r.hardware.is_ac_passthrough ? 2 : (r.hardware.is_battery_discharging ? 1 : 0);
         time_to_empty_min = static_cast<uint16_t>(std::clamp(static_cast<int>(r.hardware.battery_remaining_hours_to_empty * 60.0), 0, 65535));
