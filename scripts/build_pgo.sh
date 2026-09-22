@@ -23,8 +23,10 @@ STRIP_SECTIONS=(
 
 # REF-REQ-075: this pipeline performs two full compiles (stage 1 and stage 3).
 # Ninja defaults to CPUs+2, which can oversubscribe a host that is also running
-# other work. Cap at the CPU count by default; override with WATTCURB_JOBS.
-JOBS="${WATTCURB_JOBS:-$(nproc 2>/dev/null || echo 4)}"
+# other work. Cap at half the CPU count by default; override with WATTCURB_JOBS.
+NPROC="$(nproc 2>/dev/null || echo 4)"
+JOBS="${WATTCURB_JOBS:-$(( NPROC / 2 ))}"
+[ "${JOBS}" -lt 1 ] && JOBS=1
 
 echo "==================================================================="
 echo "  WattCurb Multi-Target PGO Release Pipeline (REF-REQ-075)         "
