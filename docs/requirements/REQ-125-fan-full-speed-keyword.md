@@ -102,3 +102,40 @@ write was then defended by a mis-attributed measurement.
 - The >= 60 C rule holds in all four profiles (REF-REQ-118.1).
 - Live on the host after release: with `Tctl` at 70.2 C the daemon's write must
   produce ~5346 RPM (previously 4780).
+
+## 7. Fan state is verified, not assumed (REF-REQ-125.4)
+
+`g_last_fan_level` caches what this process WROTE. Nothing checked that the EC kept
+it. Observed on the host: after an external `echo level auto` the daemon went on
+believing it held full speed and did not correct it until the temperature crossed a
+level boundary - the fan sat at the EC's quiet curve (~3.5k RPM) while the daemon
+reported maximum cooling.
+
+While the curve asks for full speed - the case where losing the state actually
+matters - `apply_fan_for_temp()` now reads `/proc/acpi/ibm/fan` back and
+re-asserts the write when the state no longer matches. The comparison maps
+`disengaged`/`full-speed` to `FAN_LEVEL_FULL_SPEED`; a naive integer comparison
+would conclude control was lost on every cycle and rewrite the fan forever. `auto`
+and unknown words never match, which is exactly the state that must be corrected.
+
+Cost: one ~100-byte procfs read per cycle, and only while the full-speed step is
+in force. The write itself still happens only on a change or on a detected loss.
+
+### 7.1 Every fan state measured on this host (Tctl 70 C)
+
+| State | RPM |
+| :--- | ---: |
+| `auto` (EC control) | 3490 |
+| `level 4` | 3610 |
+| `pwm1=128` (hwmon) | 3831 |
+| `level 5` | 4332 |
+| `level 6` | 4789 |
+| `level 7` | 4780 |
+| `pwm1=255` (100 % duty) | 4771 |
+| **`full-speed` / `disengaged`** | **5340-5357** |
+
+`full-speed` is the maximum reachable through the OS on this host. 100 % PWM duty
+is 570 RPM BELOW it, so "write 100 %" is not the answer either. A 5701 RPM reading
+was observed once earlier in the session; it could not be reproduced by any state
+above, and the EC's own `auto` mode is far lower, so it is recorded as
+unexplained rather than assumed reachable.

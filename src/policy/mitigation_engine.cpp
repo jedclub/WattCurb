@@ -3022,6 +3022,34 @@ int MitigationEngine::fan_level_for_temp_in_profile(double cpu_temp_c,
     return fan_level_for_temp(cpu_temp_c);
 }
 
+// REF-REQ-125.4: read back the fan state and decide whether it is still the one
+// we commanded. thinkpad_acpi reports the full-speed state as the word
+// "disengaged" (TP_EC_FAN_FULLSPEED), not as a number, so a naive integer
+// comparison would decide we had lost control every single cycle and rewrite the
+// fan forever. "auto" and unknown words never match: they mean the EC has the
+// fan, which is exactly the state that must be corrected.
+[[nodiscard]] static bool fan_state_matches(int expected_level) noexcept {
+    int fd = ::open("/proc/acpi/ibm/fan", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return true; // cannot read -> do not rewrite blindly
+    char buf[256];
+    const ssize_t n = ::read(fd, buf, sizeof(buf) - 1);
+    ::close(fd);
+    if (n <= 0) return true;
+    buf[n] = '\0';
+    const char* lv = std::strstr(buf, "level:");
+    if (lv == nullptr) return true;
+    lv += 6;
+    while (*lv == ' ' || *lv == '\t') ++lv;
+
+    int actual = -1;
+    if (std::strncmp(lv, "disengaged", 10) == 0 || std::strncmp(lv, "full-speed", 10) == 0) {
+        actual = MitigationEngine::FAN_LEVEL_FULL_SPEED;
+    } else if (*lv >= '0' && *lv <= '9') {
+        actual = static_cast<int>(std::strtol(lv, nullptr, 10));
+    }
+    return actual == expected_level;
+}
+
 int MitigationEngine::apply_fan_for_temp(double cpu_temp_c,
                                          PowerProfileMode mode) noexcept {
     ++g_fan_curve_application_count;
@@ -3030,7 +3058,21 @@ int MitigationEngine::apply_fan_for_temp(double cpu_temp_c,
 
     // Write only on a level change: the observation cycle runs every 1-3 s and a
     // per-cycle fan write would be a needless sysfs storm.
-    if (lvl == g_last_fan_level) return lvl;
+    //
+    // REF-REQ-125.4: a cached level is a claim, not a fact. The cache records what
+    // THIS process wrote, and nothing checked that the EC kept it. Observed on the
+    // host: after an external `echo level auto` the daemon went on believing it
+    // held full speed and did not correct it until the temperature crossed a level
+    // boundary - the fan sat at the EC's quiet curve while the daemon reported
+    // maximum cooling. While the curve is asking for full speed (the case where
+    // losing the state actually matters) the level is therefore verified by
+    // reading it back, and re-asserted if it no longer matches.
+    if (lvl == g_last_fan_level) {
+        if (lvl != FAN_LEVEL_FULL_SPEED || fan_state_matches(FAN_LEVEL_FULL_SPEED)) {
+            return lvl;
+        }
+        // fall through and re-write
+    }
 
     char level[16];
     // REF-REQ-125: the top step is the `full-speed` keyword (TP_EC_FAN_FULLSPEED),

@@ -4806,6 +4806,13 @@ void test_thinkpad_fan_thermal_assist_and_smu_limits() {
     assert(!policy::MitigationEngine::hardware_baseline().fan_level_modified);
     assert(policy::MitigationEngine::restore_fan_level()); // no-op success
 
+    // --- 2b. REF-REQ-125.4: the read-back must not actuate in the sandbox ---
+    // The verification path reads /proc/acpi/ibm/fan to decide whether the EC kept
+    // the state. Under the sandbox the corrective write is refused, so the call
+    // must report failure rather than claiming it re-asserted the fan.
+    assert(policy::MitigationEngine::apply_fan_for_temp(75.0, PowerProfileMode::Performance) == -1);
+    assert(!policy::MitigationEngine::hardware_baseline().fan_level_modified);
+
     // --- 3. SMU constants are coherent; the raise is sandboxed -----------
     assert(policy::MitigationEngine::SMU_TCTL_PERF_C == 85);
     assert(policy::MitigationEngine::SMU_STAPM_PERF_MW <=
