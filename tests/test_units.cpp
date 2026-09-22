@@ -12,6 +12,7 @@
 #include "policy/unified_rollback_coordinator.hpp"
 #include "policy/battery_feature.hpp"
 #include "policy/memory_pressure_guard.hpp"
+#include "policy/swap_expander.hpp"
 #include "report/report_generator.hpp"
 #include "ipc/tray_shared_state.hpp"
 #include "ipc/history_ring_buffer.hpp"
@@ -4662,6 +4663,86 @@ void test_memory_pressure_parsers() {
                  "meminfo fields, truncation safety, PSI avg10 extraction verified)\n";
 }
 
+// Implements REF-TEST-071 & REF-REQ-113: Performance mode endures memory
+// pressure by growing swap, not by braking the workload.
+//
+// The risk this change introduces is a daemon that fills the disk, or one that
+// gives capacity back while the machine is still paging into it. Both are
+// falsified here, together with the policy that decides when the CPU brake may
+// be used at all.
+void test_performance_swap_expansion_policy() {
+    using namespace wattcurb;
+    using namespace wattcurb::policy;
+
+    std::cout << "\n--- [REF-TEST-071] Performance Swap Expansion Policy (REF-REQ-113) ---\n";
+
+    // --- When to grow ------------------------------------------------------
+    constexpr uint64_t GiB_KB = 1024ull * 1024ull;
+
+    // Healthy: 39 GiB total, 30 GiB free (77%) - nothing to do.
+    assert(!SwapExpander::should_expand(39 * GiB_KB, 30 * GiB_KB));
+    // Depleting: 39 GiB total, 8 GiB free (20%) - below the percentage bound.
+    assert(SwapExpander::should_expand(39 * GiB_KB, 8 * GiB_KB));
+    // Small tier: 12 GiB total, 5 GiB free is 41% - above the percentage bound
+    // but below the 6 GiB absolute floor, which is what matters on a small tier.
+    assert(SwapExpander::should_expand(12 * GiB_KB, 5 * GiB_KB));
+    // No swap configured at all: there is nothing to extend.
+    assert(!SwapExpander::should_expand(0, 0));
+
+    // --- Disk budget -------------------------------------------------------
+    constexpr uint64_t GiB = 1ull << 30;
+    const uint64_t need = SwapExpander::INCREMENT_BYTES + SwapExpander::DISK_FREE_FLOOR_BYTES;
+
+    assert(SwapExpander::budget_allows(need, 0));           // exactly enough
+    assert(!SwapExpander::budget_allows(need - 1, 0));      // one byte short of the floor
+    assert(SwapExpander::budget_allows(200 * GiB, 0));
+    // The file ceiling is a hard stop however much disk is free.
+    assert(!SwapExpander::budget_allows(500 * GiB, SwapExpander::MAX_FILES));
+    assert(SwapExpander::budget_allows(500 * GiB, SwapExpander::MAX_FILES - 1));
+    // An unreadable filesystem is not permission to allocate.
+    assert(!SwapExpander::budget_allows(0, 0));
+
+    // --- When it is safe to give capacity back -----------------------------
+    // swapoff() faults every page of the file back in, so releasing while the
+    // machine is still paging heavily would cause the exhaustion this defends
+    // against. 39 GiB total, 35 GiB free -> only 4 GiB paged out, fits easily.
+    assert(SwapExpander::safe_to_release(39 * GiB_KB, 35 * GiB_KB, SwapExpander::INCREMENT_BYTES));
+    // 39 GiB total, 4 GiB free -> 35 GiB paged out; removing 8 GiB leaves 31 GiB.
+    assert(!SwapExpander::safe_to_release(39 * GiB_KB, 4 * GiB_KB, SwapExpander::INCREMENT_BYTES));
+    // A file at least as large as the whole tier can never be removed safely.
+    assert(!SwapExpander::safe_to_release(4 * GiB_KB, 4 * GiB_KB, SwapExpander::INCREMENT_BYTES));
+
+    // --- Who may brake the workload ---------------------------------------
+    // Performance: never while capacity can still be added.
+    assert(!MemoryPressureGuard::throttle_permitted(PowerProfileMode::Performance, true, false));
+    assert(!MemoryPressureGuard::throttle_permitted(PowerProfileMode::Performance, false, false));
+    // Still growing, even with the budget spent: wait for the file in flight.
+    assert(!MemoryPressureGuard::throttle_permitted(PowerProfileMode::Performance, true, true));
+    // Nothing left to add: the brake is the only alternative to a kernel kill.
+    assert(MemoryPressureGuard::throttle_permitted(PowerProfileMode::Performance, false, true));
+    // Every other profile brakes at the Throttle tier as before.
+    assert(MemoryPressureGuard::throttle_permitted(PowerProfileMode::Balanced, false, false));
+    assert(MemoryPressureGuard::throttle_permitted(PowerProfileMode::PowerSaver, true, false));
+    assert(MemoryPressureGuard::throttle_permitted(PowerProfileMode::UltraEndurance, false, false));
+
+    // --- The sandbox must keep the expander off a developer's disk ---------
+    {
+        const bool prev = MitigationEngine::actuation_sandboxed();
+        MitigationEngine::set_actuation_sandbox(true);
+        SwapExpander exp;
+        // Pressure that would otherwise allocate 8 GiB on this host.
+        const bool started = exp.ensure_headroom(39 * GiB_KB, 1 * GiB_KB);
+        assert(!started && "sandboxed run must not create a swapfile");
+        assert(exp.active_count() == 0);
+        assert(!exp.expansion_in_flight());
+        MitigationEngine::set_actuation_sandbox(prev);
+    }
+
+    std::cout << " [PASS] test_performance_swap_expansion_policy (REF-TEST-071: growth "
+                 "thresholds, disk floor and file ceiling, release safety, Performance "
+                 "brake-only-when-exhausted, sandbox containment verified)\n";
+}
+
 // Implements REF-TEST-062 & REF-REQ-111: the four defects found by the
 // REF-RES-029 audit.
 void test_audit_defect_remediation() {
@@ -5485,6 +5566,7 @@ int main() {
     test::test_cpu_ceiling_baseline_is_hardware_max();
     test::test_memory_pressure_ladder();
     test::test_memory_pressure_parsers();
+    test::test_performance_swap_expansion_policy();
     test::test_multilingual_l10n_and_auto_system_locale();
     test::test_anti_starvation_and_greedy_capping();
     test::test_adaptive_c1_c2_cluster_dispersion();

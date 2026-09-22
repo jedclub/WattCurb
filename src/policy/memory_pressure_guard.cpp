@@ -87,6 +87,10 @@ bool MemoryPressureGuard::initialize() noexcept {
     }
     if (m_meminfo_fd < 0) return false;
 
+    // REF-REQ-113: adopt or reclaim dynamic swapfiles from a previous run
+    // before any decision is taken on current capacity.
+    m_expander.initialize();
+
     // The PSI trigger is what makes this guard event-driven instead of polled.
     // It is optional: a kernel without CONFIG_PSI, or a container without write
     // access, leaves m_psi_fd at -1 and the guard still runs on the daemon's
@@ -274,7 +278,8 @@ void MemoryPressureGuard::actuate_throttle(const AnalysisReportData& report,
 }
 
 MemoryPressureTier MemoryPressureGuard::evaluate_and_actuate(const AnalysisReportData& report,
-                                                             int32_t protected_pid) noexcept {
+                                                             int32_t protected_pid,
+                                                             PowerProfileMode profile) noexcept {
     MemoryPressureSample s{};
     if (!sample(s)) return m_tier;
     m_last = s;
@@ -298,9 +303,52 @@ MemoryPressureTier MemoryPressureGuard::evaluate_and_actuate(const AnalysisRepor
         core::EventLogger::log_alert("MEMORY", detail);
     }
 
+    // REF-REQ-113: a creation child started on an earlier tick may have finished.
+    m_expander.poll_pending();
+
+    if (profile == PowerProfileMode::Performance) {
+        // Performance does not brake the workload. It buys room instead: the
+        // backing store grows while there is disk to grow it into, and the
+        // pages that get written out are the cost of staying alive, paid in
+        // I/O rather than in CPU the user asked for.
+        const bool growing = m_expander.ensure_headroom(s.swap_total_kb, s.swap_free_kb);
+
+        if (next == MemoryPressureTier::Normal) {
+            if (previous != MemoryPressureTier::Normal) release_all();
+            m_expander.maybe_release(s.swap_total_kb, s.swap_free_kb);
+            return next;
+        }
+
+        // File-backed reclaim only - it frees page cache, it does not slow the
+        // foreground, and it does not consume the swap tier being defended.
+        actuate_advisory(report);
+
+        const bool exhausted = m_expander.budget_exhausted();
+        if (next == MemoryPressureTier::Throttle &&
+            throttle_permitted(profile, growing, exhausted)) {
+            // No capacity left to add. The remaining choice is the brake or a
+            // kernel SIGKILL, and REF-REQ-112 exists to avoid the latter.
+            if (!m_logged_budget_exhausted) {
+                m_logged_budget_exhausted = true;
+                core::EventLogger::log_alert(
+                    "SWAP",
+                    "Performance mode: swap cannot be grown further (file ceiling or disk "
+                    "floor reached); falling back to the CPU throttle to avoid a kernel "
+                    "OOM kill (REF-REQ-113)");
+            }
+            actuate_throttle(report, protected_pid);
+        } else {
+            // While capacity can still be added, hold no CPU cap at all.
+            m_logged_budget_exhausted = false;
+            release_all();
+        }
+        return next;
+    }
+
     switch (next) {
     case MemoryPressureTier::Normal:
         if (previous != MemoryPressureTier::Normal) release_all();
+        m_expander.maybe_release(s.swap_total_kb, s.swap_free_kb);
         break;
     case MemoryPressureTier::Advisory:
         // Stepping down from Throttle releases the CPU caps but keeps reclaiming.

@@ -2,6 +2,7 @@
 
 #include "core/types.hpp"
 #include "core/custom_containers.hpp"
+#include "policy/swap_expander.hpp"
 
 #include <cstdint>
 
@@ -123,8 +124,12 @@ public:
     // Samples, classifies, and actuates. Returns the tier now in force.
     // protected_pid is the focused window (REF-REQ-085): the one process the
     // user is watching is never the one slowed down.
+    // REF-REQ-113: in Performance the ladder does NOT end at a CPU throttle.
+    // That profile grows the backing store instead and only falls back to the
+    // brake when no capacity can be added.
     MemoryPressureTier evaluate_and_actuate(const AnalysisReportData& report,
-                                            int32_t protected_pid = 0) noexcept;
+                                            int32_t protected_pid,
+                                            PowerProfileMode profile) noexcept;
 
     // Pure selection predicate, exposed so the Oracle Gate can prove WHICH
     // processes the Throttle tier is willing to slow down without needing a
@@ -132,6 +137,19 @@ public:
     // something that must never be throttled, and this is what falsifies it.
     [[nodiscard]] static bool is_throttle_candidate(const ProcessAttributedPower& p,
                                                     int32_t protected_pid) noexcept;
+
+    // REF-REQ-113: whether the CPU brake may be used at the Throttle tier.
+    // Performance forbids it while capacity can still be added - the profile's
+    // answer to pressure is a bigger backing store, not a slower workload - and
+    // permits it only once nothing more can be added, because the remaining
+    // alternative is a kernel SIGKILL. Pure, so the Oracle Gate can prove the
+    // policy without a machine under pressure.
+    [[nodiscard]] static bool throttle_permitted(PowerProfileMode profile,
+                                                 bool expansion_in_flight,
+                                                 bool budget_exhausted) noexcept {
+        if (profile != PowerProfileMode::Performance) return true;
+        return !expansion_in_flight && budget_exhausted;
+    }
 
     // Pure parsers over kernel text. Public so the Oracle Gate can feed them
     // truncated and malformed buffers directly - REF-RES-029 listed unfuzzed
@@ -150,6 +168,10 @@ public:
 
     void shutdown() noexcept;
 
+    // REF-REQ-113 accessors for the Oracle Gate and the status surface.
+    [[nodiscard]] const SwapExpander& swap_expander() const noexcept { return m_expander; }
+    [[nodiscard]] SwapExpander& swap_expander() noexcept { return m_expander; }
+
     // True while the guard wants the power-side reclaim ladder to stop pushing
     // anonymous pages into swap. REF-REQ-112.3.
     [[nodiscard]] static bool swap_feeding_suspended() noexcept { return s_suspend_swap_feed; }
@@ -163,6 +185,9 @@ private:
 
     void actuate_advisory(const AnalysisReportData& report) noexcept;
     void actuate_throttle(const AnalysisReportData& report, int32_t protected_pid) noexcept;
+
+    SwapExpander m_expander{};
+    bool m_logged_budget_exhausted{false};
 
     int m_meminfo_fd{-1};
     int m_psi_fd{-1};

@@ -173,6 +173,12 @@ causes:
 - **REQ-112.12 (No halting)** The ladder ends at CPU throttling. `SIGSTOP`,
   cgroup freezing and termination are **not** used. This is an explicit
   operator decision, taken in full knowledge of the limit stated in §3.3.
+- **REQ-112.15 (Performance carve-out, added by REF-REQ-113)** The CPU throttle
+  of REQ-112.9 is **not** applied in Performance mode while swap capacity can
+  still be added. That profile answers pressure by growing the backing store;
+  see [`REF-REQ-113`](REQ-113-performance-mode-dynamic-swap-expansion.md). The
+  throttle remains the last resort there for the case where growth is
+  impossible.
 - **REQ-112.13 (Rollback)** A cgroup CPU quota is cgroup state and outlives the
   daemon. Every throttle shall be released on de-escalation and on shutdown,
   before the hardware baseline is restored.

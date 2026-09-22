@@ -648,7 +648,8 @@ void DaemonRunner::process_observation_cycle() {
     // wakes it when pressure falls, so the tick is what walks the guard back
     // down and releases the throttles. Two file reads and, on a healthy machine,
     // no writes at all.
-    memory_guard_.evaluate_and_actuate(cached_report_, window_governor_.active_window_pid());
+    memory_guard_.evaluate_and_actuate(cached_report_, window_governor_.active_window_pid(),
+                                       policy::MitigationEngine::effective_profile());
 }
 
 int DaemonRunner::run() {
@@ -706,7 +707,8 @@ int DaemonRunner::run() {
                 // rather than at the next tick - under a runaway allocation the
                 // distance between "stalling" and "kernel OOM kill" is seconds.
                 memory_guard_.evaluate_and_actuate(cached_report_,
-                                                   window_governor_.active_window_pid());
+                                                   window_governor_.active_window_pid(),
+                                                   policy::MitigationEngine::effective_profile());
             } else if (fd == lock_.socket_fd()) {
                 handle_ipc_datagram(fd);
             }
