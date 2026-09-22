@@ -654,6 +654,40 @@ static bool resolve_dashboard_bin(char* out, size_t cap) noexcept {
     return false;
 }
 
+// REF-REQ-122: reconstruct the graphical session environment.
+//
+// install.sh starts the tray with a minimal environment (XDG_RUNTIME_DIR and
+// DBUS_SESSION_BUS_ADDRESS only). WAYLAND_DISPLAY and DISPLAY are therefore
+// absent, and Qt aborts - not degrades - when neither is set: the dashboard the
+// tray forked died with a core dump ("timeout: 감시 중인 명령에서 코어 덤프")
+// before it could create a window. The socket that actually exists is the
+// authority, so probe it and publish the answer to this process and to every
+// child it execs. Values that are already set are never overwritten.
+static void ensure_display_env() noexcept {
+    if (!::getenv("XDG_RUNTIME_DIR")) {
+        char rt[64];
+        std::snprintf(rt, sizeof(rt), "/run/user/%u", static_cast<unsigned>(::getuid()));
+        ::setenv("XDG_RUNTIME_DIR", rt, 0);
+    }
+    const char* rt = ::getenv("XDG_RUNTIME_DIR");
+
+    if (!::getenv("WAYLAND_DISPLAY") && rt) {
+        char sock[256];
+        std::snprintf(sock, sizeof(sock), "%s/wayland-0", rt);
+        if (::access(sock, F_OK) == 0) {
+            ::setenv("WAYLAND_DISPLAY", "wayland-0", 0);
+        }
+    }
+    if (!::getenv("DISPLAY") && ::access("/tmp/.X11-unix/X0", F_OK) == 0) {
+        ::setenv("DISPLAY", ":0", 0);
+    }
+    // Native Wayland when the compositor socket exists; otherwise leave the
+    // platform selection to Qt.
+    if (::getenv("WAYLAND_DISPLAY") && !::getenv("QT_QPA_PLATFORM")) {
+        ::setenv("QT_QPA_PLATFORM", "wayland", 0);
+    }
+}
+
 static void apply_hardware_profile(const char* mode) noexcept {
     if (!mode) return;
     const char* home = ::getenv("HOME");
@@ -784,6 +818,9 @@ bool TrayClient::register_with_watcher() noexcept {
 }
 
 bool TrayClient::initialize() noexcept {
+    // REF-REQ-122: fix up the display environment before anything can be exec'd
+    // from this process - the tray's children inherit it.
+    ensure_display_env();
     setup_shm(); // Non-fatal: if daemon is not yet running, local defaults apply
     if (!setup_dbus()) return false;
     register_with_watcher(); // Non-fatal if watcher is still starting up

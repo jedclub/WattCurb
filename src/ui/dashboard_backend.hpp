@@ -223,6 +223,9 @@ private:
     void mapSharedMemory() noexcept;
     void unmapSharedMemory() noexcept;
     void sendDaemonCommand(const char* cmd) noexcept;
+    // REF-REQ-121.4: same, but hands back the daemon's answer so a refusal can be
+    // reported instead of silently painting a profile that was not applied.
+    bool sendDaemonCommandQuery(const char* cmd, std::string& out_response) noexcept;
     bool queryDaemonTelemetry() noexcept;
     void updateFallbackTelemetry() noexcept;
 

@@ -44,6 +44,21 @@ symptom was specific to the dashboard.
 Note the comment above `user_dashboard_path()` already argued that the per-user
 path must not outrank the installed binary; the code did the opposite.
 
+A second entry point had the same defect and was found while verifying the first.
+`install.sh` writes the application-menu entry to
+`/usr/share/applications/wattcurb-dashboard.desktop` with the correct
+`Exec=/usr/local/bin/wattcurb-dashboard`, but an **older** installer had also left
+`~/.local/share/applications/wattcurb-dashboard.desktop` with
+`Exec=${HOME}/.local/bin/wattcurb-dashboard`. A user-level entry **shadows** the
+system one, so a menu launch took the unauthorized path and the profile buttons
+were dead there too.
+
+The refusal was also **silent**: `setProfile()` latched `local_override_mode_`
+before sending, so the dashboard highlighted the requested profile while the
+hardware never left the old one. The daemon does answer refusals
+(`ERROR: not an authorized WattCurb client (REF-REQ-111)`); the dashboard was
+discarding the reply.
+
 ## 2. Requirements
 
 - **REQ-121.1 (Authority order)** The tray shall resolve the dashboard binary as
@@ -55,6 +70,13 @@ path must not outrank the installed binary; the code did the opposite.
   a bug to be worked around by loosening the check.
 - **REQ-121.3 (Authorization unchanged)** The daemon's allowlist and the
   root-ownership requirement shall not be weakened.
+- **REQ-121.4 (Refusal is visible)** The dashboard shall read the daemon's reply.
+  If it begins with `ERROR`, the optimistic local override shall not be latched
+  and the UI shall fall back to the daemon's actual mode, so a refused change
+  shows as refused instead of as applied.
+- **REQ-121.5 (One launch path)** The installer shall remove the legacy per-user
+  desktop entry that points at `~/.local/bin`, leaving the system entry as the
+  single source of truth for the menu launch path.
 
 ## 3. Mechanism
 
@@ -63,6 +85,8 @@ path must not outrank the installed binary; the code did the opposite.
 | Resolver | `resolve_dashboard_bin()` (`src/tray/tray_client.cpp`) |
 | Call sites | dashboard action (id 10), report action (id 11) |
 | Authorization | `peer_is_authorized_client()` (`src/core/daemon_runner.cpp`) |
+| Reply handling | `sendDaemonCommandQuery()` + `setProfile()` (`src/ui/dashboard_backend.cpp`) |
+| Legacy entry cleanup | `install.sh` §4.4 |
 
 ## 4. Blast Radius & Failure Modes
 
@@ -73,14 +97,28 @@ path must not outrank the installed binary; the code did the opposite.
 - **A host with only a `~/.local/bin` install** still cannot change profiles from
   the dashboard, by design. The tray menu remains the way to change profiles
   there.
+- **The legacy entry is deleted, not rewritten.** A user who deliberately created
+  their own `~/.local/share/applications/wattcurb-dashboard.desktop` loses it on
+  the next install. The name is WattCurb's own, and keeping it was the defect.
+- **`setProfile()` now blocks up to 50 ms** waiting for the daemon's answer
+  (the existing `query_daemon` timeout) where it previously fired and returned.
+  The call runs on the GUI thread; 50 ms is the worst case when the daemon is
+  wedged, and it is the same budget the read path already uses.
 - **Not measured.** The end-to-end click was not driven programmatically; the fix
   is verified by the resolved path being an allowlisted, root-owned binary, which
   is exactly the condition `peer_is_authorized_client()` tests.
 
 ## 5. Verification & Oracle Gate Standards (REF-TEST-077)
 
-The denial was reproduced from the audit log before the fix. After the fix the
-resolved launch path is asserted to be `/usr/local/bin/wattcurb-dashboard`, which
-satisfies the daemon's `ALLOWED_CLIENTS` entry and root-ownership check. The
-release acceptance step is a profile change from the dashboard with no new
-`[ALERT:DENY]` line in `/var/log/wattcurb/audit.log`.
+The denial was reproduced from the audit log before the fix:
+
+```
+[ALERT:DENY] Rejected PROFILE command from wattcurb-dashbo[3445221] uid=1000
+             - not an installed WattCurb client binary
+```
+
+After the fix, the tray's menu action was driven over D-Bus
+(`com.canonical.dbusmenu.Event` id 10, the "Open Dashboard" item) and the process
+it forked reported `exe=/usr/local/bin/wattcurb-dashboard` - the allowlisted,
+root-owned path. The release acceptance step is a profile change from the
+dashboard with no new `[ALERT:DENY]` line in `/var/log/wattcurb/audit.log`.

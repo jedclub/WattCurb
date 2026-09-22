@@ -104,6 +104,22 @@ Categories=Utility;System;Monitor;
 EOF
 fi
 
+# 4.4. Remove legacy per-user desktop entries (REF-REQ-121.5).
+# Earlier installers wrote "${HOME}/.local/share/applications/wattcurb-dashboard.desktop"
+# with "Exec=${HOME}/.local/bin/wattcurb-dashboard". A user-level entry SHADOWS the
+# system one, and that path is not on the daemon's authorized-client list
+# (REF-REQ-111), so every profile change made from a menu-launched dashboard was
+# answered with "[ALERT:DENY] Rejected PROFILE command ... not an installed
+# WattCurb client binary" and the buttons did nothing. The system entry above is
+# the single source of truth for the launch path.
+if [ -n "${TARGET_USER}" ] && [ "${TARGET_USER}" != "root" ]; then
+    LEGACY_ENTRY="${USER_HOME}/.local/share/applications/wattcurb-dashboard.desktop"
+    if [ -f "${LEGACY_ENTRY}" ]; then
+        echo "  • Removing legacy user desktop entry pointing at ~/.local/bin: ${LEGACY_ENTRY}"
+        rm -f "${LEGACY_ENTRY}"
+    fi
+fi
+
 # 5. Launch Desktop Tray Indicator in Active Graphical Session
 echo "[4/4] Starting desktop tray indicator in user graphical session..."
 if [ -n "${TARGET_USER}" ] && [ "${TARGET_USER}" != "root" ]; then
@@ -115,9 +131,25 @@ if [ -n "${TARGET_USER}" ] && [ "${TARGET_USER}" != "root" ]; then
 
     # Launch tray under the desktop user's graphical session environment
     if [ -d "${TARGET_RUNTIME}" ]; then
+        # REF-REQ-122: pass the display variables too. Without them Qt aborts
+        # (the tray's own "Open Dashboard" forked a binary that died with a core
+        # dump). Read them from the user's systemd manager, which the desktop
+        # session populates; the tray also probes the sockets itself if this
+        # comes back empty.
+        SESSION_ENV=""
+        for var in WAYLAND_DISPLAY DISPLAY; do
+            val=$(sudo -u "${TARGET_USER}" \
+                    XDG_RUNTIME_DIR="${TARGET_RUNTIME}" \
+                    DBUS_SESSION_BUS_ADDRESS="unix:path=${TARGET_RUNTIME}/bus" \
+                    systemctl --user show-environment 2>/dev/null | sed -n "s/^${var}=//p")
+            # Unquoted on purpose: these become separate VAR=value words for env.
+            [ -n "${val}" ] && SESSION_ENV="${SESSION_ENV} ${var}=${val}"
+        done
+
         sudo -u "${TARGET_USER}" \
-            XDG_RUNTIME_DIR="${TARGET_RUNTIME}" \
+            env XDG_RUNTIME_DIR="${TARGET_RUNTIME}" \
             DBUS_SESSION_BUS_ADDRESS="unix:path=${TARGET_RUNTIME}/bus" \
+            ${SESSION_ENV} \
             nohup /usr/local/bin/wattcurb-tray >/dev/null 2>&1 &
     else
         sudo -u "${TARGET_USER}" nohup /usr/local/bin/wattcurb-tray >/dev/null 2>&1 &

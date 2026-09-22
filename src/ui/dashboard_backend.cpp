@@ -542,6 +542,11 @@ QString DashboardBackend::powerProfileName() const {
 }
 
 void DashboardBackend::sendDaemonCommand(const char* cmd) noexcept {
+    std::string ignored;
+    (void)sendDaemonCommandQuery(cmd, ignored);
+}
+
+bool DashboardBackend::sendDaemonCommandQuery(const char* cmd, std::string& out_response) noexcept {
     // REF-REQ-092 & REF-ARCH-069: Oracle Gate isolation, outbound half.
     //
     // The read side was detached earlier, but this is a WRITE to a live root
@@ -551,11 +556,10 @@ void DashboardBackend::sendDaemonCommand(const char* cmd) noexcept {
     // "power profile keeps changing on its own". A suite must never command the
     // system it is running on.
     if (::getenv("WATTCURB_TEST_ISOLATE") != nullptr) {
-        return;
+        return false; // no daemon conversation happened, caller keeps local view
     }
 
-    std::string dummy;
-    core::SingletonLock::query_daemon(cmd, dummy, "wattcurb.lock", 50);
+    return core::SingletonLock::query_daemon(cmd, out_response, "wattcurb.lock", 50);
 }
 
 void DashboardBackend::setProfile(int mode) {
@@ -566,12 +570,23 @@ void DashboardBackend::setProfile(int mode) {
         return;
     }
 
-    local_override_mode_ = mode;
-    prev_profile_mode_ = mode;
-
     char cmd[32];
     std::snprintf(cmd, sizeof(cmd), "PROFILE %d\n", mode);
-    sendDaemonCommand(cmd);
+
+    // REF-REQ-121.4: only adopt the requested profile optimistically when the
+    // daemon did not refuse it. A refusal (the daemon answers "ERROR: ..." when
+    // the calling binary is not an authorized client, REF-REQ-111) used to leave
+    // local_override_mode_ latched forever, so the dashboard highlighted a
+    // profile the hardware had never entered - a dead button that looked alive.
+    std::string reply;
+    if (sendDaemonCommandQuery(cmd, reply) && reply.rfind("ERROR", 0) == 0) {
+        std::fprintf(stderr, "[WattCurb] Profile change refused by daemon: %s", reply.c_str());
+        emit profileChanged(); // fall back to the daemon's actual mode
+        return;
+    }
+
+    local_override_mode_ = mode;
+    prev_profile_mode_ = mode;
 
     // Hardware actuation is executed natively by root daemon upon receiving PROFILE command
     emit profileChanged();
