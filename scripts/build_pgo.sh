@@ -206,8 +206,13 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "[5/5] Stage 5: PMU Hardware Counter Performance Audit"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Run PGO-optimized test suite under perf stat
-PMU_RAW=$(perf stat -e task-clock,cycles,instructions,cache-misses,L1-dcache-load-misses,dTLB-load-misses,branches,branch-misses \
+# Run PGO-optimized test suite under perf stat. This pass is measured on a host
+# that may be shared with other work, and `perf stat` multiplexing adds
+# interrupts; both inflate wall-clock latency. WATTCURB_BENCH_TOLERANCE widens
+# only the timing thresholds for this measured pass so the run completes and
+# yields counters. Correctness assertions are never scaled, and the strict gate
+# remains the plain `wattcurb_tests` run in CI and scripts/harness.py.
+PMU_RAW=$(WATTCURB_BENCH_TOLERANCE=20 perf stat -e task-clock,cycles,instructions,cache-misses,L1-dcache-load-misses,dTLB-load-misses,branches,branch-misses \
     "${BUILD_PGO_USE}/wattcurb_tests" 2>&1 || true)
 
 echo ""
@@ -233,6 +238,7 @@ cat <<EOF > "${REPORT_FILE}"
 - **Architecture**: $(uname -m) / ${CPU_MODEL}
 - **Compiler**: GCC ${GCC_VER} with C++23, Link-Time Optimization (-flto=auto), and Native Tuning (-march=native)
 - **Profile-Guided Optimization**: Active (-fprofile-use -fprofile-correction, ${GCDA_COUNT} merged .gcda counter files from 7 representative workloads)
+- **Oracle Gate Measurement**: perf-measured pass runs with WATTCURB_BENCH_TOLERANCE=20 (timing thresholds only; correctness assertions unscaled). The strict run is \`scripts/harness.py test\` and CI.
 - **Dev Profiler**: Disabled (WATTCURB_DEV_PROFILE=OFF — zero ScopedProfiler overhead)
 
 ---

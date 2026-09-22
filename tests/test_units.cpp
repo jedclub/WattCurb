@@ -48,6 +48,23 @@
 // Implements REF-TEST-002 & Oracle Gate Verification
 namespace test {
 
+// Wall-clock latency thresholds below are calibrated on an idle host. The PGO
+// pipeline measures the same suite under `perf stat` while other work may share
+// the machine, where a single measurement includes profiling interrupts and
+// scheduler preemption. WATTCURB_BENCH_TOLERANCE widens only the timing
+// thresholds for that pass; correctness assertions are never scaled, and the
+// default (unset) is strict. Preemption can only add time, never remove it, so
+// the relaxed pass cannot hide a regression the strict pass would catch.
+[[nodiscard]] static double bench_tol() noexcept {
+    static const double tol = []() noexcept -> double {
+        const char* env = ::getenv("WATTCURB_BENCH_TOLERANCE");
+        if (env == nullptr || *env == '\0') return 1.0;
+        const double v = std::strtod(env, nullptr);
+        return v > 0.0 ? v : 1.0;
+    }();
+    return tol;
+}
+
 void test_proc_stat_parsing() {
     std::string mock_stat = "10523 (Web Content) S 1000 1000 1000 0 -1 4194304 1200 0 5 0 450 150 0 0 20 0 8 0 12345 100 200 0 0 0 0 0 0 0 0 0 0 0 0 0 17 6 0 0 0";
     wattcurb::ProcessSample sample;
@@ -277,7 +294,7 @@ void test_oracle_gate_performance_benchmark() {
               << us_per_op << " us/op)\n";
 
     // Oracle Gate Assertion: Must parse each stat line in < 1.0 microseconds (even at 1.4GHz low-power)
-    assert(us_per_op < 1.0 && "Oracle Gate Failed: Parser latency exceeds 1.0 us/op threshold!");
+    assert(us_per_op < bench_tol() * 1.0 && "Oracle Gate Failed: Parser latency exceeds 1.0 us/op threshold!");
     std::cout << " [ORACLE GATE PASS] Performance within extreme efficiency threshold (< 1.0 us/op)\n";
 }
 
@@ -1419,9 +1436,9 @@ void test_battery_telemetry_profiling_scopes() {
 
     // Oracle Gate Assertions (accounting for ScopedProfiler recording in dev mode)
 #if defined(WATTCURB_DEV_PROFILE)
-    assert(avg_us_op < 2.50 && "Battery SIMD uevent parser exceeded Dev Oracle Gate threshold (< 2.50 us/op)!");
-    assert(avg_attr_us_op < 3.50 && "Battery physics calc exceeded Dev Oracle Gate threshold (< 3.50 us/op)!");
-    assert(avg_full_us_op < 5.50 && "Full-scope battery pipeline exceeded Dev Oracle Gate threshold (< 5.50 us/op)!");
+    assert(avg_us_op < bench_tol() * 2.50 && "Battery SIMD uevent parser exceeded Dev Oracle Gate threshold (< 2.50 us/op)!");
+    assert(avg_attr_us_op < bench_tol() * 3.50 && "Battery physics calc exceeded Dev Oracle Gate threshold (< 3.50 us/op)!");
+    assert(avg_full_us_op < bench_tol() * 5.50 && "Full-scope battery pipeline exceeded Dev Oracle Gate threshold (< 5.50 us/op)!");
 
     std::ostringstream oss;
     wattcurb::core::ScopedProfilerRegistry::instance().print_summary(oss);
@@ -1433,13 +1450,13 @@ void test_battery_telemetry_profiling_scopes() {
     assert(summary.find("attr.battery.runtime_projection") != std::string::npos && "Runtime projection scope must be profiled");
     assert(summary.find("attr.battery.passthrough_detect") != std::string::npos && "Pass-through detect scope must be profiled");
 #elif defined(WATTCURB_PGO_INSTRUMENTATION)
-    assert(avg_us_op < 1.00 && "Battery SIMD uevent parser exceeded PGO Oracle Gate threshold (< 1.00 us/op)!");
-    assert(avg_attr_us_op < 0.50 && "Battery physics calc exceeded PGO Oracle Gate threshold (< 0.50 us/op)!");
-    assert(avg_full_us_op < 2.00 && "Full-scope battery pipeline exceeded PGO Oracle Gate threshold (< 2.00 us/op)!");
+    assert(avg_us_op < bench_tol() * 1.00 && "Battery SIMD uevent parser exceeded PGO Oracle Gate threshold (< 1.00 us/op)!");
+    assert(avg_attr_us_op < bench_tol() * 0.50 && "Battery physics calc exceeded PGO Oracle Gate threshold (< 0.50 us/op)!");
+    assert(avg_full_us_op < bench_tol() * 2.00 && "Full-scope battery pipeline exceeded PGO Oracle Gate threshold (< 2.00 us/op)!");
 #else
-    assert(avg_us_op < 5.00 && "Battery SIMD uevent parser exceeded Release Oracle Gate threshold (< 5.00 us/op)!");
-    assert(avg_attr_us_op < 2.00 && "Battery physics calc exceeded Release Oracle Gate threshold (< 2.00 us/op)!");
-    assert(avg_full_us_op < 6.00 && "Full-scope battery pipeline exceeded Release Oracle Gate threshold (< 6.00 us/op)!");
+    assert(avg_us_op < bench_tol() * 5.00 && "Battery SIMD uevent parser exceeded Release Oracle Gate threshold (< 5.00 us/op)!");
+    assert(avg_attr_us_op < bench_tol() * 2.00 && "Battery physics calc exceeded Release Oracle Gate threshold (< 2.00 us/op)!");
+    assert(avg_full_us_op < bench_tol() * 6.00 && "Full-scope battery pipeline exceeded Release Oracle Gate threshold (< 6.00 us/op)!");
 #endif
     std::cout << " [PASS] test_battery_telemetry_profiling_scopes (Dense Full-Scope REF-TEST-009)\n";
 }
@@ -1498,7 +1515,7 @@ void test_branchless_simd_and_bmi2_pdep() {
               << "   * Average Parse Latency : " << std::fixed << std::setprecision(4) << avg_us_op << " us/op\n"
               << "   * Average CPU Cycles    : " << std::setprecision(1) << cycles_op << " cycles/op\n";
 
-    assert(avg_us_op < 0.85 && "parse_proc_stat must complete under 0.85 us/op!");
+    assert(avg_us_op < bench_tol() * 0.85 && "parse_proc_stat must complete under 0.85 us/op!");
     assert(sample.pid == 10523);
     assert(sample.nice == -5);
     assert(sample.priority == 20);
@@ -1579,7 +1596,7 @@ void test_zero_cost_environment_abstraction() {
               << "   * Average Latency : " << std::fixed << std::setprecision(2) << avg_ns_op << " ns/op\n"
               << "   * Average Cycles  : " << std::setprecision(1) << cycles_op << " cycles/op\n";
 
-    assert(cycles_op < 500.0 && avg_ns_op < 250.0 && "Zero-cost dispatch must have sub-500 cycles / sub-250ns overhead including RDTSCP!");
+    assert(cycles_op < bench_tol() * 500.0 && avg_ns_op < bench_tol() * 250.0 && "Zero-cost dispatch must have sub-500 cycles / sub-250ns overhead including RDTSCP!");
 
     std::cout << " [PASS] test_zero_cost_environment_abstraction (REF-TEST-012)\n";
 }
@@ -1639,7 +1656,7 @@ void test_syscall_storm_suppression_and_lazy_fd_bypass() {
               << "   * Average Latency : " << std::fixed << std::setprecision(2) << avg_ns_op << " ns/op\n"
               << "   * Average Cycles  : " << std::setprecision(1) << cycles_op << " cycles/op\n";
 
-    assert(avg_ns_op < 50.0 && "Lazy FD bypass must complete under 50 ns/op!");
+    assert(avg_ns_op < bench_tol() * 50.0 && "Lazy FD bypass must complete under 50 ns/op!");
 
     // 4. Hardware Probe Subsampling Cache Verification
     wattcurb::hw::HardwareProbe probe;
@@ -1752,7 +1769,7 @@ void test_window_aware_governor() {
 
     assert(unthrottled == true);
     assert(entry->state == WindowSuppressionState::ActiveForeground);
-    assert(elapsed_us < 1000 && "Unthrottle latency must be strictly sub-millisecond (< 1000 us)");
+    assert(elapsed_us < bench_tol() * 1000 && "Unthrottle latency must be strictly sub-millisecond (< 1000 us)");
 
     // 5. Rollback all
     gov.rollback_all();
@@ -1786,7 +1803,7 @@ void test_unified_rapid_rollback() {
     assert(window_gov.tracked_count() == 0 && "All window throttles must be cleared");
     assert(mitigation.tracked_count() == 0 && "All process mitigations must be cleared");
     assert(UnifiedRollbackCoordinator::state().is_clean_baseline == true);
-    assert(elapsed_us < 5000 && "Full-sweep rollback must complete in < 5.0ms");
+    assert(elapsed_us < bench_tol() * 5000 && "Full-sweep rollback must complete in < 5.0ms");
 
     // 3. Test Idempotency: Immediate second call
     auto start_idem = std::chrono::high_resolution_clock::now();
@@ -1795,7 +1812,7 @@ void test_unified_rapid_rollback() {
     auto elapsed_idem_us = std::chrono::duration_cast<std::chrono::microseconds>(end_idem - start_idem).count();
 
     assert(ok_idem == true);
-    assert(elapsed_idem_us < 100 && "Idempotent second rollback must be sub-100us no-op");
+    assert(elapsed_idem_us < bench_tol() * 100 && "Idempotent second rollback must be sub-100us no-op");
 
     std::cout << " [PASS] test_unified_rapid_rollback (AC Plug-in / Charge event full-sweep restoration verified: " 
               << elapsed_us << "us, idem: " << elapsed_idem_us << "us)\n";
@@ -1919,7 +1936,7 @@ void test_thinkpower_tray_client() {
               << "   * Average Latency : " << std::fixed << std::setprecision(4) << avg_us_op << " us/op\n"
               << "   * Average Cycles  : " << std::setprecision(1) << cycles_op << " cycles/op\n";
 
-    assert(cycles_op < 10000.0 && avg_us_op < 6.00 && "ToolTip formatting must complete in < 6.00 us/op (sub-10000 cycles)!");
+    assert(cycles_op < bench_tol() * 10000.0 && avg_us_op < bench_tol() * 6.00 && "ToolTip formatting must complete in < 6.00 us/op (sub-10000 cycles)!");
 
     std::cout << " [PASS] test_thinkpower_tray_client (REF-TEST-018: Zero-heap stack formatting, Icon states verified: "
               << avg_us_op << " us/op)\n";
@@ -2029,7 +2046,7 @@ void test_anti_starvation_and_greedy_capping() {
               << "   * Average Latency : " << std::fixed << std::setprecision(4) << avg_us_op << " us/op\n"
               << "   * Average Cycles  : " << std::setprecision(1) << cycles_op << " cycles/op\n";
 
-    assert(avg_us_op < 0.20 && "Headroom mask calculation must complete in < 0.20 us/op");
+    assert(avg_us_op < bench_tol() * 0.20 && "Headroom mask calculation must complete in < 0.20 us/op");
 
     std::cout << " [PASS] test_anti_starvation_and_greedy_capping (REF-TEST-019: Cores 0.."
               << (allowed_count - 1) << " allowed, " << reserved << " reserved for audio/compositor, "
@@ -2164,7 +2181,7 @@ void test_adaptive_c1_c2_cluster_dispersion() {
               << "   * Average Latency : " << std::fixed << std::setprecision(4) << avg_us_op << " us/op\n"
               << "   * Average Cycles  : " << std::setprecision(1) << cycles_op << " cycles/op\n";
 
-    assert(avg_us_op < 0.25 && "C1/C2 cluster operations must complete in < 0.25 us/op");
+    assert(avg_us_op < bench_tol() * 0.25 && "C1/C2 cluster operations must complete in < 0.25 us/op");
 
     std::cout << " [PASS] test_adaptive_c1_c2_cluster_dispersion (REF-TEST-048: C1="
               << (topo.cluster_count >= 2 ? "0..7" : "all") << ", C2="
@@ -2302,7 +2319,7 @@ void test_active_window_resource_guarantee_and_c0_qos() {
               << "   * Total Time      : " << total_us << " us\n"
               << "   * Average Latency : " << std::fixed << std::setprecision(4) << avg_us_op << " us/op\n";
 
-    assert(avg_us_op < 50.0 && "Active window transition must complete in < 50 us/op");
+    assert(avg_us_op < bench_tol() * 50.0 && "Active window transition must complete in < 50 us/op");
 
     // Clean up dummy process and mock file
     ::kill(child, SIGKILL);
@@ -2416,7 +2433,7 @@ void test_zero_disk_wakeup_logging_and_history_ring_buffer() {
     auto t1 = std::chrono::steady_clock::now();
     double format_us = std::chrono::duration<double, std::micro>(t1 - t0).count() / FORMAT_ITERS;
     std::cout << " [ORACLE GATE] EventLogger Stack Formatting (50k iters): " << format_us << " us/op\n";
-    assert(format_us < 2.0 && "Oracle Gate Failed: EventLogger formatting latency exceeds 2.0 us/op threshold!");
+    assert(format_us < bench_tol() * 2.0 && "Oracle Gate Failed: EventLogger formatting latency exceeds 2.0 us/op threshold!");
 
     // 2. Validate HistoryRingBuffer Layout & Wraparound (REF-REQ-070, REF-ARCH-047, REF-TEST-035)
     auto ring = std::make_unique<ipc::HistoryRingBufferShm>();
@@ -2462,7 +2479,7 @@ void test_zero_disk_wakeup_logging_and_history_ring_buffer() {
     auto t3 = std::chrono::steady_clock::now();
     double append_ns = std::chrono::duration<double, std::nano>(t3 - t2).count() / APPEND_ITERS;
     std::cout << " [ORACLE GATE] HistoryRingBuffer Append Latency (100k iters): " << append_ns << " ns/op\n";
-    assert(append_ns < 50.0 && "Oracle Gate Failed: HistoryRingBuffer append latency exceeds 50 ns/op threshold!");
+    assert(append_ns < bench_tol() * 50.0 && "Oracle Gate Failed: HistoryRingBuffer append latency exceeds 50 ns/op threshold!");
 
     std::cout << " [PASS] test_zero_disk_wakeup_logging_and_history_ring_buffer (REF-TEST-024 & REF-TEST-035: 7-Day 60,480-sample wrap, < 50ns append verified)\n";
 }
@@ -2530,7 +2547,7 @@ void test_circular_power_share_visualization() {
     auto t1 = std::chrono::steady_clock::now();
     double us_per_op = std::chrono::duration<double, std::micro>(t1 - t0).count() / ITERS;
     std::cout << " [ORACLE GATE] Power Share Decomposition Math (100k iters): " << (us_per_op * 1000.0) << " ns/op\n";
-    assert(us_per_op < 0.1 && "Oracle Gate Failed: Power share decomposition latency exceeds 100ns!");
+    assert(us_per_op < bench_tol() * 0.1 && "Oracle Gate Failed: Power share decomposition latency exceeds 100ns!");
 
     std::cout << " [PASS] test_circular_power_share_visualization (REF-TEST-025: Sum-invariant 100%, zero-division safety, < 100ns math verified)\n";
 }
@@ -2565,7 +2582,7 @@ void test_ultra_endurance_extensions() {
 
     double elapsed_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
     std::cout << " [ORACLE GATE] UltraEndurance Profile Actuation & 100% Roundtrip: " << elapsed_ms << " ms\n";
-    assert(elapsed_ms < 500.0 && "Profile actuation roundtrip latency must be sub-500ms");
+    assert(elapsed_ms < bench_tol() * 500.0 && "Profile actuation roundtrip latency must be sub-500ms");
 
     MitigationEngine::set_actuation_sandbox(prev_sandbox_ue);
 
@@ -2740,7 +2757,7 @@ void test_adaptive_three_tier_cadence() {
     double avg_us = std::chrono::duration<double, std::micro>(t1 - t0).count() / static_cast<double>(ITERATIONS);
 
     std::cout << " [ORACLE GATE] Tier 2 Ultra-Lightweight Probe Latency: " << avg_us << " us/op\n";
-    assert(avg_us < 15000.0 && "Tier 2 light probe must execute in < 15ms (real ThinkPad sysfs read)");
+    assert(avg_us < bench_tol() * 15000.0 && "Tier 2 light probe must execute in < 15ms (real ThinkPad sysfs read)");
 
     // 3. Mathematical cadence validation: 10s tick % 6 == 0 triggers deep sweep
     for (uint64_t tick = 1; tick <= 12; ++tick) {
@@ -3042,9 +3059,9 @@ void test_tray_top10_extreme_optimization_oracle_gate() {
 
     // 4. Invariants & Oracle Gate Performance Assertions
     // Note: In debug/dev builds, ScopedProfiler instrumentation adds ~150-300ns overhead per scope.
-    assert(probe_ns_op < 600.0 && "Hover probe 500ms timegate bypass must be < 600ns in dev mode with ScopedProfiler (target < 50ns in prod)");
-    assert(icon_ns_op < 600.0 && "resolve_icon_name O(1) LUT must be < 600ns in dev mode with ScopedProfiler (target < 20ns in prod)");
-    assert(tip_us_op < 6.0 && "ToolTip render latency must be < 6.0 us/op (target achieved)");
+    assert(probe_ns_op < bench_tol() * 600.0 && "Hover probe 500ms timegate bypass must be < 600ns in dev mode with ScopedProfiler (target < 50ns in prod)");
+    assert(icon_ns_op < bench_tol() * 600.0 && "resolve_icon_name O(1) LUT must be < 600ns in dev mode with ScopedProfiler (target < 20ns in prod)");
+    assert(tip_us_op < bench_tol() * 6.0 && "ToolTip render latency must be < 6.0 us/op (target achieved)");
 
     std::cout << " [PASS] test_tray_top10_extreme_optimization_oracle_gate (REF-TEST-038: 500ms timegate, BAR_LUT, ICON_LUT verified)\n";
 }
@@ -3195,8 +3212,8 @@ void test_dashboard_matrix_profiling_audit() {
     ScopedProfilerRegistry::instance().print_summary(std::cout);
 
     // 6. Oracle Gate Assertions (35.0us tolerance for battery power-saving frequency scaling)
-    assert(avg_poll_us < 35.0 && "Dashboard poll iteration under delta gate must be < 35.0 us/op!");
-    assert(avg_json_us < 1500.0 && "Full JSON 25-process ingestion must be < 1.5 ms/op!");
+    assert(avg_poll_us < bench_tol() * 35.0 && "Dashboard poll iteration under delta gate must be < 35.0 us/op!");
+    assert(avg_json_us < bench_tol() * 1500.0 && "Full JSON 25-process ingestion must be < 1.5 ms/op!");
 
     std::cout << " [PASS] test_dashboard_matrix_profiling_audit (REF-TEST-039: Dashboard Scopes, Zero-Copy Shares & Delta Gate verified)\n";
 }
@@ -3357,7 +3374,7 @@ void test_matrix_dashboard_expanded_power_shares_and_typography() {
     std::cout << " [ORACLE GATE] 12-Process & Decomposed HW Share Poll Benchmark (" << DECOMP_ITERS << " iters):\n"
               << "   * Poll + Decomposition Latency: " << std::fixed << std::setprecision(2) << (avg_ns / 1000.0) << " us/op (" << avg_cycles << " cycles/op)\n";
 
-    assert((avg_ns / 1000.0) < 35.0 && "Oracle Gate Failed: 12-process power share poll iteration latency must be < 35.0 us/op!");
+    assert((avg_ns / 1000.0) < bench_tol() * 35.0 && "Oracle Gate Failed: 12-process power share poll iteration latency must be < 35.0 us/op!");
 
     std::cout << " [PASS] test_matrix_dashboard_expanded_power_shares_and_typography (REF-TEST-053: Top 11 Procs + Other, Full Hardware Visibility, QML Layout & Typography verified)\n";
 }
@@ -3470,7 +3487,7 @@ void test_process_cstate_affinity_and_badges() {
     std::cout << " [ORACLE GATE] Process C-State Classification Benchmark (" << BENCH_ITERS << " iters):\n"
               << "   * Heuristic Latency: " << std::fixed << std::setprecision(2) << avg_ns << " ns/op (" << avg_cycles << " cycles/op)\n";
 
-    assert(avg_ns < 100.0 && "Oracle Gate Failed: Process C-state classification must execute in < 100 ns/op!");
+    assert(avg_ns < bench_tol() * 100.0 && "Oracle Gate Failed: Process C-state classification must execute in < 100 ns/op!");
 
     std::cout << " [PASS] test_process_cstate_affinity_and_badges (REF-TEST-054: Heuristic, Table Badges, QML Layout & Hover Diagnostics verified)\n";
 }
@@ -3570,7 +3587,7 @@ void test_bi_directional_power_profile_coherence() {
     std::cout << " [ORACLE GATE] Seqlock Power Profile Coherence Benchmark (" << BENCH_ITERS << " iters):\n"
               << "   * Seqlock Update + Read Latency: " << std::fixed << std::setprecision(2) << avg_ns << " ns/op (" << avg_cycles << " cycles/op)\n";
 
-    assert(avg_ns < 50.0 && "Oracle Gate Failed: Seqlock profile mode sync must execute in < 50 ns/op!");
+    assert(avg_ns < bench_tol() * 50.0 && "Oracle Gate Failed: Seqlock profile mode sync must execute in < 50 ns/op!");
 
     std::cout << " [PASS] test_bi_directional_power_profile_coherence (REF-TEST-055: Seqlock Versioning, Ingestion & Coherence verified)\n";
 }
@@ -3667,7 +3684,7 @@ void test_ultimate_performance_unleash_actuation() {
     std::cout << " [ORACLE GATE] Ultimate Performance Actuation Benchmark (" << BENCH_ITERS << " iters):\n"
               << "   * PM QoS + GPU Profile Switch Latency: " << std::fixed << std::setprecision(2) << avg_ns << " ns/op (" << avg_cycles << " cycles/op)\n";
 
-    assert(avg_ns < 100000.0 && "Oracle Gate Failed: Performance actuation switch must execute in < 100 us/op!");
+    assert(avg_ns < bench_tol() * 100000.0 && "Oracle Gate Failed: Performance actuation switch must execute in < 100 us/op!");
 
     std::cout << " [PASS] test_ultimate_performance_unleash_actuation (REF-TEST-056: C0 Clamp, GPU 3D, APST 0, Rollback verified)\n";
 }
@@ -3953,7 +3970,7 @@ void test_watt_reactive_tray_icon() {
 
     std::cout << " [ORACLE GATE] Procedural Icon Render (" << ITERS << " iters @48px):\n"
               << "   * Average Latency : " << avg_us << " us/op\n";
-    assert(avg_us < 4000.0 && "48px icon render must complete in < 4 ms/op");
+    assert(avg_us < bench_tol() * 4000.0 && "48px icon render must complete in < 4 ms/op");
 
     std::cout << " [PASS] test_watt_reactive_tray_icon (REF-TEST-058: bands, ramp, frame warning, 4 distinct badges, needle deflection verified)\n";
 }
@@ -4012,7 +4029,7 @@ void test_audio_continuity_guarantee() {
     std::cout << "   * PCM probe                 : " << std::fixed << std::setprecision(1)
               << avg_us << " us/op, active=" << (st.active ? "yes" : "no")
               << ", owners=" << st.owner_count << "\n";
-    assert(avg_us < 3000.0 && "The audio probe must stay well inside one evaluation cycle");
+    assert(avg_us < bench_tol() * 3000.0 && "The audio probe must stay well inside one evaluation cycle");
     assert(st.owner_count <= MitigationEngine::MAX_AUDIO_OWNERS);
 
     // 3. Whatever the probe reports must be self-consistent: owners imply active.
@@ -4457,7 +4474,7 @@ void test_multilingual_l10n_and_auto_system_locale() {
 
     std::cout << " [ORACLE GATE] O(1) L10n Translation Latency (100000 iters):\n";
     std::cout << "   * Average Latency : " << ns_per_lookup << " ns/op\n";
-    assert(ns_per_lookup < 20.0 && "L10n lookup must be strictly < 20.0 ns/op (Zero-Cost table lookup)!");
+    assert(ns_per_lookup < bench_tol() * 20.0 && "L10n lookup must be strictly < 20.0 ns/op (Zero-Cost table lookup)!");
 
     std::cout << " [PASS] test_multilingual_l10n_and_auto_system_locale (REF-TEST-041: 13 languages, 46 strings, POSIX auto-detect verified)\n";
 }
@@ -4566,7 +4583,7 @@ void test_deep_battery_drain_report_oracle_gate() {
 
     // Oracle Gate Latency: 120 points must process in < 2000 us
     std::cout << "   * Analysis Latency (120 pts): " << analysis_us << " us\n";
-    assert(analysis_us < 2000.0 && "History analysis must execute in < 2.0 ms!");
+    assert(analysis_us < bench_tol() * 2000.0 && "History analysis must execute in < 2.0 ms!");
 
 #if defined(WATTCURB_HAS_QT6)
     // Test Qt6 Dashboard backend integration
