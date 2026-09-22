@@ -191,6 +191,13 @@ public:
     static void set_actuation_sandbox(bool enable) noexcept;
     [[nodiscard]] static bool actuation_sandboxed() noexcept;
 
+    // REF-REQ-071: shell-safety predicates for the desktop-session tokens that
+    // are interpolated into a root-spawned command line. Exposed so the Oracle
+    // Gate can prove a hostile Wayland socket name / runtime dir is rejected,
+    // independently of whatever /run/user happens to contain.
+    [[nodiscard]] static bool is_safe_wayland_component(const char* s) noexcept;
+    [[nodiscard]] static bool is_safe_run_user_dir(const char* s) noexcept;
+
     // Ultimate Performance Unleash Actuators (REF-REQ-092, REF-ARCH-069)
     static void set_performance_pm_qos(bool enable) noexcept;
     static bool set_gpu_power_profile_mode(int mode_id) noexcept;

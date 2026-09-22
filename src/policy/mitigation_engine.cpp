@@ -2784,6 +2784,23 @@ struct DesktopSession {
     return true;
 }
 
+// Public wrappers so the Oracle Gate can assert the rejection directly.
+bool MitigationEngine::is_safe_wayland_component(const char* s) noexcept {
+    return is_shell_safe_component(s);
+}
+
+bool MitigationEngine::is_safe_run_user_dir(const char* s) noexcept {
+    constexpr char prefix[] = "/run/user/";
+    constexpr size_t plen = sizeof(prefix) - 1;
+    if (!s || std::strncmp(s, prefix, plen) != 0) return false;
+    const char* d = s + plen;
+    if (*d == '\0') return false;
+    for (; *d; ++d) {
+        if (*d < '0' || *d > '9') return false;
+    }
+    return true;
+}
+
 // XDG_RUNTIME_DIR must be exactly /run/user/<digits>, never a path that could
 // escape /run/user or smuggle shell syntax into the command line.
 [[nodiscard]] static bool is_run_user_dir(const char* s) noexcept {

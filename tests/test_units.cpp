@@ -4954,6 +4954,132 @@ void test_process_full_name_and_interactive_tooltips() {
     std::cout << " [PASS] test_process_full_name_and_interactive_tooltips (REF-TEST-047: Full name & cyber tooltips verified)\n";
 }
 
+// Implements REF-TEST-063 (REF-REQ-071): desktop-session token shell safety.
+// The Wayland socket name and XDG_RUNTIME_DIR are interpolated into a
+// root-spawned /bin/sh command line; a user owns their /run/user/<uid> dir and
+// can name a socket "wayland-0;chmod 4755 /bin/bash;#". This test fails if the
+// sanitisation is removed.
+void test_desktop_session_token_shell_safety() {
+    using namespace wattcurb::policy;
+
+    std::cout << "--- [REF-TEST-063] Desktop Session Token Shell-Safety Verification ---\n";
+
+    // Benign real-world tokens must be accepted.
+    assert(MitigationEngine::is_safe_wayland_component("wayland-0"));
+    assert(MitigationEngine::is_safe_wayland_component("wayland-1"));
+    assert(MitigationEngine::is_safe_run_user_dir("/run/user/1000"));
+    assert(MitigationEngine::is_safe_run_user_dir("/run/user/0"));
+
+    const char* bad_names[] = {
+        "wayland-0;chmod 4755 /bin/bash;#",
+        "wayland-0`id`",
+        "wayland-0$(id)",
+        "wayland-0|x",
+        "wayland-0&id",
+        "wayland-0\nid",
+        "wayland-0\rid",
+        "wayland-0'id'",
+        "wayland-0\"id\"",
+        "wayland-0>/tmp/pwn",
+        "wayland-0<in",
+        "../../etc/passwd",
+        "wayland 0",
+        "wayland*",
+        "$WAYLAND_DISPLAY",
+        "",
+    };
+    for (const char* n : bad_names) {
+        assert(!MitigationEngine::is_safe_wayland_component(n) &&
+               "hostile Wayland socket token must be rejected");
+    }
+
+    const char* bad_dirs[] = {
+        "/run/user/1000;id",
+        "/run/user/1000;chmod 4755 /bin/bash",
+        "/run/user/../etc",
+        "/run/user/10x0",
+        "/run/user/",
+        "/tmp/1000",
+        "/run/user/1000 ",
+        " /run/user/1000",
+        "/run/user/1000\n",
+        "/run/user/1000|x",
+        "",
+    };
+    for (const char* n : bad_dirs) {
+        assert(!MitigationEngine::is_safe_run_user_dir(n) &&
+               "hostile XDG_RUNTIME_DIR token must be rejected");
+    }
+
+    std::cout << " [PASS] test_desktop_session_token_shell_safety (REF-TEST-063: "
+              << "16 hostile socket names + 11 hostile runtime dirs rejected)\n";
+}
+
+// Implements REF-TEST-064 (REF-REQ-092): with the actuation sandbox engaged the
+// active-window governor must not write the PM QoS C0 clamp (or the other live
+// actuator targets) for a real process.
+//
+// The Oracle Gate runs unprivileged, where nice -10 and /dev/cpu_dma_latency are
+// refused by the kernel anyway - so asserting "nothing changed" proves nothing.
+// Instead a mock PM QoS device is pointed at a user-writable temp file: under
+// the sandbox it must stay untouched, and with the sandbox off the same call
+// must write 4 bytes to it. That asymmetry fails if the raw pin bypasses the
+// guard, which is exactly the pre-fix window governor behaviour.
+void test_actuation_sandbox_blocks_window_governor() {
+    using namespace wattcurb::policy;
+
+    std::cout << "--- [REF-TEST-064] Actuation Sandbox vs Window Governor Live-Write Verification ---\n";
+
+    const char* mock_qos_path = "/tmp/wattcurb_sandbox_probe_qos";
+    { int mfd = ::open(mock_qos_path, O_CREAT | O_TRUNC | O_WRONLY, 0600); if (mfd >= 0) ::close(mfd); }
+    PmQosController::set_device_path_for_testing(mock_qos_path);
+
+    const bool prev_sandbox = MitigationEngine::actuation_sandboxed();
+    MitigationEngine::set_actuation_sandbox(true);
+
+    pid_t child = ::fork();
+    if (child == 0) {
+        ::pause();
+        ::_exit(0);
+    }
+    assert(child > 0 && "fork should succeed");
+
+    // 1. Sandbox ON: the mock device must not be opened or written.
+    WindowAwareGovernor gov;
+    assert(gov.engage_active_window(child, "sandbox-probe"));
+    assert(!gov.pm_qos().is_pinned() && "sandbox must not pin the PM QoS device");
+    auto file_size = [](const char* p) -> off_t {
+        int fd = ::open(p, O_RDONLY | O_CLOEXEC);
+        if (fd < 0) return -1;
+        off_t sz = ::lseek(fd, 0, SEEK_END);
+        ::close(fd);
+        return sz;
+    };
+    assert(file_size(mock_qos_path) == 0 && "sandbox must not write the PM QoS device");
+    gov.release_active_window();
+    assert(!gov.is_active_window_engaged());
+
+    // 2. Negative control, sandbox OFF: the same call must write. This proves
+    //    the sandbox - not a permissions failure - is what suppressed it.
+    MitigationEngine::set_actuation_sandbox(false);
+    WindowAwareGovernor gov2;
+    assert(gov2.engage_active_window(child, "sandbox-probe"));
+    assert(gov2.pm_qos().is_pinned() && "unsandboxed engage must pin the mock device");
+    assert(file_size(mock_qos_path) == static_cast<off_t>(sizeof(int32_t)) &&
+           "unsandboxed engage must write a 4-byte latency constraint");
+    gov2.release_active_window();
+
+    ::kill(child, SIGKILL);
+    ::waitpid(child, nullptr, 0);
+
+    PmQosController::reset_device_path();
+    ::unlink(mock_qos_path);
+    MitigationEngine::set_actuation_sandbox(prev_sandbox);
+
+    std::cout << " [PASS] test_actuation_sandbox_blocks_window_governor (REF-TEST-064: "
+              << "mock PM QoS untouched under sandbox, 4-byte pin when off)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -5015,6 +5141,8 @@ int main() {
     test::test_anti_starvation_and_greedy_capping();
     test::test_adaptive_c1_c2_cluster_dispersion();
     test::test_active_window_resource_guarantee_and_c0_qos();
+    test::test_desktop_session_token_shell_safety();
+    test::test_actuation_sandbox_blocks_window_governor();
     test::test_state_journaling_and_faithful_restoration();
     test::test_zero_disk_wakeup_logging_and_history_ring_buffer();
     test::test_circular_power_share_visualization();
