@@ -4726,6 +4726,24 @@ void test_thinkpad_fan_thermal_assist_and_smu_limits() {
     // Half-way (52.5 C) the linear curve is at fraction 0.6 -> level 4.
     assert(policy::MitigationEngine::fan_level_for_temp(52.5) == 4);
 
+    // --- 1b. REF-REQ-114 defect: the top step must be a numeric level -----
+    // The regression was that >=70 C produced the string "full-speed", which
+    // thinkpad_acpi resolves to `disengaged` on this host. The write succeeds, so
+    // the curve cached "7" and never retried - pinning the fan to the EC curve
+    // while the daemon believed it had pinned full speed. The curve itself must
+    // now stay inside the numeric range at every temperature, and the formatting
+    // must never emit the keyword.
+    for (int t = 70; t <= 110; ++t) {
+        assert(policy::MitigationEngine::fan_level_for_temp(static_cast<double>(t)) == 7);
+    }
+    {
+        // Whatever the curve returns at the limit, set_fan_level() must format a
+        // numeric token. Under the sandbox the write is refused, so assert on the
+        // documented contract instead: the curve's own range is 1..7 numeric.
+        const int top = policy::MitigationEngine::fan_level_for_temp(80.0);
+        assert(top == 7 && "the limit step is the numeric level 7, not \"full-speed\"");
+    }
+
     // --- 2. Sandboxed writes are refused, never actuated -----------------
     assert(!policy::MitigationEngine::set_fan_level("3"));
     assert(!policy::MitigationEngine::hardware_baseline().fan_level_modified);

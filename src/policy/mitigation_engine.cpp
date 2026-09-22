@@ -2962,7 +2962,15 @@ uint64_t g_fan_curve_application_count = 0;
 
 int MitigationEngine::fan_level_for_temp(double cpu_temp_c) noexcept {
     if (cpu_temp_c <= 0.0) return -1; // no temperature reading
-    if (cpu_temp_c >= FAN_FULL_TEMP_C) return 7; // full speed
+    // REF-REQ-114 (defect fix): the top step is written as the NUMERIC level 7,
+    // never as the string "full-speed". On this host (T14/P14s class, Renoir)
+    // `level full-speed` is accepted by thinkpad_acpi but resolves to
+    // `level: disengaged` - the EC takes the fan back. The write still returns
+    // success, so the old code cached level 7 and then never retried at the same
+    // temperature, pinning the fan to the EC's quiet curve (~4.3k RPM) while the
+    // daemon believed it had pinned full speed. Numeric 7 is the real full speed
+    // here (measured ~5.3k RPM), so the curve stays inside 1..7.
+    if (cpu_temp_c >= FAN_FULL_TEMP_C) return 7; // full speed (numeric)
     if (cpu_temp_c <= FAN_CURVE_MIN_TEMP_C) return 1; // 0.2 -> level 1
     // Linear between (35 C, 0.2) and (70 C, 1.0), mapped onto the 0..7 steps.
     const double frac = FAN_CURVE_MIN_FRACTION +
@@ -2985,12 +2993,10 @@ int MitigationEngine::apply_fan_for_temp(double cpu_temp_c) noexcept {
     if (lvl == g_last_fan_level) return lvl;
 
     char level[16];
-    if (lvl >= 7) {
-        std::strncpy(level, "full-speed", sizeof(level) - 1);
-        level[sizeof(level) - 1] = '\0';
-    } else {
-        std::snprintf(level, sizeof(level), "%d", lvl);
-    }
+    // REF-REQ-114 (defect fix): always the numeric step, including the top one.
+    // "full-speed" is a thinkpad_acpi keyword that resolves to `disengaged` on
+    // this host - see fan_level_for_temp(). Writing 7 is the real full speed.
+    std::snprintf(level, sizeof(level), "%d", lvl);
     if (!set_fan_level(level)) return -1;
     g_last_fan_level = lvl;
     return lvl;

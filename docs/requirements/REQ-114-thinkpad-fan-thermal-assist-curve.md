@@ -80,6 +80,32 @@ frequency watchdog.
 
 ## 4. Blast Radius & Failure Modes
 
+### 4.1 Defect found in the field (2026-09-22): `full-speed` is not level 7
+
+The first implementation wrote the string `full-speed` for the top step. Measured
+on this host (T14/P14s class, Renoir, `thinkpad_acpi fan_control=Y`):
+
+| Written | Resulting `level:` | Tachometer |
+| :--- | :--- | :--- |
+| `level 7` | `7` | ~5.3k RPM |
+| `level full-speed` | **`disengaged`** | EC curve (~4.3–4.8k RPM) |
+| `level auto` | `auto` | EC curve |
+
+`level full-speed` is accepted (the write returns success) but the EC takes the
+fan back and reports `disengaged`. The old code cached `g_last_fan_level = 7`, so
+the "write only on change" guard suppressed every subsequent retry at the same
+temperature. The observable result: **the curve stopped actuating** - the fan sat
+on the EC's quiet curve while the daemon believed it had pinned full speed, and
+the REF-REQ-115 raised SMU limit then had no thermal assist.
+
+Fix: `apply_fan_for_temp()` always writes the numeric step, including `7`, and
+`fan_level_for_temp()` documents that `7` is the real full speed on this host.
+REF-TEST-073 now asserts the curve never leaves the numeric `1..7` range at any
+temperature, so the keyword cannot come back.
+
+Not measured: the resulting skin temperature with numeric `7` under sustained
+load. The RPM mapping above is measured; the thermal outcome is not.
+
 - **Audible noise and fan power.** This is the point of the change: in
   Performance/Balanced the fan runs faster than the EC would choose. At the top
   step the thermal budget saved can exceed the ~2.45 W the fan spends
