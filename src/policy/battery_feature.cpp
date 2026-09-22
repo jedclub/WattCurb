@@ -510,16 +510,19 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
             s_freq_starved_streak = 0;
             s_freq_starved_logged = false;
         }
-
-        // REF-REQ-114: thermal-assist fan curve for the raised SMU ceiling. The
-        // EC's automatic curve on this model tops out around 4.3k RPM while the
-        // fan can do ~5.4k, so under the 85 C limit of REF-REQ-115 the part would
-        // sit against its thermal limit with cooling headroom unused. This runs
-        // every cycle - the curve must track temperature, and apply_power_profile
-        // only runs on a profile TRANSITION - while apply_fan_for_temp() writes
-        // only when the level changes. Saving profiles keep the EC's quiet curve.
-        (void)MitigationEngine::apply_fan_for_temp(report.hardware.cpu_temp_c);
     }
+
+    // REF-REQ-118: the fan curve is a thermal-safety mapping and applies in EVERY
+    // power profile, not only the two that raise the SMU limit. It is driven here,
+    // every cycle, because apply_power_profile() only runs on a profile
+    // TRANSITION and the curve has to track temperature. Two rules ride on top of
+    // the common curve:
+    //   * >= 70 C is full speed in all profiles (the part must never be cooked to
+    //     save fan power);
+    //   * in UltraEndurance only, <= 45 C stops the fan (REF-REQ-118.3).
+    // apply_fan_for_temp() writes only on a level change, so a steady temperature
+    // costs no sysfs write. Restore/exit returns the captured baseline.
+    (void)MitigationEngine::apply_fan_for_temp(report.hardware.cpu_temp_c, eff_profile);
 
     // REF-REQ-102: A profile change releases everything the previous profile
     // applied, before the new one decides anything. Restrictions must not

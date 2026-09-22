@@ -4758,36 +4758,68 @@ void test_thinkpad_fan_thermal_assist_and_smu_limits() {
     assert(!policy::MitigationEngine::apply_smu_performance_limits()); // sandboxed no-op
     assert(!policy::MitigationEngine::hardware_baseline().smu_limits_modified);
 
-    // --- 4. Production wiring: Performance and Balanced only -------------
-    {
+    // --- 4. REF-REQ-118: the curve applies in EVERY profile --------------
+    // The 70 C full-speed rule is a thermal-safety floor and must hold in all
+    // four profiles; the UltraEndurance cold stop (<= 45 C -> level 0) is the one
+    // profile-specific exception, and it must not leak into the others.
+    using policy::MitigationEngine;
+    for (const PowerProfileMode m : {PowerProfileMode::Performance, PowerProfileMode::Balanced,
+                                     PowerProfileMode::PowerSaver, PowerProfileMode::UltraEndurance}) {
+        assert(MitigationEngine::fan_level_for_temp_in_profile(75.0, m) == 7 &&
+               "REF-REQ-118.1: >= 70 C must be full speed in every profile");
+        assert(MitigationEngine::fan_level_for_temp_in_profile(0.0, m) == -1);
+    }
+    // The 35 C floor maps to level 1 in every profile EXCEPT UltraEndurance, where
+    // 35 C is below the cold-stop threshold and so stops the fan instead. Asserting
+    // the floor uniformly here would contradict REF-REQ-118.3.
+    for (const PowerProfileMode m : {PowerProfileMode::Performance, PowerProfileMode::Balanced,
+                                     PowerProfileMode::PowerSaver}) {
+        assert(MitigationEngine::fan_level_for_temp_in_profile(35.0, m) == 1);
+        assert(MitigationEngine::fan_level_for_temp_in_profile(30.0, m) == 1);
+    }
+    assert(MitigationEngine::fan_level_for_temp_in_profile(35.0, PowerProfileMode::UltraEndurance) == 0 &&
+           "UltraEndurance: 35 C is below the cold-stop threshold");
+    // UltraEndurance-only cold stop.
+    assert(MitigationEngine::fan_level_for_temp_in_profile(45.0, PowerProfileMode::UltraEndurance) == 0);
+    assert(MitigationEngine::fan_level_for_temp_in_profile(30.0, PowerProfileMode::UltraEndurance) == 0);
+    assert(MitigationEngine::fan_level_for_temp_in_profile(46.0, PowerProfileMode::UltraEndurance) ==
+           MitigationEngine::fan_level_for_temp(46.0));
+    assert(MitigationEngine::fan_level_for_temp_in_profile(46.0, PowerProfileMode::UltraEndurance) > 0 &&
+           "above the cold-stop threshold the common curve applies unchanged");
+    // The stop must NOT apply to the other three, even well below the threshold.
+    assert(MitigationEngine::fan_level_for_temp_in_profile(30.0, PowerProfileMode::Balanced) == 1);
+    assert(MitigationEngine::fan_level_for_temp_in_profile(30.0, PowerProfileMode::PowerSaver) == 1);
+    assert(MitigationEngine::fan_level_for_temp_in_profile(30.0, PowerProfileMode::Performance) == 1);
+
+    // --- 5. Production wiring: evaluated in every profile ----------------
+    for (const PowerProfileMode m : {PowerProfileMode::Performance, PowerProfileMode::Balanced}) {
         policy::FeatureManager mgr;
-        mgr.set_override_profile(PowerProfileMode::Performance);
+        mgr.set_override_profile(m);
         AnalysisReportData rpt{};
         rpt.hardware.cpu_temp_c = 65.0;
-        const uint64_t before = policy::MitigationEngine::fan_curve_application_count();
+        const uint64_t before = MitigationEngine::fan_curve_application_count();
         mgr.evaluate_and_actuate(rpt, /*on_battery=*/false, /*battery_pct=*/80.0);
-        const uint64_t after = policy::MitigationEngine::fan_curve_application_count();
+        const uint64_t after = MitigationEngine::fan_curve_application_count();
         assert(after > before &&
-               "REF-REQ-114: the production path must evaluate the fan curve in Performance");
+               "REF-REQ-118: the production path must evaluate the fan curve in this profile");
     }
     {
-        // A saving profile must leave the fan to the EC: the same report and a
-        // battery state that resolve to PowerSaver must not evaluate the curve.
+        // PowerSaver is no longer skipped (REF-REQ-118 supersedes the old scope).
         policy::FeatureManager mgr;
         AnalysisReportData rpt{};
         rpt.hardware.cpu_temp_c = 65.0;
-        const uint64_t before = policy::MitigationEngine::fan_curve_application_count();
+        const uint64_t before = MitigationEngine::fan_curve_application_count();
         const auto st = mgr.evaluate_and_actuate(rpt, /*on_battery=*/true, /*battery_pct=*/15.0);
-        const uint64_t after = policy::MitigationEngine::fan_curve_application_count();
+        const uint64_t after = MitigationEngine::fan_curve_application_count();
         assert(st.current_profile == PowerProfileMode::PowerSaver);
-        assert(after == before &&
-               "REF-REQ-114: saving profiles must not override the EC fan curve");
+        assert(after > before &&
+               "REF-REQ-118: the curve is a thermal-safety mapping and runs in saving profiles too");
     }
 
     policy::MitigationEngine::set_actuation_sandbox(prev_sandbox);
     std::cout << " [PASS] test_thinkpad_fan_thermal_assist_and_smu_limits (REF-TEST-073: "
-                 "curve monotonic/sandboxed, SMU constants ordered, production wiring "
-                 "Performance-only)\n";
+                 "curve monotonic/sandboxed, SMU constants ordered, all-profile wiring, "
+                 "Ultra-only cold stop)\n";
 }
 
 // Implements REF-TEST-069 & REF-REQ-112: the memory pressure ladder.

@@ -225,27 +225,39 @@ public:
     static bool set_gpu_dpm_level(const char* level) noexcept;
     static bool set_smt_control(const char* state) noexcept;
 
-    // REF-REQ-114: ThinkPad thermal-assist fan curve. It is scoped to the two
-    // profiles that RAISE the SMU thermal limit (Performance and Balanced,
-    // REF-REQ-115). The EC's automatic curve on this model tops out around
-    // 4.3k RPM while the fan itself does ~5.4k, so under the raised ceiling the
-    // part would sit against a thermal limit with cooling headroom unused. The
-    // curve is linear between FAN_CURVE_MIN_TEMP_C (fraction
-    // FAN_CURVE_MIN_FRACTION) and FAN_FULL_TEMP_C (full speed); at or above
-    // FAN_FULL_TEMP_C the fan is pinned to full speed. Saving profiles keep the
-    // EC's own quiet curve, and release/exit restores the captured baseline.
-    // Levels are the thinkpad_acpi discrete steps 0..7. Writing needs
-    // thinkpad_acpi fan_control=1; without it the write is refused (no-op).
+    // REF-REQ-114 / REF-REQ-118: ThinkPad fan curve. It applies in ALL power
+    // profiles - it is a thermal-safety mapping, not a performance perk:
+    //   * at or above FAN_FULL_TEMP_C (70 C)      -> level 7 (full speed)
+    //   * between FAN_FULL_TEMP_C and FAN_CURVE_MIN_TEMP_C (35 C) -> linear
+    //     100% .. FAN_CURVE_MIN_FRACTION*100 % (20%), mapped onto steps 1..7
+    //   * at or below FAN_CURVE_MIN_TEMP_C (35 C) -> level 1 (20%, never 0)
+    // UltraEndurance adds one exception (REF-REQ-118.3): at or below
+    // FAN_ULTRA_STOP_TEMP_C (45 C) the fan is stopped outright (level 0), because
+    // that profile exists to minimise every load and the EC's floor keeps the fan
+    // turning for no thermal reason.
+    //
+    // Levels are the thinkpad_acpi discrete steps 0..7. The top step MUST be the
+    // numeric 7: on this host `level full-speed` is accepted but resolves to
+    // `disengaged` (see apply_fan_for_temp). Writing needs thinkpad_acpi
+    // fan_control=1; without it the write is refused (no-op).
     static constexpr double FAN_CURVE_MIN_TEMP_C = 35.0;
     static constexpr double FAN_CURVE_MIN_FRACTION = 0.2;
     static constexpr double FAN_FULL_TEMP_C = 70.0;
+    // REF-REQ-118.3: UltraEndurance-only cold stop threshold.
+    static constexpr double FAN_ULTRA_STOP_TEMP_C = 45.0;
     [[nodiscard]] static int fan_level_for_temp(double cpu_temp_c) noexcept;
+    // Profile-aware variant: identical to the above except in UltraEndurance,
+    // where <= FAN_ULTRA_STOP_TEMP_C returns 0 (fan stopped).
+    [[nodiscard]] static int fan_level_for_temp_in_profile(double cpu_temp_c,
+                                                           PowerProfileMode mode) noexcept;
     static bool set_fan_level(const char* level) noexcept;
     static bool restore_fan_level() noexcept;
-    // Applies the curve for one temperature reading. Returns the level in force
-    // (0..7) or -1 when the fan is not controllable / no reading. Writes only on
-    // a level change, so a steady temperature costs no sysfs write.
-    static int apply_fan_for_temp(double cpu_temp_c) noexcept;
+    // Applies the curve for one temperature reading in the given profile. Returns
+    // the level in force (0..7) or -1 when the fan is not controllable / no
+    // reading. Writes only on a level change, so a steady temperature costs no
+    // sysfs write.
+    static int apply_fan_for_temp(double cpu_temp_c,
+                                  PowerProfileMode mode) noexcept;
     // Number of times the curve was evaluated from the PRODUCTION entry point
     // (FeatureManager::evaluate_and_actuate). Mirrors ceiling_assertion_count()
     // so REF-TEST-073 can falsify a wiring that exists only under test.

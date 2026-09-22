@@ -4,7 +4,14 @@ import QtQuick.Layouts
 
 Window {
     id: reportWin
-    visible: false
+    // REF-REQ-119: a plain `Window` (unlike `ApplicationWindow`) is never shown
+    // by QQmlApplicationEngine - it must be shown explicitly. `visible: false`
+    // here meant the report window was created and then stayed invisible; the
+    // `objectCreated` callback in main_dashboard.cpp raced to set it back to true
+    // and did not reliably win. The root report window is therefore shown from the
+    // start, and the embedded instance inside DashboardWindow.qml overrides this
+    // back to false (see the DashboardWindow declaration).
+    visible: true
     width: 1180
     height: 780
     minimumWidth: 1000

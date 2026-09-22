@@ -1,4 +1,5 @@
 #include <QGuiApplication>
+#include <QQuickWindow>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QIcon>
@@ -234,7 +235,17 @@ int main(int argc, char* argv[]) {
         if (!obj && qmlUrl == objUrl) {
             std::cerr << "[!] Failed to load QML window!\n";
             QCoreApplication::exit(-1);
-        } else if (obj && report_mode) {
+        } else if (obj) {
+            // REF-REQ-119: a top-level `Window` is not shown by the engine. The
+            // report window used to be a plain `Window` with `visible: false` and
+            // depended on this callback to set it back to true, which raced with
+            // creation. Both windows are now shown explicitly here, through the
+            // QWindow API (`show()`), not the QML property alone.
+            if (auto* win = qobject_cast<QQuickWindow*>(obj)) {
+                win->show();
+                win->raise();
+                win->requestActivate();
+            }
             obj->setProperty("visible", true);
         }
     }, Qt::QueuedConnection);

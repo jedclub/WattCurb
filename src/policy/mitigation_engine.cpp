@@ -2983,9 +2983,23 @@ int MitigationEngine::fan_level_for_temp(double cpu_temp_c) noexcept {
     return lvl;
 }
 
-int MitigationEngine::apply_fan_for_temp(double cpu_temp_c) noexcept {
+int MitigationEngine::fan_level_for_temp_in_profile(double cpu_temp_c,
+                                                    PowerProfileMode mode) noexcept {
+    // REF-REQ-118.3: UltraEndurance is the only profile that stops the fan. It is
+    // a cold-start exception, not a general weakening: above the threshold the
+    // common curve applies unchanged, so the part can never be cooked to save a
+    // few hundred milliwatts of fan power.
+    if (mode == PowerProfileMode::UltraEndurance && cpu_temp_c > 0.0 &&
+        cpu_temp_c <= FAN_ULTRA_STOP_TEMP_C) {
+        return 0; // fan stopped
+    }
+    return fan_level_for_temp(cpu_temp_c);
+}
+
+int MitigationEngine::apply_fan_for_temp(double cpu_temp_c,
+                                         PowerProfileMode mode) noexcept {
     ++g_fan_curve_application_count;
-    const int lvl = fan_level_for_temp(cpu_temp_c);
+    const int lvl = fan_level_for_temp_in_profile(cpu_temp_c, mode);
     if (lvl < 0) return -1;
 
     // Write only on a level change: the observation cycle runs every 1-3 s and a

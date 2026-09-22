@@ -33,28 +33,140 @@ void handle_sigint(int) {
 } // namespace
 
 void print_help(const char* prog) {
-    std::cout << "Usage: " << prog << " [options]\n"
-              << "WattCurb: Ultra-low-overhead Linux power profiler and modular battery mitigation daemon\n\n"
-              << "Developer & Debugging Reporting (REF-REQ-020):\n"
-              << "  -b, --briefing         High-fidelity detailed executive briefing (10s observation by default)\n"
-              << "  -R, --battery-report   Audit all accumulated battery history logs & print deep drain report\n"
-              << "      --detail           Comprehensive engineering/developer terminal table dashboard\n"
-              << "  -F, --features         Print catalog of all modular optimization features with rationale\n"
-              << "  -X, --extreme-profile  Execute 30s extreme battery profile for LLM feature synthesis\n\n"
-              << "Daemon & Live Modes:\n"
-              << "  -d, --daemon           Run persistent daemon (128-byte binary Seqlock POD state in /dev/shm)\n"
-              << "  -s, --status           Query live binary state from running daemon via 128-byte Seqlock POD\n"
-              << "  -H, --history          Display in-memory telemetry history (last 30 minutes, 0 disk I/O)\n"
-              << "  -L, --logs             Display recent event-driven audit logs from journald/audit.log\n"
-              << "  -l, --live             Continuous live interactive terminal dashboard (Ctrl+C to stop)\n\n"
-              << "Observation & Feature Tuning Options:\n"
-              << "      --period <sec>     Daemon sleep period in seconds (default: 60.0s)\n"
-              << "      --window <sec>     Daemon observation window in seconds (default: 5.0s)\n"
-              << "  -i, --interval <sec>   Sampling interval in seconds (default: 2.0s)\n"
-              << "  -w, --duration <sec>   Total window duration in seconds (default for briefing: 10.0s)\n"
-              << "  -n, --top <count>      Number of top processes to display (default: 15)\n"
-              << "      --dev-profile      Display fine-grained subsystem execution cost breakdown\n"
-              << "  -h, --help             Display this help message and exit\n";
+    std::cout <<
+R"(WattCurb — Ultra-Low-Overhead Linux Power Profiler & Modular Battery Mitigation Daemon
+
+USAGE
+  )" << prog << R"( [MODE] [OPTIONS]
+
+  With no arguments, WattCurb runs one observation window and prints the
+  developer detail table. Every mode below is a single-shot query unless it is
+  marked PERSISTENT.
+
+WHEN TO USE WHICH
+  Just checking the machine now ............ -b  (briefing)
+  Machine-parsable current state ........... -s  (status)
+  Why is the battery draining .............. -R  (battery report)
+  What has the daemon been doing ........... -L  (logs)
+  Watch it live in a terminal .............. -l  (live)
+  Run it as a background service ........... -d  (daemon)
+
+DISPLAY & REPORT MODES
+  -b, --briefing
+        High-fidelity executive briefing: physical hardware power domains
+        (CPU RAPL, GPU, display, NVMe, fan, platform loss), battery chemistry
+        and health, and the top drain culprits with their causation mechanism.
+        Queries the running daemon over IPC (zero disk I/O); falls back to the
+        cached briefing file, then to a one-shot local observation.
+        Default window: )" << "10.0s" << R"( (override with -w).
+
+      --detail
+        Comprehensive engineering table: per-process attributed watts, WDI
+        ranking, wakeups, cgroup/tier classification and scheduler state.
+        This is the default when no mode flag is given.
+
+  -R, --battery-report
+        Deep battery drain audit over ALL accumulated history (7-day in-memory
+        ring buffer plus persisted logs). Reports discharge energy, average and
+        peak power, per-profile efficiency comparisons, C3 residency and
+        thermal correlation. Read-only; writes nothing.
+
+  -l, --live
+        PERSISTENT. Continuous interactive terminal dashboard, refreshed every
+        -i seconds until Ctrl+C. Low cost, but it is a full-screen redraw loop.
+
+  -F, --features
+        Print the catalog of every modular optimization feature: what it does,
+        which kernel interface it writes, and its power-saving rationale.
+        No observation is performed.
+
+  -X, --extreme-profile
+        Run a 30 s extreme battery-drain observation for feature synthesis /
+        LLM analysis. Forces -w 30 unless you pass -w explicitly.
+        NOTE: this is a measurement profile, not a power profile.
+
+  -H, --history
+        Print the in-memory telemetry history (last ~30 minutes) from the
+        running daemon. Zero disk I/O.
+
+  -L, --logs
+        Print recent event-driven audit records (mitigations, rollbacks,
+        repairs, alerts) from journald / audit.log.
+
+DAEMON MODES
+  -d, --daemon
+        PERSISTENT. Run the background daemon: it samples hardware, evaluates
+        policy, actuates mitigation, and publishes a 128-byte Seqlock POD state
+        into )" << "/dev/shm" << R"( for the tray and dashboard to read.
+        Sleep between windows: --period (default 60.0s).
+        This is what the systemd unit runs.
+
+  -s, --status
+        One-shot read of the live daemon state from shared memory (no daemon
+        round-trip): total/CPU/GPU drain, temperature, battery %, wakeups,
+        fan RPM, active mitigations, and the top culprit.
+
+OBSERVATION TUNING
+      --period <sec>       Daemon sleep between observation windows (min 1.0,
+                           default 60.0). Only meaningful with -d.
+      --window <sec>       Length of one observation window (min 0.5,
+                           default 5.0). Longer = steadier numbers, slower.
+  -i, --interval <sec>     Sampling interval within a window (min 0.5,
+                           default 2.0).
+  -w, --duration <sec>     Total duration to observe (min 0.5). Overrides the
+                           per-mode default (-b 10.0, -X 30.0).
+  -c, --count <n>          Fixed number of samples instead of a duration
+                           (min 1). Mutually exclusive with -w in practice.
+  -n, --top <n>            How many processes to list (min 1, default 15).
+
+DIAGNOSTICS
+      --dev-profile        Append a fine-grained subsystem execution-cost
+                           breakdown (per-scope latency) to the output.
+                           Development aid; it adds measurement overhead.
+  -h, --help               Show this help and exit.
+
+POWER PROFILES
+  Profiles are selected from the tray icon's context menu or the dashboard,
+  never by a CLI flag. The daemon persists the choice and reapplies it.
+    Performance    unrestricted CPU ceiling, boost on, all cores, SMU limit
+                   raised; no process throttling at all (REF-REQ-104).
+    Balanced       default. Unrestricted ceiling, schedutil, SMU limit raised;
+                   conservative process mitigation only.
+    PowerSaver     low-power platform profile, boost off, 1.7 GHz cap,
+                   moderate mitigation.
+    UltraEndurance powersave governor, boost off, 1.4 GHz cap, GPU capped,
+                   progressive mitigation. Below 45 C the fan is stopped
+                   (REF-REQ-118.3).
+
+  On battery, dropping to <= 30% demotes Performance to Balanced once, and
+  <= 20% to PowerSaver. AC connection never changes the profile on its own.
+
+ENVIRONMENT
+  WATTCURB_ACTUATION_SANDBOX=1   Make every actuation a no-op (safe for
+                                 development and benchmarking).
+  WATTCURB_QML_DEV_ROOT=<dir>    Dev builds only: load QML from a directory
+                                 instead of the compiled-in resources.
+
+EXIT STATUS
+  0   Success (including "daemon not running" fallbacks where handled).
+  1   Invalid usage or a required resource was unavailable.
+  255 QML window failed to load (dashboard/report).
+
+EXAMPLES
+  )" << prog << R"(                       # default detail table for one window
+  )" << prog << R"( -b -w 30              # 30-second executive briefing
+  )" << prog << R"( -R                    # deep battery drain audit
+  )" << prog << R"( -d --period 10       # daemon, 10s between windows
+  )" << prog << R"( -s                    # instant status from the daemon
+  )" << prog << R"( -l -i 1               # live terminal dashboard, 1s refresh
+
+NOTES
+  * The CLI is read-only except for -d and -X. Profile changes and per-feature
+    toggles live in the tray / dashboard UI.
+  * Timings are wall-clock minimums; the kernel's timer coalescing can add a
+    few milliseconds by design (Zero-Wakeup principle).
+  * See docs/INDEX.md for the requirement behind every behaviour.
+)";
 }
 
 int query_daemon_briefing() {

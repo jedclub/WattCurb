@@ -37,8 +37,13 @@ ApplicationWindow {
     property real hoverTargetY: 0
 
     // Standalone Deep Battery Drain Report Window (REF-REQ-078, REF-ARCH-055)
+    // REF-REQ-119: BatteryReportWindow.qml now defaults `visible: true` so it can
+    // be used as a top-level window by `--report`. This embedded copy must start
+    // hidden and is shown only by an explicit user action (its three call sites
+    // below set visible/show/raise/requestActivate together).
     BatteryReportWindow {
         id: reportWindow
+        visible: false
     }
 
     // =========================================================================
