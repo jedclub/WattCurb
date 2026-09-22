@@ -21,6 +21,11 @@ STRIP_SECTIONS=(
     --remove-section=.eh_frame_hdr
 )
 
+# REF-REQ-075: this pipeline performs two full compiles (stage 1 and stage 3).
+# Ninja defaults to CPUs+2, which can oversubscribe a host that is also running
+# other work. Cap at the CPU count by default; override with WATTCURB_JOBS.
+JOBS="${WATTCURB_JOBS:-$(nproc 2>/dev/null || echo 4)}"
+
 echo "==================================================================="
 echo "  WattCurb Multi-Target PGO Release Pipeline (REF-REQ-075)         "
 echo "==================================================================="
@@ -59,7 +64,7 @@ if [ -f "${BUILD_PGO_GEN}/build.ninja" ] && grep -q "build wattcurb-dashboard:" 
 else
     HAS_DASHBOARD=0
 fi
-ninja -C "${BUILD_PGO_GEN}" ${TARGETS_STAGE1}
+ninja -C "${BUILD_PGO_GEN}" -j "${JOBS}" ${TARGETS_STAGE1}
 
 echo ""
 echo "  ✓ Stage 1 instrumented binaries built successfully."
@@ -158,7 +163,7 @@ TARGETS_STAGE3="wattcurb wattcurb-tray wattcurb_tests wattcurb_asm"
 if [ "${HAS_DASHBOARD}" -eq 1 ]; then
     TARGETS_STAGE3="${TARGETS_STAGE3} wattcurb-dashboard"
 fi
-ninja -C "${BUILD_PGO_USE}" ${TARGETS_STAGE3}
+ninja -C "${BUILD_PGO_USE}" -j "${JOBS}" ${TARGETS_STAGE3}
 
 echo ""
 echo "  ✓ PGO-optimized release binaries compiled with feedback."

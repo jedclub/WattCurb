@@ -40,9 +40,22 @@ def run_cmd(cmd_list, cwd=REPO_ROOT):
     duration = time.perf_counter() - start
     return proc.returncode, proc.stdout, duration
 
+def ninja_jobs():
+    """Job cap for Ninja.
+
+    Ninja defaults to CPUs+2, which oversubscribes a host that is already
+    running other work (e.g. a user's own compile). Default to the CPU count
+    and allow an explicit override via WATTCURB_JOBS / CMAKE_BUILD_PARALLEL_LEVEL.
+    """
+    v = os.environ.get("WATTCURB_JOBS") or os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL")
+    if v and v.isdigit() and int(v) > 0:
+        return ["-j", v]
+    return ["-j", str(os.cpu_count() or 1)]
+
+
 def cmd_build(args):
     targets = args.targets if args.targets else []
-    cmd = ["ninja", "-C", "build"] + targets
+    cmd = ["ninja", "-C", "build"] + ninja_jobs() + targets
     ret, output, duration = run_cmd(cmd)
 
     # Always persist raw log to disk
