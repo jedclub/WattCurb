@@ -126,10 +126,28 @@ causes:
   from `/proc/meminfo` (MemTotal, MemAvailable, SwapTotal, SwapFree) and
   `/proc/pressure/memory` (`some`/`full` avg10).
 - **REQ-112.8 (Event-driven, not polled)** Pressure shall be delivered by a PSI
-  trigger (`some 150000 1000000`) registered in the daemon's existing `epoll`
+  trigger (`some 150000 2000000`) registered in the daemon's existing `epoll`
   set with `EPOLLPRI`. The descriptor is silent on a healthy machine, so the
-  Zero-Wakeup contract of [`REF-REQ-002`] is preserved. A kernel without
+  Zero-Wakeup contract of [`REF-REQ-002`] is preserved. A kernel that refuses
+  the primary trigger shall be offered a fallback ladder, and a kernel without
   `CONFIG_PSI` degrades to tick-driven sampling rather than losing the guard.
+
+  The parameters are constrained by the kernel and were established by
+  measurement on this host (7.2.5-cachyos), not assumed:
+
+  | Trigger | root | unprivileged |
+  | :--- | :---: | :---: |
+  | `some 150000 1000000` | EINVAL | EINVAL |
+  | `some 150000 2000000` | accepted | EINVAL |
+  | `some 200000 2000000` | accepted | EINVAL |
+  | `some 500000 2000000` | EINVAL | EINVAL |
+  | `some 1000000 10000000` | accepted | EINVAL |
+
+  Three rules follow: the window must be a multiple of 2,000,000 us, the
+  threshold may not exceed one tenth of the window, and trigger creation
+  requires `CAP_SYS_RESOURCE`. The first implementation used a 1 s window, was
+  silently declined at runtime, and fell back to tick sampling - caught only
+  because the daemon logs the fallback.
 - **REQ-112.9 (Ladder)** Two escalating tiers, both reversible, **neither
   terminating nor halting**:
 

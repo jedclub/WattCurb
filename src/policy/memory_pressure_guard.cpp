@@ -92,14 +92,22 @@ bool MemoryPressureGuard::initialize() noexcept {
     // access, leaves m_psi_fd at -1 and the guard still runs on the daemon's
     // existing observation tick - later, but not never.
     if (m_psi_fd < 0) {
-        int fd = ::open("/proc/pressure/memory", O_RDWR | O_NONBLOCK | O_CLOEXEC);
-        if (fd >= 0) {
-            const size_t tlen = std::strlen(PSI_TRIGGER);
-            if (::write(fd, PSI_TRIGGER, tlen) < 0) {
+        // A refused trigger leaves the descriptor unusable, so each candidate
+        // gets its own open.
+        auto try_trigger = [](const char* spec) noexcept -> int {
+            int fd = ::open("/proc/pressure/memory", O_RDWR | O_NONBLOCK | O_CLOEXEC);
+            if (fd < 0) return -1;
+            if (::write(fd, spec, std::strlen(spec)) < 0) {
                 ::close(fd);
-            } else {
-                m_psi_fd = fd;
+                return -1;
             }
+            return fd;
+        };
+
+        m_psi_fd = try_trigger(PSI_TRIGGER);
+        for (const char* spec : PSI_TRIGGER_FALLBACKS) {
+            if (m_psi_fd >= 0) break;
+            m_psi_fd = try_trigger(spec);
         }
     }
     return true;

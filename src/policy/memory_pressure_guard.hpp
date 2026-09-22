@@ -74,10 +74,28 @@ public:
     static constexpr size_t MAX_THROTTLED = 16;
     static constexpr size_t MAX_RECLAIMED_PER_CYCLE = 8;
 
-    // PSI trigger: wake when memory stalls exceed 150 ms inside any 1 s window.
+    // PSI trigger: wake when memory stalls exceed 150 ms inside any 2 s window.
     // This is what keeps the guard inside the Zero-Wakeup contract - the fd is
     // silent on a healthy machine and the daemon never polls for pressure.
-    static constexpr const char* PSI_TRIGGER = "some 150000 1000000";
+    //
+    // The parameters are not free. Measured against kernel 7.2.5 on this host:
+    //   - the window must be a multiple of 2,000,000 us (a 1 s window is
+    //     rejected with EINVAL even for root);
+    //   - the threshold may not exceed one tenth of the window
+    //     ("some 500000 2000000" is rejected, "some 200000 2000000" is not);
+    //   - creating a trigger at all requires CAP_SYS_RESOURCE - every
+    //     unprivileged attempt returns EINVAL.
+    // A first attempt with a 1 s window was silently declined at runtime and
+    // the guard fell back to tick sampling, which is exactly the failure this
+    // ladder is written to avoid.
+    static constexpr const char* PSI_TRIGGER = "some 150000 2000000";
+    // Tried in order if the primary is refused, so a kernel with different
+    // limits still gets an event-driven guard rather than the tick fallback.
+    static constexpr const char* PSI_TRIGGER_FALLBACKS[] = {
+        "some 200000 2000000",
+        "some 400000 4000000",
+        "some 1000000 10000000",
+    };
 
     MemoryPressureGuard() = default;
     ~MemoryPressureGuard();

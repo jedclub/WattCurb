@@ -73,7 +73,7 @@ sysfs write traffic and no uncoordinated wakeups. It is called from two places:
             │                            └─► memory_guard_.evaluate_and_actuate()    │  ← de-escalation
   signalfd ─┤ SIGTERM/SIGHUP                                                          │
             │                                                                        │
-  PSI  fd  ─┤ EPOLLPRI, "some 150000 1000000" ──► memory_guard_.evaluate_and_actuate()│  ← escalation
+  PSI  fd  ─┤ EPOLLPRI, "some 150000 2000000" ──► memory_guard_.evaluate_and_actuate()│  ← escalation
             │                                                                        │
  ctrl sock ─┤ IPC                                                                     │
             └────────────────────────────────────────────────────────────────────────┘
@@ -81,13 +81,19 @@ sysfs write traffic and no uncoordinated wakeups. It is called from two places:
 
 The asymmetry is deliberate. The kernel raises `EPOLLPRI` when memory *starts*
 stalling and never signals when pressure *falls*, so escalation is event-driven
-(latency measured in the PSI window, 1 s) while de-escalation rides the existing
+(latency bounded by the PSI window, 2 s) while de-escalation rides the existing
 tick. Nothing polls: on a machine that is not under pressure the PSI descriptor
 is silent for the life of the daemon.
 
 This is the only new descriptor in the event loop, and it is optional - a kernel
-without `CONFIG_PSI`, or a container that cannot write the trigger, leaves
+without `CONFIG_PSI`, or a process without `CAP_SYS_RESOURCE`, leaves
 `psi_fd_ == -1` and the guard runs on the tick alone.
+
+The trigger parameters are kernel-constrained and were measured rather than
+assumed (see REF-REQ-112 §3.2): the window must be a multiple of 2 s, the
+threshold at most one tenth of the window, and creation needs
+`CAP_SYS_RESOURCE`. A refused trigger leaves the descriptor unusable, so each
+candidate in the fallback ladder gets its own `open()`.
 
 ### 2.2 Ladder and state
 
