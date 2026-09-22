@@ -1015,14 +1015,15 @@ bool MitigationEngine::assert_unrestricted_cpu_ceiling() noexcept {
     // The boost bit gates the P-state above the table's top entry. On acpi-cpufreq
     // (AMD CPB) cpuinfo_max_freq is the BASE clock, so a restored ceiling alone
     // still leaves the part pinned at base until this bit is set.
-    {
-        char cur[32];
-        size_t cn = 0;
-        if (core::fs::read_small_file("/sys/devices/system/cpu/cpufreq/boost", cur, sizeof(cur) - 1, &cn) &&
-            cn > 0 && cur[0] == '0') {
-            if (set_cpu_boost(true)) repaired = true;
-        }
-    }
+    //
+    // REF-REQ-112.11: write it unconditionally. The sysfs value is not a reliable
+    // mirror of the hardware state: this host was observed reading "1" while
+    // cpupower reported "Active: no" and the single-core clock stayed at ~2.4 GHz,
+    // and re-writing "1" restored 4.1 GHz. Gating the write on that read meant the
+    // re-assertion skipped exactly the case it exists to repair. One small write
+    // per observation cycle is the price of a reliable boost; `repaired` is left
+    // alone so the per-cycle write does not turn into a REPAIR log storm.
+    (void)set_cpu_boost(true);
 
     return repaired;
 }
