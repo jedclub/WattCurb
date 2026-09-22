@@ -4758,47 +4758,48 @@ void test_thinkpad_fan_thermal_assist_and_smu_limits() {
     // REF-REQ-124 (2026-09-22): full speed from 60 C (was 70 C) and the ramp
     // spans 60 C (100%) -> 35 C (20%). 70 C is the firmware's Tctl ceiling, so
     // waiting until 70 C to reach full fan left no margin before throttling.
+    // REF-REQ-125 (2026-09-22): the top step is FAN_LEVEL_FULL_SPEED (the
+    // `full-speed` keyword), because numeric 7 measured 4780 RPM against
+    // full-speed's 5346 RPM.
+    constexpr int FULL = policy::MitigationEngine::FAN_LEVEL_FULL_SPEED;
     assert(policy::MitigationEngine::fan_level_for_temp(0.0) == -1); // no reading
     assert(policy::MitigationEngine::fan_level_for_temp(-5.0) == -1);
     assert(policy::MitigationEngine::fan_level_for_temp(20.0) == 1); // below floor -> 1
     assert(policy::MitigationEngine::fan_level_for_temp(35.0) == 1); // floor = 20%
-    assert(policy::MitigationEngine::fan_level_for_temp(60.0) == 7); // full speed
-    assert(policy::MitigationEngine::fan_level_for_temp(70.0) == 7); // above ceiling
-    assert(policy::MitigationEngine::fan_level_for_temp(95.0) == 7);
+    assert(policy::MitigationEngine::fan_level_for_temp(60.0) == FULL);
+    assert(policy::MitigationEngine::fan_level_for_temp(70.0) == FULL);
+    assert(policy::MitigationEngine::fan_level_for_temp(95.0) == FULL);
 
     int prev = 0;
     for (int t = 1; t <= 120; ++t) {
         const int lvl = policy::MitigationEngine::fan_level_for_temp(static_cast<double>(t));
-        assert(lvl >= 1 && lvl <= 7); // always a valid discrete step
-        assert(lvl >= prev);          // monotonic non-decreasing
+        assert(lvl >= 1 && lvl <= FULL); // always a valid step
+        assert(lvl >= prev);             // monotonic non-decreasing
         prev = lvl;
     }
     // Half-way through the new ramp (47.5 C) the fraction is 0.6 -> level 4.
     assert(policy::MitigationEngine::fan_level_for_temp(47.5) == 4);
     // Just under the full-speed threshold is NOT full speed yet: the ramp has to
     // be a ramp, or the threshold change would just be a step function at 60 C.
-    // Level 7 is reserved for the threshold, so 59 C is the top of the ramp (6).
+    // The full-speed step is reserved for the threshold; the ramp tops out at 6.
     assert(policy::MitigationEngine::fan_level_for_temp(59.0) == 6);
     assert(policy::MitigationEngine::fan_level_for_temp(59.9) == 6);
-    assert(policy::MitigationEngine::fan_level_for_temp(60.0) == 7);
 
-    // --- 1b. REF-REQ-114 defect: the top step must be a numeric level -----
-    // The regression was that >=70 C produced the string "full-speed", which
-    // thinkpad_acpi resolves to `disengaged` on this host. The write succeeds, so
-    // the curve cached "7" and never retried - pinning the fan to the EC curve
-    // while the daemon believed it had pinned full speed. The curve itself must
-    // now stay inside the numeric range at every temperature, and the formatting
-    // must never emit the keyword.
-    for (int t = 70; t <= 110; ++t) {
-        assert(policy::MitigationEngine::fan_level_for_temp(static_cast<double>(t)) == 7);
+    // --- 1b. REF-REQ-125 defect: the top step must be the KEYWORD ---------
+    // Numeric 7 is a discrete step, not the fan's maximum: measured on this host
+    // level 7 = 4780 RPM while `full-speed` = 5346 RPM (reproducible across
+    // writes, stable for 60 s). Commanding 7 for "full speed" left 12% of the
+    // fan unused at exactly the temperature where the firmware ceiling begins to
+    // throttle. The curve must therefore never return numeric 7 - that step is
+    // skipped entirely (it is within 2 RPM of level 6 anyway).
+    for (int t = 60; t <= 110; ++t) {
+        assert(policy::MitigationEngine::fan_level_for_temp(static_cast<double>(t)) == FULL);
     }
-    {
-        // Whatever the curve returns at the limit, set_fan_level() must format a
-        // numeric token. Under the sandbox the write is refused, so assert on the
-        // documented contract instead: the curve's own range is 1..7 numeric.
-        const int top = policy::MitigationEngine::fan_level_for_temp(80.0);
-        assert(top == 7 && "the limit step is the numeric level 7, not \"full-speed\"");
+    for (int t = 1; t < 60; ++t) {
+        assert(policy::MitigationEngine::fan_level_for_temp(static_cast<double>(t)) != 7 &&
+               "numeric 7 must never be commanded: it is below the fan's maximum");
     }
+    assert(FULL != 7 && "the full-speed sentinel must not collide with a numeric step");
 
     // --- 2. Sandboxed writes are refused, never actuated -----------------
     assert(!policy::MitigationEngine::set_fan_level("3"));
@@ -4821,7 +4822,8 @@ void test_thinkpad_fan_thermal_assist_and_smu_limits() {
     using policy::MitigationEngine;
     for (const PowerProfileMode m : {PowerProfileMode::Performance, PowerProfileMode::Balanced,
                                      PowerProfileMode::PowerSaver, PowerProfileMode::UltraEndurance}) {
-        assert(MitigationEngine::fan_level_for_temp_in_profile(75.0, m) == 7 &&
+        assert(MitigationEngine::fan_level_for_temp_in_profile(75.0, m) ==
+                   MitigationEngine::FAN_LEVEL_FULL_SPEED &&
                "REF-REQ-118.1: >= 60 C must be full speed in every profile");
         assert(MitigationEngine::fan_level_for_temp_in_profile(0.0, m) == -1);
     }

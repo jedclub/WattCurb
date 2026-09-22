@@ -2978,15 +2978,21 @@ uint64_t g_fan_curve_application_count = 0;
 
 int MitigationEngine::fan_level_for_temp(double cpu_temp_c) noexcept {
     if (cpu_temp_c <= 0.0) return -1; // no temperature reading
-    // REF-REQ-114 (defect fix): the top step is written as the NUMERIC level 7,
-    // never as the string "full-speed". On this host (T14/P14s class, Renoir)
-    // `level full-speed` is accepted by thinkpad_acpi but resolves to
-    // `level: disengaged` - the EC takes the fan back. The write still returns
-    // success, so the old code cached level 7 and then never retried at the same
-    // temperature, pinning the fan to the EC's quiet curve (~4.3k RPM) while the
-    // daemon believed it had pinned full speed. Numeric 7 is the real full speed
-    // here (measured ~5.3k RPM), so the curve stays inside 1..7.
-    if (cpu_temp_c >= FAN_FULL_TEMP_C) return 7; // full speed (numeric)
+    // REF-REQ-114 (defect fix) / REF-REQ-125 (defect fix):
+    // The top step is NOT numeric 7. Two separate defects lived here:
+    //
+    //   1. Writing the string "full-speed" and then CACHING it as level 7 meant
+    //      the daemon never retried at the same temperature, so whatever the EC
+    //      did afterwards was never corrected.
+    //   2. The first fix concluded that numeric 7 was the real full speed and
+    //      used it for the top step. Measured now: level 7 is 4780 RPM while
+    //      `full-speed` is 5346 RPM - numeric 7 leaves ~560 RPM (12%) unused, so
+    //      the "full speed" step was not full speed at all.
+    //
+    // The correct write is the keyword, which thinkpad_acpi maps to
+    // TP_EC_FAN_FULLSPEED. FAN_LEVEL_FULL_SPEED is the sentinel for it; the ramp
+    // stays inside the numeric steps 1..6.
+    if (cpu_temp_c >= FAN_FULL_TEMP_C) return FAN_LEVEL_FULL_SPEED;
     if (cpu_temp_c <= FAN_CURVE_MIN_TEMP_C) return 1; // 0.2 -> level 1
     // Linear between (35 C, 0.2) and (60 C, 1.0) - REF-REQ-124 lowered the top
     // from 70 C so the ramp starts below the firmware's Tctl ceiling.
@@ -2996,11 +3002,9 @@ int MitigationEngine::fan_level_for_temp(double cpu_temp_c) noexcept {
                             (1.0 - FAN_CURVE_MIN_FRACTION);
     int lvl = static_cast<int>(frac * 7.0 + 0.5);
     if (lvl < 1) lvl = 1;
-    // REF-REQ-124.2: level 7 IS "100%", and the 100% reference is the threshold.
-    // Nearest-rounding reaches 7 at ~57.8 C because 7 discrete steps span a
-    // 0.2..1.0 fraction, which would silently turn "full speed from 60 C" into
-    // "full speed from ~58 C". The top step is therefore reserved for
-    // FAN_FULL_TEMP_C and above; the last stretch of the ramp is level 6.
+    // REF-REQ-124.2: the 100% step belongs to the threshold, and REF-REQ-125
+    // makes that step the full-speed keyword. The ramp therefore tops out at 6;
+    // numeric 7 is never commanded (it is within 2 RPM of 6, so nothing is lost).
     if (lvl > 6) lvl = 6;
     return lvl;
 }
@@ -3029,10 +3033,14 @@ int MitigationEngine::apply_fan_for_temp(double cpu_temp_c,
     if (lvl == g_last_fan_level) return lvl;
 
     char level[16];
-    // REF-REQ-114 (defect fix): always the numeric step, including the top one.
-    // "full-speed" is a thinkpad_acpi keyword that resolves to `disengaged` on
-    // this host - see fan_level_for_temp(). Writing 7 is the real full speed.
-    std::snprintf(level, sizeof(level), "%d", lvl);
+    // REF-REQ-125: the top step is the `full-speed` keyword (TP_EC_FAN_FULLSPEED),
+    // not a number - numeric 7 is ~560 RPM below the real maximum. Every other
+    // step is the numeric level.
+    if (lvl == FAN_LEVEL_FULL_SPEED) {
+        std::snprintf(level, sizeof(level), "full-speed");
+    } else {
+        std::snprintf(level, sizeof(level), "%d", lvl);
+    }
     if (!set_fan_level(level)) return -1;
     g_last_fan_level = lvl;
     return lvl;

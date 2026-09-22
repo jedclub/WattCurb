@@ -253,6 +253,18 @@ public:
     static constexpr double FAN_CURVE_MIN_TEMP_C = 35.0;
     static constexpr double FAN_CURVE_MIN_FRACTION = 0.2;
     static constexpr double FAN_FULL_TEMP_C = 60.0;
+    // REF-REQ-125: the sentinel for "the EC's full speed", written as the
+    // `full-speed` keyword rather than as a number. Measured on this host:
+    //   level 6 -> 4789 RPM, level 7 -> 4780 RPM,
+    //   full-speed -> 5346 RPM (stable for 60 s, reproducible across writes).
+    // The discrete steps do NOT reach the fan's maximum: numeric 7 sits ~560 RPM
+    // below it. thinkpad_acpi maps `full-speed` (and its synonym `disengaged`) to
+    // TP_EC_FAN_FULLSPEED, which is the real maximum. The earlier code comment
+    // claimed "numeric 7 is the real full speed (measured ~5.3k RPM)" - that
+    // 5.3k reading was taken while the fan was still coasting down from a
+    // full-speed write, and the conclusion was wrong. The curve therefore uses
+    // the keyword for the top step and numeric levels 1..6 for the ramp.
+    static constexpr int FAN_LEVEL_FULL_SPEED = 8;
     // REF-REQ-118.3: UltraEndurance-only cold stop threshold.
     static constexpr double FAN_ULTRA_STOP_TEMP_C = 45.0;
     [[nodiscard]] static int fan_level_for_temp(double cpu_temp_c) noexcept;
