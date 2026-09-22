@@ -151,7 +151,7 @@ void test_drm_fdinfo_parsing() {
 }
 
 void test_attribution_engine() {
-    auto now = std::chrono::steady_clock::now();
+    auto now = wattcurb::BootTimeClock::now();
     wattcurb::HardwareSample hw1;
     hw1.timestamp = now;
     hw1.battery_power_uw = 15'000'000;
@@ -194,7 +194,7 @@ void test_attribution_engine() {
 
 // Implements REF-TEST-009 & REF-REQ-051: AMD APU PPT Disambiguation and Duty-Cycle GPU Attribution
 void test_apu_ppt_and_gpu_duty_cycle_attribution() {
-    auto now = std::chrono::steady_clock::now();
+    auto now = wattcurb::BootTimeClock::now();
     wattcurb::HardwareSample hw1;
     hw1.timestamp = now;
     hw1.battery_power_uw = 25'000'000;
@@ -244,7 +244,7 @@ void test_apu_ppt_and_gpu_duty_cycle_attribution() {
 }
 
 void test_windowed_attribution_engine() {
-    auto now = std::chrono::steady_clock::now();
+    auto now = wattcurb::BootTimeClock::now();
     std::vector<wattcurb::HardwareSample> hw_list;
     std::vector<std::vector<wattcurb::ProcessSample>> proc_list;
 
@@ -273,6 +273,57 @@ void test_windowed_attribution_engine() {
     assert(report.top_processes.size() >= 1);
     assert(report.top_processes[0].pid == 201);
     std::cout << " [PASS] test_windowed_attribution_engine\n";
+}
+
+// Implements REF-TEST-066 (REF-REQ-010): RAPL wrap arithmetic and the
+// suspend-inclusive timebase. Fails if the wrap modulus is hard-coded to 2^32
+// (wrong delta) or if a backwards jump with unknown range fabricates a spike.
+void test_rapl_wrap_and_boottime_timebase() {
+    using namespace wattcurb;
+    policy::AttributionEngine engine;
+
+    // (a) Forward delta: 1,000,000 uJ over 1.0 s == 1.0 W.
+    HardwareSample a{};
+    HardwareSample b{};
+    a.timestamp = BootTimeClock::now();
+    b.timestamp = a.timestamp + std::chrono::seconds(1);
+    a.rapl_package_uj = 1'000'000ULL;
+    b.rapl_package_uj = 2'000'000ULL;
+    auto hw = engine.compute_hardware_power(a, b, 1.0);
+    assert(std::abs(hw.cpu_package_watts - 1.0) < 0.01 && "1 J over 1 s must be exactly 1 W");
+
+    // (b) Wrap resolved with the real max_energy_range_uj.
+    HardwareSample w1{}, w2{};
+    w1.timestamp = BootTimeClock::now();
+    w2.timestamp = w1.timestamp + std::chrono::seconds(10);
+    const uint64_t range = 4'294'967'296ULL; // 2^32 uJ
+    w1.rapl_package_uj = range - 1'000'000ULL;
+    w2.rapl_package_uj = 1'000'000ULL;
+    w1.rapl_package_max_range_uj = range;
+    w2.rapl_package_max_range_uj = range;
+    auto hw_wrap = engine.compute_hardware_power(w1, w2, 10.0);
+    const double expected_w = (2'000'000.0 / 1'000'000.0) / 10.0; // 0.2 W
+    assert(std::abs(hw_wrap.cpu_package_watts - expected_w) < 0.01 &&
+           "wrap must use max_energy_range_uj, not a hard-coded 2^32");
+
+    // (c) Backwards jump with unknown range is a reset (0 W), not a huge spike.
+    HardwareSample r1{}, r2{};
+    r1.timestamp = BootTimeClock::now();
+    r2.timestamp = r1.timestamp + std::chrono::seconds(1);
+    r1.rapl_package_uj = 5'000'000ULL;
+    r2.rapl_package_uj = 100ULL;
+    r1.rapl_package_max_range_uj = 0;
+    r2.rapl_package_max_range_uj = 0;
+    auto hw_reset = engine.compute_hardware_power(r1, r2, 1.0);
+    assert(hw_reset.cpu_package_watts < 0.001 && "unknown-range reset must not fabricate power");
+
+    // (d) BootTimeClock (CLOCK_BOOTTIME) is monotonic and reads a real clock.
+    auto t0 = BootTimeClock::now();
+    auto t1 = BootTimeClock::now();
+    assert(t1 >= t0 && "BootTimeClock must be monotonic");
+    assert(t0.time_since_epoch().count() > 0 && "BootTimeClock must read a real clock");
+
+    std::cout << " [PASS] test_rapl_wrap_and_boottime_timebase (REF-TEST-066: range-based wrap, 0 on reset, BOOTTIME monotonic)\n";
 }
 
 
@@ -514,7 +565,7 @@ void test_pmu_energy_proxy_metrics() {
     wattcurb::policy::AttributionEngine engine;
 
     wattcurb::HardwareSample hw1{};
-    hw1.timestamp = std::chrono::steady_clock::now();
+    hw1.timestamp = wattcurb::BootTimeClock::now();
     hw1.pmu_instructions = 10'000'000ULL;
     hw1.pmu_cycles = 10'000'000ULL;
     hw1.pmu_ipc = 1.0;
@@ -1791,7 +1842,7 @@ void test_window_aware_governor() {
 
     assert(unthrottled == true);
     assert(entry->state == WindowSuppressionState::ActiveForeground);
-    assert(elapsed_us < bench_tol() * 1000 && "Unthrottle latency must be strictly sub-millisecond (< 1000 us)");
+    assert(static_cast<double>(elapsed_us) < bench_tol() * 1000 && "Unthrottle latency must be strictly sub-millisecond (< 1000 us)");
 
     // 5. Rollback all
     gov.rollback_all();
@@ -1825,7 +1876,7 @@ void test_unified_rapid_rollback() {
     assert(window_gov.tracked_count() == 0 && "All window throttles must be cleared");
     assert(mitigation.tracked_count() == 0 && "All process mitigations must be cleared");
     assert(UnifiedRollbackCoordinator::state().is_clean_baseline == true);
-    assert(elapsed_us < bench_tol() * 5000 && "Full-sweep rollback must complete in < 5.0ms");
+    assert(static_cast<double>(elapsed_us) < bench_tol() * 5000 && "Full-sweep rollback must complete in < 5.0ms");
 
     // 3. Test Idempotency: Immediate second call
     auto start_idem = std::chrono::high_resolution_clock::now();
@@ -1834,7 +1885,7 @@ void test_unified_rapid_rollback() {
     auto elapsed_idem_us = std::chrono::duration_cast<std::chrono::microseconds>(end_idem - start_idem).count();
 
     assert(ok_idem == true);
-    assert(elapsed_idem_us < bench_tol() * 100 && "Idempotent second rollback must be sub-100us no-op");
+    assert(static_cast<double>(elapsed_idem_us) < bench_tol() * 100 && "Idempotent second rollback must be sub-100us no-op");
 
     std::cout << " [PASS] test_unified_rapid_rollback (AC Plug-in / Charge event full-sweep restoration verified: " 
               << elapsed_us << "us, idem: " << elapsed_idem_us << "us)\n";
@@ -2846,7 +2897,7 @@ void test_smart_adaptive_trigger_and_temporal_sync() {
 
     // 3. Invariant 3: Temporal Synchronization between Hardware & Process accumulation window
     // Simulate 60-second window with decoupled baselines
-    auto t0 = std::chrono::steady_clock::now();
+    auto t0 = wattcurb::BootTimeClock::now();
     auto t1 = t0 + std::chrono::seconds(60);
 
     HardwareSample hw_deep_prev{};
@@ -5201,6 +5252,7 @@ int main() {
     test::test_proc_io_parsing();
     test::test_drm_fdinfo_parsing();
     test::test_attribution_engine();
+    test::test_rapl_wrap_and_boottime_timebase();
     test::test_apu_ppt_and_gpu_duty_cycle_attribution();
     test::test_windowed_attribution_engine();
     test::test_singleton_lock();

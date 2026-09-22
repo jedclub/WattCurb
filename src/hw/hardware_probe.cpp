@@ -722,6 +722,16 @@ std::pair<uint8_t, uint8_t> HardwareProbe::read_pcie_binary_link_status(int conf
         auto pkg_file = rapl_dir / "intel-rapl:0/energy_uj";
         if (std::filesystem::exists(pkg_file, ec)) {
             rapl_pkg_path_ = pkg_file;
+            // REF-REQ-010: capture the wrap modulus, not a hard-coded 2^32.
+            auto range_file = rapl_dir / "intel-rapl:0/max_energy_range_uj";
+            int rfd = open_ro_cloexec(range_file);
+            if (rfd >= 0) {
+                auto range_str = read_string_fd(rfd);
+                ::close(rfd);
+                if (!range_str.empty()) {
+                    rapl_pkg_max_range_uj_ = std::strtoull(range_str.c_str(), nullptr, 10);
+                }
+            }
             auto core_file = rapl_dir / "intel-rapl:0/intel-rapl:0:0/energy_uj";
             if (std::filesystem::exists(core_file, ec)) {
                 rapl_core_path_ = core_file;
@@ -852,7 +862,7 @@ HardwareSample HardwareProbe::capture_sample() const {
     WATTCURB_PROFILE_SCOPE("hw.capture_all");
     ++sample_counter_;
     HardwareSample sample;
-    sample.timestamp = std::chrono::steady_clock::now();
+    sample.timestamp = BootTimeClock::now();
 
     // 1. Battery & Power Rail (REF-REQ-022, REF-ARCH-012, REF-REQ-023)
     {
@@ -1083,7 +1093,7 @@ HardwareSample HardwareProbe::capture_sample_desktop() const {
     WATTCURB_PROFILE_SCOPE("hw.capture_all");
     ++sample_counter_;
     HardwareSample sample;
-    sample.timestamp = std::chrono::steady_clock::now();
+    sample.timestamp = BootTimeClock::now();
 
     // Desktop / Headless AC-Only Power State (Zero Battery Sysfs I/O)
     sample.is_ac_online = true;
@@ -1102,6 +1112,7 @@ void HardwareProbe::capture_subsystems(HardwareSample& sample) const {
             if (rapl_pkg_fd_ >= 0) sample.rapl_package_uj = read_uint64_fd(rapl_pkg_fd_);
             if (rapl_core_fd_ >= 0) sample.rapl_core_uj = read_uint64_fd(rapl_core_fd_);
             if (rapl_dram_fd_ >= 0) sample.rapl_dram_uj = read_uint64_fd(rapl_dram_fd_);
+            sample.rapl_package_max_range_uj = rapl_pkg_max_range_uj_;
             if (cpu_temp_fd_ >= 0) sample.cpu_temp_mdeg = read_int32_fd(cpu_temp_fd_);
 
             if (cpu_governor_fd_ >= 0) {

@@ -4,15 +4,43 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <ctime>
 #include <optional>
 #include <string_view>
 #include "core/custom_containers.hpp"
 
 namespace wattcurb {
 
+// Implements REF-REQ-010: samplers must timestamp with a clock that also
+// advances across suspend-to-RAM.
+//
+// std::chrono::steady_clock maps to CLOCK_MONOTONIC on Linux, which stops while
+// the machine is suspended. RAPL energy counters and c-state residency counters
+// do not: they keep accumulating. After resume, a steady_clock interval of a
+// few milliseconds is divided into a suspend-sized counter delta, so the
+// derived CPU/GPU wattage and c-state percentages explode. CLOCK_BOOTTIME is
+// monotonic and counts suspend, so the time delta and the counter delta describe
+// the same span.
+struct BootTimeClock {
+    using duration = std::chrono::nanoseconds;
+    using rep = duration::rep;
+    using period = duration::period;
+    using time_point = std::chrono::time_point<BootTimeClock, duration>;
+    static constexpr bool is_steady = true;
+
+    static time_point now() noexcept {
+        struct timespec ts{};
+        if (::clock_gettime(CLOCK_BOOTTIME, &ts) != 0) {
+            return time_point{};
+        }
+        return time_point{duration{static_cast<rep>(ts.tv_sec) * 1'000'000'000LL +
+                                   static_cast<rep>(ts.tv_nsec)}};
+    }
+};
+
 // Implements REF-REQ-001, REF-REQ-010 & REF-ARCH-002
 struct HardwareSample {
-    std::chrono::steady_clock::time_point timestamp{};
+    BootTimeClock::time_point timestamp{};
 
     // 1. Power Supply & Battery Gas Gauge (REF-REQ-010 Sec 2.1, REF-REQ-022)
     std::optional<uint64_t> battery_power_uw;
@@ -57,6 +85,10 @@ struct HardwareSample {
     std::optional<uint64_t> rapl_package_uj;
     std::optional<uint64_t> rapl_core_uj;
     std::optional<uint64_t> rapl_dram_uj;
+    // REF-REQ-010: the RAPL counter's wrap modulus, read from
+    // max_energy_range_uj. 0 means unknown; the wrap math then treats a
+    // backwards jump as a counter reset rather than inventing a huge delta.
+    uint64_t rapl_package_max_range_uj{0};
     std::optional<int32_t> cpu_temp_mdeg; // k10temp / coretemp
     uint32_t cpu_freq_avg_khz{0};
     uint32_t cpu_freq_min_khz{0};

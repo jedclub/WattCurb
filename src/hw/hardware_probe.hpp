@@ -77,6 +77,7 @@ private:
     std::filesystem::path rapl_pkg_path_;
     std::filesystem::path rapl_core_path_;
     std::filesystem::path rapl_dram_path_;
+    uint64_t rapl_pkg_max_range_uj_{0}; // from max_energy_range_uj (0 = unknown)
     std::filesystem::path cpu_temp_path_;
     std::filesystem::path cpu_governor_path_;
 

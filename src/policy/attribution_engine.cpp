@@ -241,7 +241,17 @@ HardwarePowerBreakdown AttributionEngine::compute_hardware_power(
         hw.has_direct_rapl = true;
         uint64_t e1 = *hw1.rapl_package_uj;
         uint64_t e2 = *hw2.rapl_package_uj;
-        uint64_t delta_uj = (e2 >= e1) ? (e2 - e1) : (e2 + (0xFFFFFFFFULL - e1));
+        uint64_t delta_uj;
+        if (e2 >= e1) {
+            delta_uj = e2 - e1;
+        } else {
+            // The counter went backwards: a wrap or a reset. Wrap with the real
+            // max_energy_range_uj when the probe knows it; otherwise treat it as
+            // a reset (delta 0) rather than inventing a ~2^32 uJ spike from a
+            // hard-coded modulus that need not match this platform.
+            const uint64_t range = hw2.rapl_package_max_range_uj;
+            delta_uj = (range > e1) ? (e2 + (range - e1)) : 0;
+        }
         hw.cpu_package_watts = (static_cast<double>(delta_uj) / 1'000'000.0) / delta_sec;
     } else {
         // Fallback unprivileged decomposition (REF-RES-002, REF-REQ-051)
