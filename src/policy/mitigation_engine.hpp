@@ -210,8 +210,23 @@ public:
     // condition: the machine is loaded, yet even the highest core clock observed
     // this cycle is far below the hardware maximum. Pure, so the Oracle Gate can
     // prove the decision without a machine that is actually throttling.
-    static constexpr double FREQ_STARVED_MIN_LOAD_RATIO = 0.5; // load1 >= 0.5 * ncpu
-    static constexpr double FREQ_STARVED_CLOCK_FRACTION = 0.6; // max_clock < 0.6 * hw_max
+    //
+    // REF-REQ-126 (2026-09-23): both thresholds were calibrated for the
+    // catastrophic collapse and missed the ordinary one. Measured on the host with
+    // the EC's 6 W STAPM in force:
+    //   * the delivered clock settles at the driver's lowest P-state, 1400 MHz,
+    //     which is 0.824 of the 1700 MHz table maximum - above the old 0.6 gate
+    //     (1020 MHz), so the watchdog saw nothing;
+    //   * it does so under load1 3.5-7, below the old gate of 0.5 * 16 = 8.0.
+    // The machine therefore sat at the P-state floor for as long as the EC kept
+    // its own limit, and the repair path never ran. The gates now sit above the
+    // floor and below the load levels that actually occur:
+    //   * clock gate 0.85 * 1700 MHz = 1445 MHz -> the floor (1400/1397) trips it;
+    //   * load gate 0.25 * ncpu = 4.0 on 16 threads -> load 4-7 trips it.
+    // A trip only re-asserts the intended limits, so a false positive costs one
+    // idempotent write and one log line, not a throttled machine.
+    static constexpr double FREQ_STARVED_MIN_LOAD_RATIO = 0.25; // load1 >= 0.25 * ncpu
+    static constexpr double FREQ_STARVED_CLOCK_FRACTION = 0.85; // max_clock < 0.85 * hw_max
     static constexpr uint32_t FREQ_STARVED_TRIP_CYCLES = 5;
     [[nodiscard]] static bool is_frequency_starved(uint64_t observed_max_khz,
                                                    uint64_t hw_max_khz,
@@ -297,6 +312,51 @@ public:
     [[nodiscard]] static bool ryzenadj_available() noexcept;
     static bool apply_smu_performance_limits() noexcept;
     static bool restore_smu_limits() noexcept;
+
+    // REF-REQ-126 (2026-09-23): the EC owns STAPM and takes it back.
+    //
+    // `apply_smu_performance_limits()` writes the SMU mailbox once, at profile
+    // application, and nothing checked afterwards that the value stayed. Measured
+    // on the reference host: with Performance in force the EC moved STAPM back to
+    // its own table value (6 W) and the CPU settled at the 1400 MHz P-state floor
+    // (780-1400 MHz observed) with 25 C of thermal headroom unused, because the
+    // package could not draw enough power to clock higher. The write is therefore
+    // verified by reading the limit back, and re-asserted when the EC has taken it.
+    //
+    // The verification is periodic rather than per-cycle: it costs one `ryzenadj
+    // -i` exec, so it runs every SMU_VERIFY_INTERVAL_CYCLES observation cycles
+    // (~30 s at the 10 s cadence) and only while the machine is actually loaded
+    // (an idle box does not need the power budget) and an unrestricted profile is
+    // in force (the saving profiles leave the EC's limit in place on purpose).
+    static constexpr uint32_t SMU_VERIFY_INTERVAL_CYCLES = 3;
+    static constexpr double SMU_VERIFY_MIN_LOAD1 = 1.0;
+    // Floor below which the read-back means "the EC has taken it back". The value
+    // is not SMU_STAPM_PERF_MW: our own accepted write reads back at 22-25 W
+    // (SMU granularity), so a tight comparison would re-write every cycle forever.
+    // The EC's own band is 6-10 W, which this separates cleanly from 22 W.
+    static constexpr uint32_t SMU_STAPM_CLAWED_BACK_MW = 18000;
+    // Pure decision, so the Oracle Gate can prove it without a live SMU.
+    [[nodiscard]] static constexpr bool smu_limit_needs_reassert(uint32_t observed_mw) noexcept {
+        return observed_mw != 0 && observed_mw < SMU_STAPM_CLAWED_BACK_MW;
+    }
+    // Pure row reader for `ryzenadj -i` output ("| STAPM LIMIT | 6.000 |"), so the
+    // parser is testable without the tool. Returns the raw number printed, which
+    // is a watt (STAPM/PPT) or degree (THM) value with three decimals - 6.000 is
+    // 6 W, not 6000 mW - and 0.0 when the row is absent. Each caller scales it:
+    // ryzenadj's argument space is milliwatts, the table's is watts.
+    [[nodiscard]] static double parse_smu_limit_row(const char* text, const char* row_name) noexcept;
+    enum class SmuVerifyResult : uint8_t {
+        Unavailable,     // no tool, no captured baseline, or sandboxed
+        NotUnrestricted, // saving profile - the EC's limit is intentional
+        ReadFailed,      // read-back produced no value; nothing is assumed
+        Healthy,         // the limit is still ours
+        Reasserted,      // the EC had taken it; the raise was re-applied
+        Refused,         // re-apply attempted and failed
+    };
+    // REF-REQ-126: read the enforced STAPM back and re-assert the raise if the EC
+    // has reclaimed it. Returns what it did, for the cycle's log decision.
+    [[nodiscard]] static SmuVerifyResult verify_and_reassert_smu_limits(PowerProfileMode mode) noexcept;
+
     static bool set_bluetooth_blocked(bool block) noexcept;
     static bool cap_display_backlight(double max_pct) noexcept;
     static bool restore_display_backlight() noexcept;

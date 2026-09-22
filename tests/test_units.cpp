@@ -4673,19 +4673,97 @@ void test_frequency_starvation_watchdog() {
     assert(MitigationEngine::is_frequency_starved(400'000, hw, 9.0, ncpu));
     assert(MitigationEngine::is_frequency_starved(900'000, hw, 8.0, ncpu));
 
-    // Loaded but the cores are boosting -> not starved.
-    assert(!MitigationEngine::is_frequency_starved(1'650'000, hw, 12.0, ncpu));
-    assert(!MitigationEngine::is_frequency_starved(1'020'000, hw, 8.0, ncpu)); // exactly 0.6
+    // REF-REQ-126: the state the old 0.6 clock gate and 0.5*ncpu load gate both
+    // missed. With the EC's 6 W STAPM in force the CPU settles at the driver's
+    // lowest P-state - 1400 MHz, i.e. 0.824 of the 1700 MHz table maximum - and it
+    // does so under load1 3.5-7. Measured on the host: STAPM 6 W -> 780-1400 MHz
+    // at Tctl 45 C; STAPM 25 W -> 3218-3942 MHz under the same load.
+    assert(MitigationEngine::is_frequency_starved(1'400'000, hw, 6.7, ncpu));
+    assert(MitigationEngine::is_frequency_starved(1'397'000, hw, 4.0, ncpu));
+    assert(MitigationEngine::is_frequency_starved(780'000, hw, 6.7, ncpu));
 
-    // An idle low clock is expected, never a fault.
+    // Loaded but the cores are boosting -> not starved. 1450 MHz is just above the
+    // 0.85 * 1700 = 1445 MHz gate.
+    assert(!MitigationEngine::is_frequency_starved(1'650'000, hw, 12.0, ncpu));
+    assert(!MitigationEngine::is_frequency_starved(1'450'000, hw, 8.0, ncpu));
+    assert(!MitigationEngine::is_frequency_starved(3'300'000, hw, 6.0, ncpu));
+
+    // An idle low clock is expected, never a fault. The load gate is 0.25 * ncpu
+    // = 4.0 on this host, so load 1 and 3.9 stay clean.
     assert(!MitigationEngine::is_frequency_starved(400'000, hw, 1.0, ncpu));
+    assert(!MitigationEngine::is_frequency_starved(1'400'000, hw, 3.9, ncpu));
 
     // Degenerate inputs never trip.
     assert(!MitigationEngine::is_frequency_starved(400'000, 0, 9.0, ncpu));
     assert(!MitigationEngine::is_frequency_starved(400'000, hw, 9.0, 0));
 
     std::cout << " [PASS] test_frequency_starvation_watchdog (REF-TEST-072: "
-              << "loaded-low trips, loaded-boost/idle clean, degenerate safe)\n";
+              << "loaded-low trips, P-state-floor pin trips (REF-REQ-126), "
+              << "loaded-boost/idle clean, degenerate safe)\n";
+}
+
+// Implements REF-TEST-080 & REF-REQ-126: the EC takes the SMU power limit back
+// and the daemon has to notice.
+//
+// What this falsifies: the read-back parser and the re-assert decision - both
+// pure, so the Oracle Gate proves them without a live SMU. What it does NOT
+// cover: that a real STAPM write reaches the SMU, and that the clock then rises.
+// That needs the hardware and is measured on the host (REF-REQ-126 section 3:
+// 6 W -> 780-1400 MHz, 25 W -> 3218-3942 MHz). A test asserting only "the raise
+// was attempted" would not touch the risk at all; the risk is a silently capped
+// package while every knob in this daemon reads correct.
+void test_smu_limit_clawback_verification() {
+    using namespace wattcurb::policy;
+
+    std::cout << "--- [REF-TEST-080] SMU Power-Limit Clawback Verification (REF-REQ-126) ---\n";
+
+    // Verbatim `ryzenadj -i` excerpt from the reference host while the EC held its
+    // own limit - the state that produced 780-1400 MHz with Tctl at 45 C.
+    static const char* kClawedBack =
+        "| STAPM LIMIT         |     6.000 | stapm-limit        |\n"
+        "| STAPM VALUE         |     5.998 |                    |\n"
+        "| PPT LIMIT FAST      |    30.000 | fast-limit         |\n"
+        "| PPT LIMIT SLOW      |    12.000 | slow-limit         |\n"
+        "| THM LIMIT CORE      |    70.000 | tctl-temp          |\n";
+    static const char* kRaised =
+        "| STAPM LIMIT         |    25.000 | stapm-limit        |\n"
+        "| THM LIMIT CORE      |    70.000 | tctl-temp          |\n";
+    // Our own accepted write reads back rounded by the SMU.
+    static const char* kAcceptedBySmu =
+        "| STAPM LIMIT         |    22.000 | stapm-limit        |\n";
+
+    // Parser: the value is the first number after the first '|' on the named row,
+    // in the table's unit (watts for the power rows).
+    assert(MitigationEngine::parse_smu_limit_row(kClawedBack, "STAPM LIMIT") == 6.0);
+    assert(MitigationEngine::parse_smu_limit_row(kRaised, "STAPM LIMIT") == 25.0);
+    assert(MitigationEngine::parse_smu_limit_row(kAcceptedBySmu, "STAPM LIMIT") == 22.0);
+    assert(MitigationEngine::parse_smu_limit_row(kClawedBack, "THM LIMIT CORE") == 70.0);
+    // The neighbouring "STAPM VALUE" row must not be mistaken for the limit, and an
+    // absent row must read as unknown rather than as a healthy value.
+    assert(MitigationEngine::parse_smu_limit_row(kClawedBack, "STAPM VALUE") > 5.99 &&
+           MitigationEngine::parse_smu_limit_row(kClawedBack, "STAPM VALUE") < 6.0);
+    assert(MitigationEngine::parse_smu_limit_row(kClawedBack, "TDC LIMIT VDD") == 0.0);
+    assert(MitigationEngine::parse_smu_limit_row("", "STAPM LIMIT") == 0.0);
+    assert(MitigationEngine::parse_smu_limit_row(nullptr, "STAPM LIMIT") == 0.0);
+    assert(MitigationEngine::parse_smu_limit_row(kClawedBack, nullptr) == 0.0);
+
+    // Decision: 6 W is a clawback, 22-25 W is our own write (the SMU reads back at
+    // 22 W for a 25 W request, so a tight comparison would re-write every cycle),
+    // and 0 is "unknown" - never "healthy", or a failed read hides a real loss.
+    assert(MitigationEngine::smu_limit_needs_reassert(6000));
+    assert(MitigationEngine::smu_limit_needs_reassert(10000)); // top of the EC's band
+    assert(!MitigationEngine::smu_limit_needs_reassert(22000));
+    assert(!MitigationEngine::smu_limit_needs_reassert(25000));
+    assert(!MitigationEngine::smu_limit_needs_reassert(0));
+    static_assert(MitigationEngine::SMU_STAPM_CLAWED_BACK_MW < MitigationEngine::SMU_STAPM_PERF_MW,
+                  "the clawback floor must sit below the raise target");
+    static_assert(MitigationEngine::SMU_STAPM_CLAWED_BACK_MW > 10000,
+                  "the floor must sit above the EC's own 6-10 W band");
+    static_assert(MitigationEngine::SMU_VERIFY_INTERVAL_CYCLES >= 1,
+                  "the verification interval must be a positive cycle count");
+
+    std::cout << " [PASS] test_smu_limit_clawback_verification (REF-TEST-080: parser reads the "
+                 "right row, clawback trips, accepted write and failed read do not)\n";
 }
 
 // Implements REF-TEST-079 & REF-REQ-115.3: the SMU raise must never be a
@@ -5948,6 +6026,7 @@ int main() {
     test::test_audit_defect_remediation();
     test::test_cpu_ceiling_baseline_is_hardware_max();
     test::test_frequency_starvation_watchdog();
+    test::test_smu_limit_clawback_verification();
     test::test_smu_raise_is_guarded();
     test::test_thinkpad_fan_thermal_assist_and_smu_limits();
     test::test_memory_pressure_ladder();

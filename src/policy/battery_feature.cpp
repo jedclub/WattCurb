@@ -572,6 +572,38 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
     // costs no sysfs write. Restore/exit returns the captured baseline.
     (void)MitigationEngine::apply_fan_for_temp(report.hardware.cpu_temp_c, eff_profile);
 
+    // REF-REQ-126: the SMU power raise is verified, not assumed.
+    //
+    // The EC owns STAPM and moves it back to its own table value without notice.
+    // Measured on this host with Performance in force: STAPM read back 6 W, every
+    // core sat at the 1400 MHz P-state floor (780 MHz under heavier load) with
+    // Tctl at 45 C against the firmware's 70 C ceiling, and not one of this
+    // daemon's own knobs showed anything wrong - governor=performance, ceiling at
+    // cpuinfo_max, boost=1, platform_profile=performance. Raising STAPM back to
+    // 25 W moved the highest core to 3942 MHz immediately. Temperature was never
+    // the binding constraint; the power budget was.
+    //
+    // The check costs one `ryzenadj -i` exec, so it runs every
+    // SMU_VERIFY_INTERVAL_CYCLES cycles (~30 s at the 10 s cadence) and only while
+    // the machine is actually loaded. The saving profiles are skipped inside the
+    // call: there the EC's cap is intentional.
+    {
+        static uint32_t s_smu_verify_tick = 0;
+        if (++s_smu_verify_tick >= MitigationEngine::SMU_VERIFY_INTERVAL_CYCLES) {
+            s_smu_verify_tick = 0;
+            double verify_load1 = 0.0;
+            char lbuf[32];
+            size_t ln = 0;
+            if (core::fs::read_small_file("/proc/loadavg", lbuf, sizeof(lbuf) - 1, &ln) && ln > 0) {
+                lbuf[ln] = '\0';
+                verify_load1 = std::strtod(lbuf, nullptr);
+            }
+            if (verify_load1 >= MitigationEngine::SMU_VERIFY_MIN_LOAD1) {
+                (void)MitigationEngine::verify_and_reassert_smu_limits(eff_profile);
+            }
+        }
+    }
+
     // REF-REQ-102: A profile change releases everything the previous profile
     // applied, before the new one decides anything. Restrictions must not
     // outlive the profile that imposed them.

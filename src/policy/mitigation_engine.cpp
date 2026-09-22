@@ -3181,6 +3181,74 @@ bool MitigationEngine::ryzenadj_available() noexcept {
     return find_ryzenadj() != nullptr;
 }
 
+// REF-REQ-126: read the whole `ryzenadj -i` table in one exec. Every row this
+// daemon reads (STAPM LIMIT, THM LIMIT CORE) sits in the first ~2 KB of the
+// output, and the daemon is single-threaded, so the buffer is static - the
+// steady-state path must not allocate (AGENTS.md section 9).
+//
+// Returns nullptr when the tool is absent or produced nothing. A null return is
+// "no evidence", never "the limit is fine".
+[[nodiscard]] static const char* read_ryzenadj_table() noexcept {
+    const char* tool = find_ryzenadj();
+    if (tool == nullptr) return nullptr;
+    static char buf[8192];
+    char cmd[128];
+    std::snprintf(cmd, sizeof(cmd), "%s -i 2>/dev/null", tool);
+    FILE* p = ::popen(cmd, "r");
+    if (p == nullptr) return nullptr;
+    const size_t n = ::fread(buf, 1, sizeof(buf) - 1, p);
+    ::pclose(p);
+    if (n == 0) return nullptr;
+    buf[n] = '\0';
+    return buf;
+}
+
+// REF-REQ-126: pure reader for one row of the table above. `ryzenadj -i` prints
+//   | STAPM LIMIT         |     6.000 | stapm-limit        |
+// so the value is the first number after the first '|' on the row that carries
+// the name. The unit is the table's own - watts for the power rows, degrees for
+// the thermal rows - and the raw value is returned so callers scale it.
+//
+// Returns 0.0 when the row is absent or carries no number, which the caller must
+// read as "unknown" - the distinction matters, because treating an unreadable
+// limit as a healthy one is how a clawed-back budget stays hidden.
+double MitigationEngine::parse_smu_limit_row(const char* text, const char* row_name) noexcept {
+    if (text == nullptr || row_name == nullptr || *row_name == '\0') return 0.0;
+    for (const char* line = text; *line != '\0';) {
+        const char* eol = std::strchr(line, '\n');
+        const char* end = (eol != nullptr) ? eol : line + std::strlen(line);
+        // The search must not cross the line boundary: `strstr` would happily match
+        // a row name that lives on a LATER line and then read this line's number -
+        // which is how a "THM LIMIT CORE" lookup returned the STAPM value during
+        // development. Ref-TEST-080 pins that case.
+        const char* hit = std::strstr(line, row_name);
+        if (hit != nullptr && hit < end) {
+            // Fields are "| name | value | argument |": the number we want is the
+            // first one after the SECOND bar. Starting from the first bar would also
+            // work today, but only because none of the row names contain a digit -
+            // the value field is the correct thing to read.
+            const char* bar1 = static_cast<const char*>(
+                std::memchr(line, '|', static_cast<size_t>(end - line)));
+            if (bar1 != nullptr) {
+                const char* bar2 = static_cast<const char*>(
+                    std::memchr(bar1 + 1, '|', static_cast<size_t>(end - (bar1 + 1))));
+                if (bar2 != nullptr) {
+                    const char* v = bar2 + 1;
+                    while (v < end && !((*v >= '0' && *v <= '9') || *v == '-')) ++v;
+                    if (v < end) {
+                        const double d = std::strtod(v, nullptr);
+                        if (d > 0.0) return d;
+                    }
+                }
+            }
+            return 0.0; // the row exists but carries no usable number
+        }
+        if (eol == nullptr) break;
+        line = eol + 1;
+    }
+    return 0.0;
+}
+
 // REF-REQ-115.4: read back the thermal limit the SMU is actually enforcing.
 //
 // The SMU mailbox ACCEPTS --tctl-temp above the firmware ceiling and reports
@@ -3197,27 +3265,16 @@ bool MitigationEngine::ryzenadj_available() noexcept {
 //     iwlwifi_1 with no valid trip points.
 // The OS may lower Tctl but may not raise it past the firmware ceiling.
 [[nodiscard]] static uint32_t read_back_tctl_limit() noexcept {
-    const char* tool = find_ryzenadj();
-    if (tool == nullptr) return 0;
-    char cmd[128];
-    std::snprintf(cmd, sizeof(cmd), "%s -i 2>/dev/null", tool);
-    FILE* p = ::popen(cmd, "r");
-    if (p == nullptr) return 0;
-    uint32_t limit = 0;
-    char line[256];
-    while (::fgets(line, sizeof(line), p) != nullptr) {
-        if (std::strstr(line, "THM LIMIT CORE") == nullptr) continue;
-        const char* bar = std::strchr(line, '|');
-        if (bar != nullptr) {
-            ++bar;
-            while (*bar != '\0' && !((*bar >= '0' && *bar <= '9') || *bar == '-')) ++bar;
-            const double c = std::strtod(bar, nullptr);
-            if (c > 0.0) limit = static_cast<uint32_t>(c + 0.5);
-        }
-        break;
-    }
-    ::pclose(p);
-    return limit;
+    const double c = MitigationEngine::parse_smu_limit_row(read_ryzenadj_table(), "THM LIMIT CORE");
+    return (c > 0.0) ? static_cast<uint32_t>(c + 0.5) : 0;
+}
+
+// REF-REQ-126: the enforced sustained power limit, read back from the same table.
+// The table prints watts; the raise target is milliwatts, so the scale is applied
+// here where the unit is known.
+[[nodiscard]] static uint32_t read_back_stapm_limit() noexcept {
+    const double w = MitigationEngine::parse_smu_limit_row(read_ryzenadj_table(), "STAPM LIMIT");
+    return (w > 0.0) ? static_cast<uint32_t>(w * 1000.0 + 0.5) : 0;
 }
 
 bool MitigationEngine::apply_smu_performance_limits() noexcept {
@@ -3261,6 +3318,59 @@ bool MitigationEngine::apply_smu_performance_limits() noexcept {
         }
     }
     return true;
+}
+
+// REF-REQ-126: the EC owns STAPM and can take the raise back without notice.
+//
+// Evidence on the reference host (2026-09-23), Performance in force, Tctl 45 C
+// against the firmware's 70 C ceiling - i.e. thermally nowhere near a limit:
+//   * STAPM read back 6 W (the EC's own table value) and every core sat at the
+//     1400 MHz P-state floor, 780 MHz under heavier load;
+//   * writing the same limits this function's caller writes (STAPM 25 W) moved
+//     the highest core to 3942 MHz immediately and 3218-3622 MHz sustained.
+// Temperature was never the binding constraint; the power budget was. The write
+// is therefore not "fire and forget" any more - it is verified, and re-asserted
+// while an unrestricted profile is in force.
+//
+// What this does NOT do: it cannot stop the EC from reclaiming the limit again.
+// It shortens the window in which the machine runs crippled, nothing more. The
+// reversion interval is not characterised (one observation held >90 s, another
+// had reverted within ~30 min).
+MitigationEngine::SmuVerifyResult
+MitigationEngine::verify_and_reassert_smu_limits(PowerProfileMode mode) noexcept {
+    if (s_actuation_sandbox) return SmuVerifyResult::Unavailable;
+    if (!ryzenadj_available()) return SmuVerifyResult::Unavailable;
+    if (mode != PowerProfileMode::Performance && mode != PowerProfileMode::Balanced) {
+        return SmuVerifyResult::NotUnrestricted; // the EC's cap is intentional here
+    }
+    if (s_hardware_baseline.smu_stapm_mw == 0) return SmuVerifyResult::Unavailable;
+
+    const uint32_t observed = read_back_stapm_limit();
+    // No value read is not the same as a healthy value. Writing on a failed read
+    // would turn a transient exec failure into a write storm.
+    if (observed == 0) return SmuVerifyResult::ReadFailed;
+
+    // Report the first clawback of an episode, then stay quiet until the limit is
+    // observed healthy again - a re-assert every 30 s must not become log spam.
+    static bool s_clawback_reported = false;
+    if (!smu_limit_needs_reassert(observed)) {
+        s_clawback_reported = false;
+        return SmuVerifyResult::Healthy;
+    }
+
+    const bool reapplied = apply_smu_performance_limits();
+    if (!s_clawback_reported) {
+        s_clawback_reported = true;
+        char detail[288];
+        std::snprintf(detail, sizeof(detail),
+                      "EC reclaimed the SMU power limit: STAPM read back %u mW against the "
+                      "%u mW target, so the package was capped below its intended budget; %s "
+                      "(REF-REQ-126)",
+                      observed, SMU_STAPM_PERF_MW,
+                      reapplied ? "re-applied the raise" : "the re-apply was refused");
+        core::EventLogger::log_alert(reapplied ? "WARN" : "ERROR", detail);
+    }
+    return reapplied ? SmuVerifyResult::Reasserted : SmuVerifyResult::Refused;
 }
 
 bool MitigationEngine::restore_smu_limits() noexcept {
