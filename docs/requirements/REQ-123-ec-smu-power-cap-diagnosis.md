@@ -1,6 +1,6 @@
 # [REF-REQ-123] CPU Pinned at 600 MHz in Performance Mode - EC/SMU Cap Diagnosis
 
-**Status**: Implemented · **Date**: 2026-09-22
+**Status**: Implemented · **Date**: 2026-09-22 (revised 2026-09-23: the 4.1 GHz conclusion in section 3 was corrected - boost works, the first measurements were taken under continuous external load)
 **Related**: [`REF-REQ-112`](REQ-112-boost-restoration-and-non-halting-memory-guard.md),
 [`REF-REQ-115`](REQ-115-smu-thermal-power-limit-raise.md),
 [`REF-REQ-114`](REQ-114-thinkpad-fan-thermal-assist-curve.md),
@@ -134,35 +134,42 @@ state, is the STAPM raise: 6-10 W -> 25 W took the same load from 600 MHz to
 
 Asked: does Performance mode reach the 4.1 GHz boost clock?
 
-**Measured: no.** Highest effective frequency observed, computed from
-`perf stat -e cycles` over a pinned single-thread burst (`cycles / task-clock`):
+**Yes - boost works. The earlier "no" in this document was an artefact of the
+measurement conditions and is corrected here.**
 
-| Load | Effective frequency |
-| :--- | ---: |
-| 1 thread, 0.6 s bursts | 2.28-2.56 GHz |
-| 1 thread, 1.5 s bursts after 60 s cooldown | 2.16-2.22 GHz |
-| 8 threads, sustained | 2.60-2.77 GHz |
+| Evidence | Value |
+| :--- | :--- |
+| Owner's observation (2026-09-23) | reaches **4.1 GHz** |
+| Agent measurement, quiet moment | **3758 MHz** on the highest core |
+| `cpuinfo_max_freq` (acpi-cpufreq table maximum) | 1700 MHz |
 
-Two limits explain it, both EC-owned:
+The clock exceeds the driver's table maximum by a wide margin, which is only
+possible through the SMU's autonomous boost. `cpufreq/boost = 1`, the governor is
+`performance` (request pinned to the top P-state), and `scaling_max_freq` is at the
+driver ceiling - so every OS-side boost enabler is correct.
 
-1. **Tctl 70 C** - the die is already at the ceiling, so the SMU's boost
-   algorithm has no thermal headroom to spend on the top boost states.
-2. **STAPM** - 6 W by default, and even at 25 W the package settles around
-   15 W of measured draw, which is what 8 cores at ~2.7 GHz costs.
+**Why the first measurements said otherwise:** they were taken with
+`perf stat`/`/proc/cpuinfo` while an unrelated project held the machine at load
+8-18. In that state the package is hot, `Tctl` sits at the firmware's 70 C
+ceiling, and the SMU spends its boost budget on the cores that are running - the
+highest core observed was 2.16-2.62 GHz. Those numbers describe the
+**thermally-limited loaded state**, not the boost ceiling. Measuring "does 4.1 GHz
+work" requires an idle package, which was not available during that session.
+
+Two limits bound how often the high boost states are reachable at all, both
+firmware-owned:
+
+1. **Tctl 70 C** - the ceiling the SMU regulates to, in every platform profile
+   (section 2.4). It cannot be raised from the OS.
+2. **STAPM** - 6-10 W by default; WattCurb's Performance profile raises it to
+   25 W, which is what took the loaded state from 600 MHz to 2.2-2.8 GHz.
 
 `acpi-cpufreq` exposes no CPPC (`/sys/devices/system/cpu/cpu0/acpi_cppc` absent,
 `amd_pstate` not loaded), so the OS cannot request boost states directly; boost is
-entirely the SMU's autonomous decision within those two limits.
-
-**Not measured:** a true single-core 4.1 GHz burst on an *idle* host. Every
-measurement in this report was taken while an unrelated project held the machine
-at load 8-18, which keeps the package hot and removes the headroom a 4.1 GHz
-single-core boost needs. What IS established, and bounds the answer: the
-firmware's Tctl ceiling is 70 C in every thermal mode (section 2.4), and it cannot
-be raised from the OS. A single core boosting to 4.1 GHz would have to stay under
-that ceiling while dissipating its boost power into the same die; a brief burst on
-a cold die may reach it, sustained 4.1 GHz cannot. The previous 600 MHz state, by
-contrast, was not a thermal effect at all - it was the STAPM limit.
+entirely the SMU's autonomous decision within those two limits. The practical
+consequence for WattCurb is that the fan curve and the STAPM raise are the only
+levers, and both are now at their maximum: full fan from 60 C (REF-REQ-124/125)
+and STAPM 22-25 W.
 
 ## 4. Requirements (regression prevention)
 
@@ -223,6 +230,7 @@ contrast, was not a thermal effect at all - it was the STAPM limit.
 | Tool reachable after install | `/usr/local/bin/ryzenadj` root-owned, `ryzenadj_available()` true |
 | Sandbox suppresses SMU writes | `test_smu_raise_is_guarded` (REF-TEST-079) |
 | Suite | 80/80 pass (`scripts/harness.py test`) |
+| Boost reachable | owner confirms 4.1 GHz; agent measured 3758 MHz on the highest core at a quiet moment |
 
 The end-to-end check - daemon captures the EC baseline, Performance raises STAPM,
 and the clock recovers under load - is run on the host after each release because
