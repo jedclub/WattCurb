@@ -490,25 +490,73 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
             if (++s_freq_starved_streak >= MitigationEngine::FREQ_STARVED_TRIP_CYCLES) {
                 (void)MitigationEngine::assert_unrestricted_cpu_ceiling();
                 (void)MitigationEngine::set_platform_profile(want_pp);
+
+                // REF-REQ-115.2 / REF-REQ-112.11: on the observed defect (2026-09-22,
+                // ThinkPad, Ryzen 4750U) BOTH knobs above were already correct -
+                // scaling_max_freq was at the driver ceiling and platform_profile was
+                // already "performance" - and the CPU still sat at 620-680 MHz under
+                // load 11-17. The binding limit was the SMU STAPM, which is set by the
+                // EC (here 6 W, its lap-mode thermal table) and is below every knob
+                // this daemon owns. Re-asserting the same two values could therefore
+                // never repair anything; it only produced a log line that read like a
+                // successful repair.
+                //
+                // The one OS-side lever that reaches the STAPM is ryzenadj, so the
+                // repair now re-applies the SMU performance limits for the profiles
+                // that are supposed to be unrestricted. Measured on the defect host:
+                // STAPM 6 W -> 550-600 MHz at 56 C, STAPM 25 W -> 2.6-2.77 GHz at
+                // 56-57 C under the same 8-thread load. Tctl protection is untouched
+                // by the raise (it is set to SMU_TCTL_PERF_C, not disabled).
+                const bool smu_tool_present = MitigationEngine::ryzenadj_available();
+                const bool smu_perf_profile = (eff_profile == PowerProfileMode::Performance ||
+                                               eff_profile == PowerProfileMode::Balanced);
+                const bool smu_applied =
+                    (smu_tool_present && smu_perf_profile)
+                        ? MitigationEngine::apply_smu_performance_limits()
+                        : false;
+
                 if (!s_freq_starved_logged) {
                     s_freq_starved_logged = true;
-                    char detail[224];
+                    const char* smu_note =
+                        !smu_tool_present
+                            ? "ryzenadj NOT installed on a system path - the EC power cap cannot be lifted"
+                            : (!smu_perf_profile
+                                   ? "saving profile - EC power cap intentionally left in place"
+                                   : (smu_applied ? "re-applied SMU performance limits (REF-REQ-115)"
+                                                  : "SMU re-apply refused (baseline not captured)"));
+                    char detail[320];
                     std::snprintf(detail, sizeof(detail),
                                   "CPU frequency starved under load: max core %llu MHz vs ceiling "
-                                  "%llu MHz, load1=%.2f, profile=%s; re-asserted ceiling and "
-                                  "platform_profile (REF-REQ-112.10)",
+                                  "%llu MHz, load1=%.2f, profile=%s; ceiling/profile were already "
+                                  "at target, %s; SMU baseline STAPM %u mW "
+                                  "(REF-REQ-112.10, REF-REQ-115.2)",
                                   static_cast<unsigned long long>(observed_max_khz / 1000ull),
                                   static_cast<unsigned long long>(hw_max_khz / 1000ull),
                                   load1,
                                   (eff_profile == PowerProfileMode::Performance) ? "Performance"
-                                                                                 : "Balanced");
+                                                                                 : "Balanced",
+                                  smu_note,
+                                  MitigationEngine::hardware_baseline().smu_stapm_mw);
                     core::EventLogger::log_alert("WARN", detail);
                 }
                 s_freq_starved_streak = 0; // re-arm after a repair attempt
             }
         } else {
+            // REF-REQ-112.12: report the recovery once, with the clock that was
+            // actually reached. Without this the log only ever records the
+            // starvation; a reader cannot tell whether a repair worked.
+            if (s_freq_starved_logged) {
+                s_freq_starved_logged = false;
+                char detail[224];
+                std::snprintf(detail, sizeof(detail),
+                              "CPU frequency recovered: max core %llu MHz vs ceiling %llu MHz, "
+                              "load1=%.2f (REF-REQ-112.12)",
+                              static_cast<unsigned long long>(observed_max_khz / 1000ull),
+                              static_cast<unsigned long long>(hw_max_khz / 1000ull),
+                              load1);
+                core::EventLogger::log_alert("INFO", detail);
+            }
             s_freq_starved_streak = 0;
-            s_freq_starved_logged = false;
         }
     }
 

@@ -4688,6 +4688,52 @@ void test_frequency_starvation_watchdog() {
               << "loaded-low trips, loaded-boost/idle clean, degenerate safe)\n";
 }
 
+// Implements REF-TEST-079 & REF-REQ-115.3: the SMU raise must never be a
+// best-effort write. Two invariants are checked, both of which were violated in
+// spirit by the 2026-09-22 defect where Performance mode ran at 600 MHz:
+//
+//   1. The actuation sandbox suppresses the SMU write entirely. The suite runs on
+//      the developer's machine; a test that raised STAPM to 25 W or Tctl to 85 C
+//      would change real power and thermal limits, and (because those limits live
+//      in the SMU, not in this process) would survive the test run.
+//   2. The raise refuses when the bootstrap capture did not read real values.
+//      Raising a limit that cannot be put back is the orphaned-actuation defect
+//      REF-REQ-112 had to repair for cpufreq; the SMU variant is worse because
+//      nothing in the OS can restore it after a crash.
+//
+// The test does NOT verify that a real raise reaches the SMU - that needs the
+// hardware, and it is measured on the host instead (see REF-REQ-123).
+void test_smu_raise_is_guarded() {
+    using namespace wattcurb::policy;
+
+    std::cout << "--- [REF-TEST-079] SMU Raise Guardrails (REF-REQ-115.3) ---\n";
+
+    const bool prev_sandbox = MitigationEngine::actuation_sandboxed();
+    MitigationEngine::set_actuation_sandbox(true);
+
+    // Sandboxed: the raise must report failure and must not actuate.
+    assert(!MitigationEngine::apply_smu_performance_limits() &&
+           "sandboxed SMU raise must refuse");
+    // A restore with nothing modified is a no-op success; it must not write.
+    assert(MitigationEngine::restore_smu_limits() &&
+           "restore with no prior modification must be a clean no-op");
+
+    MitigationEngine::set_actuation_sandbox(prev_sandbox);
+
+    // The targets must be internally consistent, or the raise would write a
+    // nonsensical limit set (fast below sustained, slow above fast).
+    static_assert(MitigationEngine::SMU_STAPM_PERF_MW < MitigationEngine::SMU_FAST_PERF_MW,
+                  "STAPM must be below the fast PPT limit");
+    static_assert(MitigationEngine::SMU_SLOW_PERF_MW <= MitigationEngine::SMU_FAST_PERF_MW,
+                  "slow PPT must not exceed fast PPT");
+    static_assert(MitigationEngine::SMU_TCTL_PERF_C >= 70 &&
+                      MitigationEngine::SMU_TCTL_PERF_C <= 95,
+                  "Tctl target must stay within a sane silicon range");
+
+    std::cout << " [PASS] test_smu_raise_is_guarded (REF-TEST-079: sandboxed raise "
+                 "refuses, restore is a no-op, limits internally consistent)\n";
+}
+
 // Implements REF-TEST-073 & REF-REQ-114/REF-REQ-115: the ThinkPad thermal-assist
 // fan curve and the SMU thermal/power limit raise.
 //
@@ -5883,6 +5929,7 @@ int main() {
     test::test_audit_defect_remediation();
     test::test_cpu_ceiling_baseline_is_hardware_max();
     test::test_frequency_starvation_watchdog();
+    test::test_smu_raise_is_guarded();
     test::test_thinkpad_fan_thermal_assist_and_smu_limits();
     test::test_memory_pressure_ladder();
     test::test_memory_pressure_parsers();

@@ -827,8 +827,24 @@ void MitigationEngine::capture_hardware_baseline() noexcept {
             }
             ::pclose(p);
         }
+    } else {
+        // REF-REQ-115.1: the SMU is the only OS-side lever for the EC's power and
+        // thermal limits, and it is a separate optional binary. When it is not on
+        // a SYSTEM path the daemon cannot lift an EC cap, and on the observed
+        // defect host (2026-09-22) that silently produced a CPU pinned at
+        // 550-600 MHz in Performance mode while every knob the daemon does own
+        // (scaling_max_freq, governor, boost, platform_profile) was already
+        // correct. Say so once at bootstrap instead of discovering it from a
+        // user report: a user-writable copy must NOT be exec'd by a root daemon
+        // (the same trust argument as REF-REQ-111), so the fix is to install it
+        // into /usr/local/bin, which install.sh now does.
+        core::EventLogger::log_alert(
+            "WARN",
+            "ryzenadj not found on a system path (/usr/local/bin, /usr/bin): the SMU power and "
+            "thermal limits cannot be raised or restored. Performance/Balanced will be capped by "
+            "the EC's own limits - observed 6 W STAPM and a 70 C Tctl ceiling pinning the CPU near "
+            "600 MHz (REF-REQ-115.1)");
     }
-
     s_hardware_baseline.captured = true;
 }
 

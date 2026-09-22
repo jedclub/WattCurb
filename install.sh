@@ -45,6 +45,38 @@ if [ -d "${HOME}/.local/bin" ]; then
     fi
 fi
 
+# 2.1. Make ryzenadj reachable for the ROOT daemon (REF-REQ-115.1).
+#
+# Performance and Balanced raise the SMU power/thermal limits through ryzenadj.
+# Without this step the daemon cannot find the tool - it searches only
+# /usr/local/bin and /usr/bin - so an EC-imposed cap is never lifted. Measured on
+# 2026-09-22: the EC held STAPM at 6 W and Tctl at 70 C, pinning the CPU at
+# 550-600 MHz in Performance mode while every knob the daemon owns was correct.
+# Raising STAPM to 25 W took the same 8-thread load from 600 MHz to 2.7 GHz.
+#
+# The daemon must not exec a user-writable path (the trust argument of
+# REF-REQ-111), so the binary is COPIED to a root-owned location rather than
+# referenced in place. A user-writable copy would let any process running as the
+# desktop user replace the program a root daemon executes.
+RYZENADJ_SRC=""
+for cand in "${HOME}/.local/bin/ryzenadj" "/usr/local/bin/ryzenadj" "/usr/bin/ryzenadj"; do
+    if [ -x "${cand}" ]; then
+        RYZENADJ_SRC="${cand}"
+        break
+    fi
+done
+if [ -n "${RYZENADJ_SRC}" ]; then
+    if [ "${RYZENADJ_SRC}" != "/usr/local/bin/ryzenadj" ]; then
+        ${SUDO} install -m 755 "${RYZENADJ_SRC}" /usr/local/bin/ryzenadj
+        echo "  • ryzenadj: installed ${RYZENADJ_SRC} -> /usr/local/bin/ryzenadj (root-owned, REF-REQ-115.1)"
+    else
+        echo "  • ryzenadj: already at /usr/local/bin/ryzenadj"
+    fi
+else
+    echo "  ! ryzenadj NOT found: the SMU power/thermal limits cannot be raised."
+    echo "    Performance mode will be capped by the EC's own limits (REF-REQ-115.1)."
+fi
+
 # 3. Install Systemd Root Service
 echo "[2/4] Installing root background service..."
 # REF-REQ-106.4: install the repository unit verbatim. An inline copy here
