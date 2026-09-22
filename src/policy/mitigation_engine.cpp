@@ -961,6 +961,18 @@ uint64_t MitigationEngine::ceiling_assertion_count() noexcept {
     return s_ceiling_assertion_count;
 }
 
+bool MitigationEngine::is_frequency_starved(uint64_t observed_max_khz,
+                                            uint64_t hw_max_khz,
+                                            double load1,
+                                            int32_t ncpu) noexcept {
+    if (hw_max_khz == 0 || ncpu <= 0) return false;
+    // Only when the machine is genuinely loaded: an idle box is supposed to sit
+    // at its low clock, and tripping on that would fire the watchdog constantly.
+    if (load1 < FREQ_STARVED_MIN_LOAD_RATIO * static_cast<double>(ncpu)) return false;
+    return observed_max_khz <
+           static_cast<uint64_t>(FREQ_STARVED_CLOCK_FRACTION * static_cast<double>(hw_max_khz));
+}
+
 bool MitigationEngine::assert_unrestricted_cpu_ceiling() noexcept {
     ++s_ceiling_assertion_count;
     // REF-REQ-112. Performance and Balanced promise an unrestricted CPU; this

@@ -183,6 +183,22 @@ public:
     // The first implementation of REF-REQ-112.4 sat in the latter and never ran
     // outside the test suite.
     [[nodiscard]] static uint64_t ceiling_assertion_count() noexcept;
+
+    // REF-REQ-112.10: load-aware frequency watchdog. A profile can be "correct"
+    // on every knob - governor=performance, ceiling at cpuinfo_max, boost set,
+    // platform_profile=performance - and still have the CPU pinned near its idle
+    // clock by the EC or the firmware, which is exactly how the 2026-09-22
+    // all-core collapse to ~400 MHz presented. This predicate is the trip
+    // condition: the machine is loaded, yet even the highest core clock observed
+    // this cycle is far below the hardware maximum. Pure, so the Oracle Gate can
+    // prove the decision without a machine that is actually throttling.
+    static constexpr double FREQ_STARVED_MIN_LOAD_RATIO = 0.5; // load1 >= 0.5 * ncpu
+    static constexpr double FREQ_STARVED_CLOCK_FRACTION = 0.6; // max_clock < 0.6 * hw_max
+    static constexpr uint32_t FREQ_STARVED_TRIP_CYCLES = 5;
+    [[nodiscard]] static bool is_frequency_starved(uint64_t observed_max_khz,
+                                                   uint64_t hw_max_khz,
+                                                   double load1,
+                                                   int32_t ncpu) noexcept;
     static bool set_panel_power_savings(uint32_t level) noexcept;
     static bool set_pcie_aspm_policy(const char* policy) noexcept;
     static bool set_cpu_epp_policy(const char* policy) noexcept;

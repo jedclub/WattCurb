@@ -4521,6 +4521,35 @@ void test_cpu_ceiling_baseline_is_hardware_max() {
                  "production path re-asserts)\n";
 }
 
+// Implements REF-TEST-072 & REF-REQ-112.10: the load-aware frequency watchdog
+// trip condition. Fails if an idle low clock or a loaded healthy clock trips it.
+void test_frequency_starvation_watchdog() {
+    using namespace wattcurb::policy;
+
+    std::cout << "--- [REF-TEST-072] Load-Aware Frequency Starvation Watchdog ---\n";
+
+    const uint64_t hw = 1'700'000; // cpuinfo_max_freq on the reference host
+    const int32_t ncpu = 16;
+
+    // Loaded, and the highest core observed is far below the ceiling -> starved.
+    assert(MitigationEngine::is_frequency_starved(400'000, hw, 9.0, ncpu));
+    assert(MitigationEngine::is_frequency_starved(900'000, hw, 8.0, ncpu));
+
+    // Loaded but the cores are boosting -> not starved.
+    assert(!MitigationEngine::is_frequency_starved(1'650'000, hw, 12.0, ncpu));
+    assert(!MitigationEngine::is_frequency_starved(1'020'000, hw, 8.0, ncpu)); // exactly 0.6
+
+    // An idle low clock is expected, never a fault.
+    assert(!MitigationEngine::is_frequency_starved(400'000, hw, 1.0, ncpu));
+
+    // Degenerate inputs never trip.
+    assert(!MitigationEngine::is_frequency_starved(400'000, 0, 9.0, ncpu));
+    assert(!MitigationEngine::is_frequency_starved(400'000, hw, 9.0, 0));
+
+    std::cout << " [PASS] test_frequency_starvation_watchdog (REF-TEST-072: "
+              << "loaded-low trips, loaded-boost/idle clean, degenerate safe)\n";
+}
+
 // Implements REF-TEST-069 & REF-REQ-112: the memory pressure ladder.
 //
 // The risk this change introduces is acting on the wrong process, or acting at
@@ -5579,6 +5608,7 @@ int main() {
     test::test_profile_throughput_and_liveness_guarantees();
     test::test_audit_defect_remediation();
     test::test_cpu_ceiling_baseline_is_hardware_max();
+    test::test_frequency_starvation_watchdog();
     test::test_memory_pressure_ladder();
     test::test_memory_pressure_parsers();
     test::test_performance_swap_expansion_policy();

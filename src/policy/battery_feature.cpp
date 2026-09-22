@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <algorithm>
 
@@ -378,6 +379,64 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
         const char* want_pp = (eff_profile == PowerProfileMode::Performance) ? "performance"
                                                                               : "balanced";
         MitigationEngine::set_platform_profile(want_pp);
+
+        // REF-REQ-112.10: load-aware frequency watchdog. Every knob can read
+        // correct while the EC pins the CPU near its idle clock - the 2026-09-22
+        // all-core collapse to ~400 MHz looked exactly like that. If the machine
+        // is loaded and even the highest core clock this cycle is far below the
+        // hardware maximum for several consecutive cycles, treat it as a stuck
+        // condition: re-assert the ceiling and the EC profile, and say so once.
+        static uint32_t s_freq_starved_streak = 0;
+        static bool s_freq_starved_logged = false;
+
+        uint64_t hw_max_khz = MitigationEngine::hardware_baseline().hw_max_freq_khz;
+        if (hw_max_khz == 0) {
+            char fbuf[32];
+            size_t fn = 0;
+            if (core::fs::read_small_file("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq",
+                                          fbuf, sizeof(fbuf) - 1, &fn) && fn > 0) {
+                fbuf[fn] = '\0';
+                hw_max_khz = static_cast<uint64_t>(std::strtoul(fbuf, nullptr, 10));
+            }
+        }
+        const uint64_t observed_max_khz =
+            static_cast<uint64_t>(report.hardware.cpu_freq_max_mhz * 1000.0);
+
+        double load1 = 0.0;
+        {
+            char lbuf[32];
+            size_t ln = 0;
+            if (core::fs::read_small_file("/proc/loadavg", lbuf, sizeof(lbuf) - 1, &ln) && ln > 0) {
+                lbuf[ln] = '\0';
+                load1 = std::strtod(lbuf, nullptr);
+            }
+        }
+
+        if (MitigationEngine::is_frequency_starved(observed_max_khz, hw_max_khz, load1,
+                                                   MitigationEngine::get_total_online_cpus())) {
+            if (++s_freq_starved_streak >= MitigationEngine::FREQ_STARVED_TRIP_CYCLES) {
+                (void)MitigationEngine::assert_unrestricted_cpu_ceiling();
+                (void)MitigationEngine::set_platform_profile(want_pp);
+                if (!s_freq_starved_logged) {
+                    s_freq_starved_logged = true;
+                    char detail[224];
+                    std::snprintf(detail, sizeof(detail),
+                                  "CPU frequency starved under load: max core %llu MHz vs ceiling "
+                                  "%llu MHz, load1=%.2f, profile=%s; re-asserted ceiling and "
+                                  "platform_profile (REF-REQ-112.10)",
+                                  static_cast<unsigned long long>(observed_max_khz / 1000ull),
+                                  static_cast<unsigned long long>(hw_max_khz / 1000ull),
+                                  load1,
+                                  (eff_profile == PowerProfileMode::Performance) ? "Performance"
+                                                                                 : "Balanced");
+                    core::EventLogger::log_alert("WARN", detail);
+                }
+                s_freq_starved_streak = 0; // re-arm after a repair attempt
+            }
+        } else {
+            s_freq_starved_streak = 0;
+            s_freq_starved_logged = false;
+        }
     }
 
     // REF-REQ-102: A profile change releases everything the previous profile
