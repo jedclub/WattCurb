@@ -4901,16 +4901,59 @@ void test_thinkpad_fan_thermal_assist_and_smu_limits() {
     assert(!policy::MitigationEngine::hardware_baseline().smu_limits_modified);
 
     // --- 4. REF-REQ-118: the curve applies in EVERY profile --------------
-    // The 60 C full-speed rule (REF-REQ-124) is a thermal-safety floor and must
-    // hold in all four profiles; the UltraEndurance cold stop (<= 45 C -> level 0)
-    // is the one profile-specific exception, and it must not leak into the others.
+    // Full speed above the anchor holds in all four profiles; the anchor itself is
+    // profile-specific since REF-REQ-127 (60 C for Performance/PowerSaver/
+    // UltraEndurance, 70 C for Balanced). The UltraEndurance cold stop
+    // (<= 45 C -> level 0) remains the one profile-specific exception and must not
+    // leak into the others.
     using policy::MitigationEngine;
     for (const PowerProfileMode m : {PowerProfileMode::Performance, PowerProfileMode::Balanced,
                                      PowerProfileMode::PowerSaver, PowerProfileMode::UltraEndurance}) {
         assert(MitigationEngine::fan_level_for_temp_in_profile(75.0, m) ==
                    MitigationEngine::FAN_LEVEL_FULL_SPEED &&
-               "REF-REQ-118.1: >= 60 C must be full speed in every profile");
+               "REF-REQ-118.1: above the anchor must be full speed in every profile");
         assert(MitigationEngine::fan_level_for_temp_in_profile(0.0, m) == -1);
+    }
+
+    // --- 4b. REF-REQ-127: Balanced anchors its 100% point at 70 C ---------
+    // Owner's request: "밸런스 모드에서는 70 도를 100 % 기준으로 잡고 70 도 부터 MAX 팬
+    // 작동". The ramp therefore spans 35 C (20%) -> 70 C (100%) and full speed
+    // starts at 70 C, where Performance/PowerSaver would already have been at full
+    // speed for 10 C. Measured consequence, asserted here: Balanced at 60 C is
+    // level 5 (not full speed), at 65 C is level 6, and only at 70 C does it reach
+    // the `full-speed` keyword.
+    assert(MitigationEngine::fan_full_temp_for_profile(PowerProfileMode::Balanced) == 70.0);
+    assert(MitigationEngine::fan_full_temp_for_profile(PowerProfileMode::Performance) ==
+           MitigationEngine::FAN_FULL_TEMP_C);
+    assert(MitigationEngine::fan_full_temp_for_profile(PowerProfileMode::PowerSaver) ==
+           MitigationEngine::FAN_FULL_TEMP_C);
+    assert(MitigationEngine::fan_full_temp_for_profile(PowerProfileMode::UltraEndurance) ==
+           MitigationEngine::FAN_FULL_TEMP_C);
+    assert(MitigationEngine::fan_level_for_temp_in_profile(70.0, PowerProfileMode::Balanced) == FULL);
+    assert(MitigationEngine::fan_level_for_temp_in_profile(80.0, PowerProfileMode::Balanced) == FULL);
+    assert(MitigationEngine::fan_level_for_temp_in_profile(69.9, PowerProfileMode::Balanced) == 6);
+    assert(MitigationEngine::fan_level_for_temp_in_profile(65.0, PowerProfileMode::Balanced) == 6);
+    assert(MitigationEngine::fan_level_for_temp_in_profile(60.0, PowerProfileMode::Balanced) == 5);
+    assert(MitigationEngine::fan_level_for_temp_in_profile(52.5, PowerProfileMode::Balanced) == 4);
+    assert(MitigationEngine::fan_level_for_temp_in_profile(35.0, PowerProfileMode::Balanced) == 1);
+    assert(MitigationEngine::fan_level_for_temp_in_profile(60.0, PowerProfileMode::Performance) == FULL &&
+           "Performance keeps the 60 C anchor of REF-REQ-124");
+    // The Balanced ramp must still be monotonic and inside the numeric steps.
+    {
+        int bprev = 0;
+        for (int t = 1; t <= 70; ++t) {
+            const int lvl =
+                MitigationEngine::fan_level_for_temp_in_profile(static_cast<double>(t),
+                                                                PowerProfileMode::Balanced);
+            assert(lvl >= 1 && lvl <= FULL);
+            assert(lvl >= bprev);
+            bprev = lvl;
+        }
+        for (int t = 1; t < 70; ++t) {
+            assert(MitigationEngine::fan_level_for_temp_in_profile(static_cast<double>(t),
+                                                                   PowerProfileMode::Balanced) != 7 &&
+                   "numeric 7 must never be commanded in Balanced either");
+        }
     }
     // The 35 C floor maps to level 1 in every profile EXCEPT UltraEndurance, where
     // 35 C is below the cold-stop threshold and so stops the fan instead. Asserting

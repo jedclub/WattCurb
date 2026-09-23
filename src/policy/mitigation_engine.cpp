@@ -2976,7 +2976,7 @@ int g_last_fan_level = -1;
 uint64_t g_fan_curve_application_count = 0;
 } // namespace
 
-int MitigationEngine::fan_level_for_temp(double cpu_temp_c) noexcept {
+int MitigationEngine::fan_level_for_temp(double cpu_temp_c, double full_temp_c) noexcept {
     if (cpu_temp_c <= 0.0) return -1; // no temperature reading
     // REF-REQ-114 (defect fix) / REF-REQ-125 (defect fix):
     // The top step is NOT numeric 7. Two separate defects lived here:
@@ -2992,13 +2992,19 @@ int MitigationEngine::fan_level_for_temp(double cpu_temp_c) noexcept {
     // The correct write is the keyword, which thinkpad_acpi maps to
     // TP_EC_FAN_FULLSPEED. FAN_LEVEL_FULL_SPEED is the sentinel for it; the ramp
     // stays inside the numeric steps 1..6.
-    if (cpu_temp_c >= FAN_FULL_TEMP_C) return FAN_LEVEL_FULL_SPEED;
+    //
+    // REF-REQ-127: the 100% anchor is a parameter, because Balanced anchors at
+    // 70 C rather than 60 C. A non-positive or degenerate anchor would divide by
+    // zero below, so it falls back to the common curve rather than misbehaving.
+    if (!(full_temp_c > FAN_CURVE_MIN_TEMP_C)) full_temp_c = FAN_FULL_TEMP_C;
+    if (cpu_temp_c >= full_temp_c) return FAN_LEVEL_FULL_SPEED;
     if (cpu_temp_c <= FAN_CURVE_MIN_TEMP_C) return 1; // 0.2 -> level 1
-    // Linear between (35 C, 0.2) and (60 C, 1.0) - REF-REQ-124 lowered the top
-    // from 70 C so the ramp starts below the firmware's Tctl ceiling.
+    // Linear between (35 C, 0.2) and (anchor, 1.0) - REF-REQ-124 lowered the top
+    // from 70 C to 60 C for the profiles that must hold the boost budget;
+    // REF-REQ-127 keeps 70 C for Balanced.
     const double frac = FAN_CURVE_MIN_FRACTION +
                         (cpu_temp_c - FAN_CURVE_MIN_TEMP_C) /
-                            (FAN_FULL_TEMP_C - FAN_CURVE_MIN_TEMP_C) *
+                            (full_temp_c - FAN_CURVE_MIN_TEMP_C) *
                             (1.0 - FAN_CURVE_MIN_FRACTION);
     int lvl = static_cast<int>(frac * 7.0 + 0.5);
     if (lvl < 1) lvl = 1;
@@ -3007,6 +3013,16 @@ int MitigationEngine::fan_level_for_temp(double cpu_temp_c) noexcept {
     // numeric 7 is never commanded (it is within 2 RPM of 6, so nothing is lost).
     if (lvl > 6) lvl = 6;
     return lvl;
+}
+
+int MitigationEngine::fan_level_for_temp(double cpu_temp_c) noexcept {
+    // The common curve: Performance, PowerSaver and UltraEndurance (REF-REQ-124).
+    return fan_level_for_temp(cpu_temp_c, FAN_FULL_TEMP_C);
+}
+
+double MitigationEngine::fan_full_temp_for_profile(PowerProfileMode mode) noexcept {
+    // REF-REQ-127: Balanced anchors its 100% point at 70 C.
+    return (mode == PowerProfileMode::Balanced) ? FAN_BALANCED_FULL_TEMP_C : FAN_FULL_TEMP_C;
 }
 
 int MitigationEngine::fan_level_for_temp_in_profile(double cpu_temp_c,
@@ -3019,7 +3035,7 @@ int MitigationEngine::fan_level_for_temp_in_profile(double cpu_temp_c,
         cpu_temp_c <= FAN_ULTRA_STOP_TEMP_C) {
         return 0; // fan stopped
     }
-    return fan_level_for_temp(cpu_temp_c);
+    return fan_level_for_temp(cpu_temp_c, fan_full_temp_for_profile(mode));
 }
 
 // REF-REQ-125.4: read back the fan state and decide whether it is still the one

@@ -242,10 +242,12 @@ public:
 
     // REF-REQ-114 / REF-REQ-118 / REF-REQ-124: ThinkPad fan curve. It applies in
     // ALL power profiles - it is a thermal-safety mapping, not a performance perk:
-    //   * at or above FAN_FULL_TEMP_C (60 C)      -> level 7 (full speed)
-    //   * between FAN_FULL_TEMP_C and FAN_CURVE_MIN_TEMP_C (35 C) -> linear
+    //   * at or above the profile's full-speed anchor          -> full speed
+    //     (FAN_FULL_TEMP_C = 60 C for Performance/PowerSaver/UltraEndurance,
+    //      FAN_BALANCED_FULL_TEMP_C = 70 C for Balanced - REF-REQ-127)
+    //   * between that anchor and FAN_CURVE_MIN_TEMP_C (35 C)  -> linear
     //     100% .. FAN_CURVE_MIN_FRACTION*100 % (20%), mapped onto steps 1..7
-    //   * at or below FAN_CURVE_MIN_TEMP_C (35 C) -> level 1 (20%, never 0)
+    //   * at or below FAN_CURVE_MIN_TEMP_C (35 C)              -> level 1 (20%, never 0)
     // UltraEndurance adds one exception (REF-REQ-118.3): at or below
     // FAN_ULTRA_STOP_TEMP_C (45 C) the fan is stopped outright (level 0), because
     // that profile exists to minimise every load and the EC's floor keeps the fan
@@ -261,6 +263,26 @@ public:
     // the clock; starting at 60 C gives 10 C of headroom, which is where the
     // boost budget now lives.
     //
+    // REF-REQ-127 (2026-09-23): the full-speed anchor is profile-specific.
+    //
+    // Balanced uses **70 C as its 100% reference** at the owner's request: the ramp
+    // spans 35 C (20%) -> 70 C (100%) and the fan reaches `full-speed` at or above
+    // 70 C. Balanced is the profile that trades thermal margin for a quieter
+    // machine; Performance keeps the 60 C anchor that REF-REQ-124 measured as the
+    // point where cooling must start to hold the raised boost budget. PowerSaver
+    // and UltraEndurance also keep 60 C - PowerSaver because a battery profile
+    // must still not cook the part, UltraEndurance because its cold-stop rule is
+    // the only exception it is allowed.
+    //
+    // Consequence, stated plainly: in Balanced the fan now runs *less* aggressively
+    // between 60 C and 70 C than it used to (level 5 at 60 C, level 6 at 65 C,
+    // instead of full speed from 60 C). 70 C is the firmware's Tctl ceiling
+    // (REF-REQ-123 2.4), so Balanced will sit at the ceiling sooner under
+    // sustained load and hold a lower clock there than Performance does.
+    static constexpr double FAN_BALANCED_FULL_TEMP_C = 70.0;
+    [[nodiscard]] static double fan_full_temp_for_profile(PowerProfileMode mode) noexcept;
+    [[nodiscard]] static int fan_level_for_temp(double cpu_temp_c, double full_temp_c) noexcept;
+
     // Levels are the thinkpad_acpi discrete steps 0..7. The top step MUST be the
     // numeric 7: on this host `level full-speed` is accepted but resolves to
     // `disengaged` (see apply_fan_for_temp). Writing needs thinkpad_acpi
