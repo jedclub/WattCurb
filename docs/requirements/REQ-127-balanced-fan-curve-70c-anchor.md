@@ -96,6 +96,36 @@ on the host.
 
 ## 6. Deployment and live measurement
 
-Deployed as part of the REF-REQ-127 PGO release; see the release commit for the
-binary sizes, hash/mtime verification and the live fan state read from
-`/proc/acpi/ibm/fan` while the daemon was in Balanced.
+Deployed as part of the REF-REQ-127 PGO release: `wattcurb` / `wattcurb-tray` /
+`wattcurb-dashboard` verified against `output/` by SHA256 **and** mtime (the `-p`
+flag added to `install.sh` in the REF-REQ-126 release is what makes the mtime
+check decidable).
+
+Measured on the host through `/proc/acpi/ibm/fan`, with the profile switched from
+the tray menu and the temperature held in the 60-70 C band by temporarily lowering
+the SMU thermal limit to 65 C (`ryzenadj --tctl-temp=65`, restored to the daemon's
+85 -> firmware 70 afterwards):
+
+| Profile | Tctl | Fan level | Fan speed |
+| :--- | ---: | :--- | ---: |
+| Balanced | 65.6 C | **6** | **4769-4778 RPM** |
+| **Balanced** | **70.1 C** | **`disengaged`** | **5398-5414 RPM** |
+| Performance | 65.5 C | `disengaged` | 5415 RPM |
+| Performance | 70.5 C | `disengaged` | 5423 RPM |
+
+The same temperature produces different fan states in the two profiles, which is
+the whole point of the change: Balanced holds level 6 at 65 C where Performance is
+already at maximum. Balanced reaches maximum at 70 C, as requested.
+
+Note on why the band had to be forced: with the power budget raised
+(REF-REQ-126), the SMU holds the die *at* the 70 C ceiling under any real load -
+observed at load1 1.88 and still 70.0 C - so the 60-70 C band only occurs while
+the machine is nearly idle. The measurement above is therefore a deliberate
+A/B, not a passive observation.
+
+### 6.1 Post-test state
+
+`THM LIMIT CORE` restored to 70 (the firmware clamp of the requested 85),
+`STAPM LIMIT` 25 W, profile left in **Performance** (the profile the machine was
+found in, not the one under test).
+
