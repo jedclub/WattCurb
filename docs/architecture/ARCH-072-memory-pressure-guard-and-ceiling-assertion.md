@@ -181,18 +181,27 @@ into a tick the daemon was already taking. No new wakeup source, no allocation:
  before                                    after
  ──────                                    ─────
  zram      15 GiB  prio 100  ← = RAM       zram       6 GiB  prio 100
- swapfile   8 GiB  prio  -1                swapfile  32 GiB  prio  -2
+ swapfile   8 GiB  prio  -1                swapfile  32 GiB  prio  -2*
  ─────────────────────────                 ─────────────────────────
  total     23 GiB                          total   38.9 GiB
  zspages at full: 4.33 GB of RAM           zspages at full: ~1.7 GB of RAM
 ```
+
+\* The effective kernel priority of the swapfile is **-1**, not the `pri=-2`
+written in `/etc/fstab`: util-linux `swapon` sets `SWAP_FLAG_PREFER` only when
+the priority is non-negative, so the option is dropped and the kernel default
+applies. Nothing depends on it - zram's `100` stays the fast tier either way,
+and hibernation device selection uses `resume=`/`resume_offset=`, not priority
+(see [`REF-RES-032`](../research/RES-032-hibernation-resume-offset-invariant.md)).
 
 zram is a *compressed RAM* tier: sizing it at 100% of RAM (the distro default,
 `zram-size = ram`) means a full swap tier consumes roughly a third of the memory
 it was supposed to free, and the disk tier behind it is unreachable until that
 has happened. Applied via `/etc/systemd/zram-generator.conf` and
 `btrfs filesystem mkswapfile --size 32g`; both survive reboot (`/etc/fstab`
-already carried the swapfile entry).
+already carried the swapfile entry). Recreating that file changes its
+first-extent physical offset and therefore the hibernation `resume_offset` -
+the invariant and recovery procedure are in REF-RES-032.
 
 This is host configuration and lives outside the repository. It is recorded here
 because §3.3 of REF-REQ-112 depends on it: the code raises the pressure at which
