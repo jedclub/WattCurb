@@ -17,15 +17,33 @@ echo "==================================================================="
 echo "  ⚡ Installing WattCurb System & Desktop Suite                    "
 echo "==================================================================="
 
-# 1. Check root or prompt sudo
-SUDO=""
+# 1. Check root or prompt single escalation (AGENTS.md Sec 14.3)
 if [ "$(id -u)" -ne 0 ]; then
-    if command -v sudo >/dev/null 2>&1; then
-        SUDO="sudo"
+    if [ ! -t 0 ] && command -v pkexec >/dev/null 2>&1; then
+        exec pkexec bash "$0" "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        exec sudo -E bash "$0" "$@"
+    elif command -v pkexec >/dev/null 2>&1; then
+        exec pkexec bash "$0" "$@"
     else
         echo "[!] Error: Root privileges are required to install systemd root service."
         exit 1
     fi
+fi
+SUDO=""
+
+# Resolve target desktop user even under root escalation (sudo/pkexec)
+TARGET_USER=""
+if [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ]; then
+    TARGET_USER="${SUDO_USER}"
+elif [ -n "${PKEXEC_UID:-}" ] && [ "${PKEXEC_UID}" -ne 0 ]; then
+    TARGET_USER=$(getent passwd "${PKEXEC_UID}" | cut -d: -f1)
+elif [ -n "${USER:-}" ] && [ "${USER}" != "root" ]; then
+    TARGET_USER="${USER}"
+fi
+USER_HOME=""
+if [ -n "${TARGET_USER}" ]; then
+    USER_HOME=$(getent passwd "${TARGET_USER}" | cut -d: -f6)
 fi
 
 # 2. Install Binaries
@@ -36,12 +54,26 @@ if [ -f "${BIN_DIR}/wattcurb-dashboard" ]; then
     ${SUDO} install -m 755 -p "${BIN_DIR}/wattcurb-dashboard" /usr/local/bin/wattcurb-dashboard
 fi
 
-# Also link into ~/.local/bin if directory exists
-if [ -d "${HOME}/.local/bin" ]; then
-    install -m 755 -p "${BIN_DIR}/wattcurb" "${HOME}/.local/bin/wattcurb"
-    install -m 755 -p "${BIN_DIR}/wattcurb-tray" "${HOME}/.local/bin/wattcurb-tray"
+# Also symlink into target user's ~/.local/bin if directory exists (preserves /usr/local/bin authorization, REF-REQ-111)
+if [ -n "${USER_HOME}" ] && [ -d "${USER_HOME}/.local/bin" ]; then
+    rm -f "${USER_HOME}/.local/bin/wattcurb" "${USER_HOME}/.local/bin/wattcurb-tray" "${USER_HOME}/.local/bin/wattcurb-dashboard"
+    ln -sf /usr/local/bin/wattcurb "${USER_HOME}/.local/bin/wattcurb"
+    ln -sf /usr/local/bin/wattcurb-tray "${USER_HOME}/.local/bin/wattcurb-tray"
     if [ -f "${BIN_DIR}/wattcurb-dashboard" ]; then
-        install -m 755 -p "${BIN_DIR}/wattcurb-dashboard" "${HOME}/.local/bin/wattcurb-dashboard"
+        ln -sf /usr/local/bin/wattcurb-dashboard "${USER_HOME}/.local/bin/wattcurb-dashboard"
+    fi
+    chown -h "${TARGET_USER}:${TARGET_USER}" "${USER_HOME}/.local/bin/wattcurb"* 2>/dev/null || true
+fi
+
+# 2.0. Configure persistent thinkpad_acpi fan_control=1 (REF-REQ-114, REF-RES-030)
+if [ -d /sys/module/thinkpad_acpi ]; then
+    if [ ! -f /etc/modprobe.d/thinkpad_acpi.conf ] || ! grep -q "fan_control=1" /etc/modprobe.d/thinkpad_acpi.conf 2>/dev/null; then
+        echo "  • Configuring persistent thinkpad_acpi fan_control=1 in /etc/modprobe.d/thinkpad_acpi.conf..."
+        ${SUDO} tee /etc/modprobe.d/thinkpad_acpi.conf > /dev/null << 'EOF'
+# WattCurb fan control override (REF-REQ-114, REF-RES-030)
+options thinkpad_acpi fan_control=1
+EOF
+        ${SUDO} chmod 644 /etc/modprobe.d/thinkpad_acpi.conf
     fi
 fi
 
@@ -111,13 +143,18 @@ X-systemd-skip=true
 EOF
 
 # 4.2. User-specific autostart backup
-TARGET_USER="${SUDO_USER:-$USER}"
-if [ -n "${TARGET_USER}" ] && [ "${TARGET_USER}" != "root" ]; then
-    USER_HOME=$(getent passwd "${TARGET_USER}" | cut -d: -f6)
+if [ -n "${TARGET_USER}" ] && [ -n "${USER_HOME}" ] && [ "${TARGET_USER}" != "root" ]; then
     if [ -d "${USER_HOME}" ]; then
         mkdir -p "${USER_HOME}/.config/autostart"
         cp /etc/xdg/autostart/wattcurb-tray.desktop "${USER_HOME}/.config/autostart/wattcurb-tray.desktop"
         chown "${TARGET_USER}:${TARGET_USER}" "${USER_HOME}/.config/autostart/wattcurb-tray.desktop" 2>/dev/null || true
+
+        # Ensure user systemd tray unit uses /usr/local/bin
+        USER_TRAY_UNIT="${USER_HOME}/.config/systemd/user/wattcurb-tray.service"
+        if [ -f "${USER_TRAY_UNIT}" ]; then
+            sed -i 's|ExecStart=.*wattcurb-tray|ExecStart=/usr/local/bin/wattcurb-tray|' "${USER_TRAY_UNIT}"
+            chown "${TARGET_USER}:${TARGET_USER}" "${USER_TRAY_UNIT}" 2>/dev/null || true
+        fi
     fi
 fi
 
@@ -159,7 +196,11 @@ if [ -n "${TARGET_USER}" ] && [ "${TARGET_USER}" != "root" ]; then
     TARGET_RUNTIME="/run/user/${TARGET_UID}"
 
     # Terminate any existing tray client for this user
-    sudo -u "${TARGET_USER}" pkill -f "wattcurb-tray" 2>/dev/null || true
+    if [ "$(id -un 2>/dev/null || echo '')" = "${TARGET_USER}" ]; then
+        pkill -f "wattcurb-tray" 2>/dev/null || true
+    else
+        sudo -u "${TARGET_USER}" pkill -f "wattcurb-tray" 2>/dev/null || true
+    fi
 
     # Launch tray under the desktop user's graphical session environment
     if [ -d "${TARGET_RUNTIME}" ]; then
@@ -170,21 +211,63 @@ if [ -n "${TARGET_USER}" ] && [ "${TARGET_USER}" != "root" ]; then
         # comes back empty.
         SESSION_ENV=""
         for var in WAYLAND_DISPLAY DISPLAY; do
-            val=$(sudo -u "${TARGET_USER}" \
-                    XDG_RUNTIME_DIR="${TARGET_RUNTIME}" \
-                    DBUS_SESSION_BUS_ADDRESS="unix:path=${TARGET_RUNTIME}/bus" \
-                    systemctl --user show-environment 2>/dev/null | sed -n "s/^${var}=//p")
+            if [ "$(id -un 2>/dev/null || echo '')" = "${TARGET_USER}" ]; then
+                val=$(XDG_RUNTIME_DIR="${TARGET_RUNTIME}" \
+                      DBUS_SESSION_BUS_ADDRESS="unix:path=${TARGET_RUNTIME}/bus" \
+                      systemctl --user show-environment 2>/dev/null | sed -n "s/^${var}=//p")
+            else
+                val=$(sudo -u "${TARGET_USER}" \
+                      XDG_RUNTIME_DIR="${TARGET_RUNTIME}" \
+                      DBUS_SESSION_BUS_ADDRESS="unix:path=${TARGET_RUNTIME}/bus" \
+                      systemctl --user show-environment 2>/dev/null | sed -n "s/^${var}=//p")
+            fi
             # Unquoted on purpose: these become separate VAR=value words for env.
             [ -n "${val}" ] && SESSION_ENV="${SESSION_ENV} ${var}=${val}"
         done
 
-        sudo -u "${TARGET_USER}" \
-            env XDG_RUNTIME_DIR="${TARGET_RUNTIME}" \
-            DBUS_SESSION_BUS_ADDRESS="unix:path=${TARGET_RUNTIME}/bus" \
-            ${SESSION_ENV} \
-            nohup /usr/local/bin/wattcurb-tray >/dev/null 2>&1 &
+        # Prefer restarting through systemd user manager if the unit exists
+        USER_TRAY_UNIT="${USER_HOME}/.config/systemd/user/wattcurb-tray.service"
+        TRAY_STARTED=0
+        if [ -f "${USER_TRAY_UNIT}" ]; then
+            if [ "$(id -un 2>/dev/null || echo '')" = "${TARGET_USER}" ]; then
+                systemctl --user daemon-reload 2>/dev/null || true
+                if systemctl --user restart wattcurb-tray.service 2>/dev/null; then
+                    TRAY_STARTED=1
+                fi
+            else
+                sudo -u "${TARGET_USER}" \
+                    XDG_RUNTIME_DIR="${TARGET_RUNTIME}" \
+                    DBUS_SESSION_BUS_ADDRESS="unix:path=${TARGET_RUNTIME}/bus" \
+                    systemctl --user daemon-reload 2>/dev/null || true
+                if sudo -u "${TARGET_USER}" \
+                    XDG_RUNTIME_DIR="${TARGET_RUNTIME}" \
+                    DBUS_SESSION_BUS_ADDRESS="unix:path=${TARGET_RUNTIME}/bus" \
+                    systemctl --user restart wattcurb-tray.service 2>/dev/null; then
+                    TRAY_STARTED=1
+                fi
+            fi
+        fi
+
+        if [ "${TRAY_STARTED}" -eq 0 ]; then
+            if [ "$(id -un 2>/dev/null || echo '')" = "${TARGET_USER}" ]; then
+                env XDG_RUNTIME_DIR="${TARGET_RUNTIME}" \
+                    DBUS_SESSION_BUS_ADDRESS="unix:path=${TARGET_RUNTIME}/bus" \
+                    ${SESSION_ENV} \
+                    nohup /usr/local/bin/wattcurb-tray >/dev/null 2>&1 &
+            else
+                sudo -u "${TARGET_USER}" \
+                    env XDG_RUNTIME_DIR="${TARGET_RUNTIME}" \
+                    DBUS_SESSION_BUS_ADDRESS="unix:path=${TARGET_RUNTIME}/bus" \
+                    ${SESSION_ENV} \
+                    nohup /usr/local/bin/wattcurb-tray >/dev/null 2>&1 &
+            fi
+        fi
     else
-        sudo -u "${TARGET_USER}" nohup /usr/local/bin/wattcurb-tray >/dev/null 2>&1 &
+        if [ "$(id -un 2>/dev/null || echo '')" = "${TARGET_USER}" ]; then
+            nohup /usr/local/bin/wattcurb-tray >/dev/null 2>&1 &
+        else
+            sudo -u "${TARGET_USER}" nohup /usr/local/bin/wattcurb-tray >/dev/null 2>&1 &
+        fi
     fi
 else
     pkill -f "wattcurb-tray" 2>/dev/null || true
