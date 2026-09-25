@@ -77,3 +77,40 @@ busctl call org.freedesktop.login1 /org/freedesktop/login1 \
 Never recreate or relocate `/swap/swapfile` without this step. WattCurb's own
 dynamic files (REF-ARCH-073) are separate (`/swap/wattcurb-dyn-*`), are never the
 hibernation target, and their creation/release does not touch this invariant.
+
+## 5. Self-healing guard (installed 2026-09-26)
+
+A stale offset is not only a lost menu entry. If hibernation were allowed while
+the kernel command line is stale, the image would be written using the live
+offset and the next boot would resume from the stale one: systemd 261's
+initramfs generator prefers the command line over the EFI `HibernateLocation`
+variable (`acquire_hibernate_info()` in
+`src/hibernate-resume/hibernate-resume-config.c` takes `info->cmdline` when
+present), so the two must always agree.
+
+Host-side units (deliberately kept under `/etc/systemd/system`, which is what
+`system-config-backup` / `tp-backup` sweeps, so they are captured and restored):
+
+| Path | Role |
+| :--- | :--- |
+| `/etc/systemd/system/hibernation-resume-offset-guard.sh` | the guard |
+| `/etc/systemd/system/hibernation-resume-offset-guard.service` | oneshot, `After=swap-swapfile.swap`, runs before `graphical.target` |
+| `/etc/systemd/system/hibernation-resume-offset-guard.path` | `PathChanged=/swap/swapfile`, heals mid-session as well |
+
+Behaviour: recompute `N` with `btrfs inspect-internal map-swapfile -r`; repair
+`/etc/default/limine` and `/boot/limine.conf` (single `.bak-hibernation-guard`
+copy, `sed` output validated against the source line count and the new value,
+snapshot entries included because every entry points at the same live file);
+then write `/sys/power/resume_offset`. **Interlock**: when the persistent
+locations cannot be repaired (UKI-embedded cmdline, read-only ESP, failed
+validation), the runtime value is left untouched on purpose - hibernation stays
+unavailable rather than producing an image the next boot cannot resume.
+`StartLimitIntervalSec=0` on both units: the first draft used a directory watch
+plus `PathExists=`, which fired three starts in 200 ms and tripped
+`start-limit-hit`, wedging the path unit.
+
+Verified 2026-09-26: writing `3577677` into `/sys/power/resume_offset` and
+starting the service restored `31634589` and `CanHibernate` stayed `yes`;
+`touch /swap/swapfile` triggered the path unit and the run was a no-op. Not
+verified: boot ordering and the mandatory `swap-swapfile.swap` dependency (both
+need a reboot) and, as in section 3, a real hibernate/resume cycle.
