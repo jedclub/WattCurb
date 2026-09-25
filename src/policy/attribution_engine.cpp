@@ -887,11 +887,13 @@ AnalysisReportData AttributionEngine::compute_attribution(
     // Sort descending by WDI score and populate FixedVector top_processes
     {
         WATTCURB_PROFILE_SCOPE("policy.wdi_ranking");
-        std::sort(attributed.begin(), attributed.end(), [](const auto& a, const auto& b) {
-            return a.wdi_score > b.wdi_score;
-        });
-
         size_t limit = std::min({top_n, attributed.size(), report.top_processes.capacity()});
+        if (limit > 0) {
+            std::partial_sort(attributed.begin(), attributed.begin() + static_cast<std::ptrdiff_t>(limit), attributed.end(), [](const auto& a, const auto& b) {
+                return a.wdi_score > b.wdi_score;
+            });
+        }
+
         report.top_processes.clear();
         for (size_t i = 0; i < limit; ++i) {
             report.top_processes.push_back(attributed[i]);

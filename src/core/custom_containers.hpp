@@ -187,6 +187,30 @@ public:
         return *ptr;
     }
 
+    iterator insert(const_iterator pos, const T& val) noexcept {
+        if (size_ >= Capacity) {
+            ++overflow_count_;
+            return end();
+        }
+        size_type index = (pos >= begin() && pos <= end()) ? static_cast<size_type>(pos - begin()) : size_;
+        if constexpr (std::is_trivially_copyable_v<T>) {
+            if (index < size_) {
+                std::memmove(data() + index + 1, data() + index, (size_ - index) * sizeof(T));
+            }
+            std::memcpy(data() + index, &val, sizeof(T));
+        } else {
+            if (index < size_) {
+                for (size_type i = size_; i > index; --i) {
+                    ::new (static_cast<void*>(data() + i)) T(std::move(data()[i - 1]));
+                    data()[i - 1].~T();
+                }
+            }
+            ::new (static_cast<void*>(data() + index)) T(val);
+        }
+        ++size_;
+        return begin() + index;
+    }
+
     void pop_back() noexcept {
         if (size_ > 0) {
             --size_;

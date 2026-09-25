@@ -201,10 +201,10 @@ static void do_capture_active_processes(
             }
 
             if (sample.ppid == 2) {
-                if (!std::binary_search(kthread_pids.begin(), kthread_pids.end(), pid)) {
+                auto it = std::lower_bound(kthread_pids.begin(), kthread_pids.end(), pid);
+                if (it == kthread_pids.end() || *it != pid) {
                     if (kthread_pids.size() < kthread_pids.capacity()) {
-                        kthread_pids.push_back(pid);
-                        std::sort(kthread_pids.begin(), kthread_pids.end());
+                        kthread_pids.insert(it, pid);
                     }
                 }
                 samples.push_back(std::move(sample));

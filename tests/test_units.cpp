@@ -5303,7 +5303,7 @@ void test_multilingual_l10n_and_auto_system_locale() {
 
     using namespace wattcurb::core::l10n;
 
-    // 1. Completeness test: Verify all 13 languages have non-empty translations for all 46 strings
+    // 1. Completeness test: Verify all 14 languages have non-empty translations for all 47 strings
     for (size_t l = 0; l < static_cast<size_t>(Language::COUNT); ++l) {
         Language lang = static_cast<Language>(l);
         const char* code = get_language_code(lang);
@@ -5342,6 +5342,8 @@ void test_multilingual_l10n_and_auto_system_locale() {
     assert(parse_language_code("de_AT") == Language::DE);
     assert(parse_language_code("ko_KR.UTF-8") == Language::KO);
     assert(parse_language_code("ko") == Language::KO);
+    assert(parse_language_code("ja_JP.UTF-8") == Language::JA);
+    assert(parse_language_code("ja") == Language::JA);
     assert(parse_language_code("xyz_UNKNOWN") == std::nullopt);
 
     // 3. Environment detection hierarchy
@@ -5387,7 +5389,7 @@ void test_multilingual_l10n_and_auto_system_locale() {
     std::cout << "   * Average Latency : " << ns_per_lookup << " ns/op\n";
     assert(ns_per_lookup < bench_tol() * 20.0 && "L10n lookup must be strictly < 20.0 ns/op (Zero-Cost table lookup)!");
 
-    std::cout << " [PASS] test_multilingual_l10n_and_auto_system_locale (REF-TEST-041: 13 languages, 46 strings, POSIX auto-detect verified)\n";
+    std::cout << " [PASS] test_multilingual_l10n_and_auto_system_locale (REF-TEST-041: 14 languages, 47 strings, POSIX auto-detect verified)\n";
 }
 
 // Implements REF-TEST-043 & REF-REQ-078: Deep Battery Drain Telemetry & Standalone Report Oracle Gate

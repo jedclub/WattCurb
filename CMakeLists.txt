@@ -33,6 +33,9 @@ add_compile_options(
     -O3
     -march=native
     -fno-omit-frame-pointer
+    -fno-semantic-interposition
+    -falign-functions=32
+    -falign-loops=32
 )
 
 # REF-REQ-008: Total Elimination of Debug/Trace Residue & Binary Hardening
@@ -50,6 +53,8 @@ if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_link_options(
         -Wl,--gc-sections
         -Wl,--as-needed
+        -Wl,-z,pack-relative-relocs
+        -Wl,--sort-common
     )
 endif()
 

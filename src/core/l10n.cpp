@@ -11,8 +11,8 @@ namespace {
 static std::atomic<Language> g_active_lang{Language::EN};
 
 // [REF-REQ-076, REF-ARCH-053]
-// 13 Languages x 46 Strings Matrix aligned to 64 bytes for L1 Data Cache locality
-// Languages order: EN, ZH, HI, ES, FR, AR, BN, PT, RU, UR, ID, DE, KO
+// 14 Languages x 47 Strings Matrix aligned to 64 bytes for L1 Data Cache locality
+// Languages order: EN, ZH, HI, ES, FR, AR, BN, PT, RU, UR, ID, DE, KO, JA
 alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(Language::COUNT)][static_cast<size_t>(StringId::COUNT)] = {
     // 0: EN (English)
     {
@@ -663,11 +663,61 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "프로세스 에너지 소모",                          // DASH_POWER_SHARE_PROC
         "실시간 전력 소모 타임라인",                     // DASH_TIMELINE
         "상세",                                          // DASH_DETAILS
+    },
+    // 13: JA (Japanese - 日本語)
+    {
+        "放電中",                                        // STATUS_DISCHARGING
+        "ACパススルー (満充電)",                          // STATUS_AC_PASSTHROUGH
+        "AC充電中",                                      // STATUS_AC_CHARGING
+        "AC電源接続中",                                  // STATUS_AC_CONNECTED
+        "バッテリー駆動中",                              // STATUS_ON_BATTERY
+        "残り %u 分",                                    // BATTERY_TIME_LEFT
+        "計算中...",                                     // BATTERY_TIME_CALCULATING
+        "AC接続中 (制限なし)",                           // BATTERY_TIME_UNLIMITED
+        "%1時間 %2分",                                   // BATTERY_TIME_HOURS_MINS
+        "%1分",                                          // BATTERY_TIME_MINS
+        "パフォーマンス (4.1G ブースト)",                 // PROFILE_PERFORMANCE_SHORT
+        "バランス",                                      // PROFILE_BALANCED_SHORT
+        "スマート節電 (1.7G)",                           // PROFILE_SMARTSAVE_SHORT
+        "ウルトラ省電力 (1.4G)",                         // PROFILE_ULTRASAVE_SHORT
+        "パフォーマンスモード (4.1GHz ブースト)",          // PROFILE_PERFORMANCE_LONG
+        "バランスモード (デフォルト推奨)",               // PROFILE_BALANCED_LONG
+        "スマート節電モード (1.7GHz)",                   // PROFILE_SMARTSAVE_LONG
+        "ウルトラ省電力モード (1.4GHz 上限)",            // PROFILE_ULTRASAVE_LONG
+        "アイドル安定 (リークなし)",                     // HUD_IDLE_STABLE
+        "📈 マトリックスダッシュボードを開く",           // ACTION_OPEN_DASHBOARD
+        "🔋 バッテリー詳細診断レポートを開く",           // ACTION_OPEN_BATTERY_REPORT
+        "📊 KDE システムモニターを開く",                // ACTION_OPEN_SYSMONITOR
+        "CPU パッケージ",                                // DEV_CPU_PKG
+        "GPU シリコン",                                  // DEV_GPU_SILICON
+        "ディスプレイ & バックライト",                    // DEV_DISPLAY
+        "ストレージ & NVMe SSD",                         // DEV_STORAGE
+        "冷却ファン",                                    // DEV_COOLING_FAN
+        "プラットフォーム / マザーボード",               // DEV_PLATFORM
+        "WattCurb 常駐デーモン稼働状態",                 // CLI_STATUS_HEADER
+        "システム総消費電力",                            // CLI_TOTAL_DRAIN
+        "CPU パッケージ消費電力",                        // CLI_CPU_DRAIN
+        "GPU シリコン消費電力",                          // CLI_GPU_DRAIN
+        "バッテリー残量",                                // CLI_BATTERY_LEVEL
+        "システムウェイクアップ",                        // CLI_WAKEUPS
+        "冷却ファン回転数",                              // CLI_COOLING_FAN
+        "アクティブな緩和ポリシー",                      // CLI_ACTIVE_MITIGATIONS
+        "最大電力消費プロセス",                          // CLI_TOP_CULPRIT
+        "総消費電力",                                    // DASH_TOTAL_DRAIN
+        "CPU & メモリサブシステム",                       // DASH_CPU_MEM_SUBSYSTEM
+        "バッテリー & 電源供給",                          // DASH_BATTERY_POWER_SUPPLY
+        "GPU シリコン & 負荷率",                         // DASH_GPU_SILICON_LOAD
+        "ディスプレイ & バックライト",                    // DASH_DISPLAY_BACKLIGHT
+        "ストレージ & NVMe SSD",                         // DASH_STORAGE_NVME
+        "ハードウェア電力占有率",                        // DASH_POWER_SHARE_HW
+        "プロセスエネルギー消費",                        // DASH_POWER_SHARE_PROC
+        "リアルタイム電力消費タイムライン",              // DASH_TIMELINE
+        "詳細",                                          // DASH_DETAILS
     }
 };
 
 static constexpr const char* const LANGUAGE_CODES[static_cast<size_t>(Language::COUNT)] = {
-    "en", "zh", "hi", "es", "fr", "ar", "bn", "pt", "ru", "ur", "id", "de", "ko"
+    "en", "zh", "hi", "es", "fr", "ar", "bn", "pt", "ru", "ur", "id", "de", "ko", "ja"
 };
 
 static constexpr const char* const LANGUAGE_NAMES[static_cast<size_t>(Language::COUNT)] = {
@@ -683,7 +733,8 @@ static constexpr const char* const LANGUAGE_NAMES[static_cast<size_t>(Language::
     "اردو",
     "Bahasa Indonesia",
     "Deutsch",
-    "한국어"
+    "한국어",
+    "日本語"
 };
 
 } // anonymous namespace
@@ -757,6 +808,7 @@ std::optional<Language> parse_language_code(std::string_view code) noexcept {
     std::string_view p(buf, copy_len);
 
     if (p == "ko" || p == "kor" || p == "korean") return Language::KO;
+    if (p == "ja" || p == "jpn" || p == "japanese") return Language::JA;
     if (p == "zh" || p == "zho" || p == "chi" || p == "chinese") return Language::ZH;
     if (p == "hi" || p == "hin" || p == "hindi") return Language::HI;
     if (p == "es" || p == "spa" || p == "spanish" || p == "espanol") return Language::ES;

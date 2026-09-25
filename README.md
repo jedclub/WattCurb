@@ -17,7 +17,7 @@
 [![CPU Overhead](https://img.shields.io/badge/CPU%20Overhead-%3C%200.05%25-informational)](docs/research/PMU_BENCHMARKS.md)
 [![Memory Footprint](https://img.shields.io/badge/RSS%20Footprint-%3C%2010%20MB-blueviolet)](docs/research/PMU_BENCHMARKS.md)
 [![Zero-Wakeup](https://img.shields.io/badge/Architecture-Zero--Wakeup%20epoll-orange)](docs/architecture/ARCH-004-resident-daemon-event-loop.md)
-[![l10n: 13 Locales](https://img.shields.io/badge/l10n-13%20Languages%20(Zero--Cost)-ff69b4)](docs/architecture/ARCH-053-multilingual-zero-cost-l10n-architecture.md)
+[![l10n: 14 Locales](https://img.shields.io/badge/l10n-14%20Languages%20(Zero--Cost)-ff69b4)](docs/architecture/ARCH-053-multilingual-zero-cost-l10n-architecture.md)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20x86__64-yellow.svg)](https://kernel.org)
 
 <br/>
@@ -62,9 +62,9 @@ Unlike conventional power managers that rely on coarse system-wide battery drain
 - **Progressive Non-Halting Mitigation**: Never terminates processes. Applies CFS `SCHED_IDLE` + idle I/O priority, spatial CPU-core partitioning that protects audio and the compositor, cgroup v2 **CPU quota** capping, and memory reclaim — with full state rollback on profile change or shutdown.
 - **Sub-Milliwatt Daemon Footprint**: Modern C++23 with zero heap allocations on hot paths, flat cache-line-aligned data structures and a lock-free 128-byte Seqlock shared-memory IPC (`/dev/shm`).
 - **Profile-Guided Optimization (PGO)**: Verified with hardware Performance Monitoring Unit (`perf stat`) counters and a 3-stage PGO + LTO pipeline.
-- **Zero-Cost 13-Language Internationalization**: A compile-time translation matrix covering 13 major world languages with automatic system-locale detection and single-digit-nanosecond lookups.
+- **Zero-Cost 14-Language Internationalization**: A compile-time translation matrix covering 14 major world languages with automatic system-locale detection and single-digit-nanosecond lookups.
 
-> **Honest scope note:** the CLI and the tray HUD are fully translated across all 13 locales. The Qt6 dashboard's labeled telemetry keys are localized; a handful of button labels and tooltips remain Korean-only and are being migrated into the l10n matrix (see [Architecture → l10n](#-zero-cost-13-language-internationalization-l10n)).
+> **Honest scope note:** the CLI and the tray HUD are fully translated across all 14 locales. The Qt6 dashboard's labeled telemetry keys are localized; a handful of button labels and tooltips remain Korean-only and are being migrated into the l10n matrix (see [Architecture → l10n](#-zero-cost-14-language-internationalization-l10n)).
 
 ---
 
@@ -80,7 +80,7 @@ Unlike conventional power managers that rely on coarse system-wide battery drain
 | **Desktop Integration** | Terminal-only or basic static icons | **Native StatusNotifierItem (SNI) Tray HUD** + **KDE Plasma 6 Matrix Dashboard** (Qt6 Quick/QML) |
 | **IPC Communication** | Heavy D-Bus method calls or JSON files on disk | **128-byte Lock-Free Seqlock POD** in `/dev/shm` (single-digit-ns reads, 0 disk I/O) |
 | **Compiler Optimization** | Standard `-O2` distribution packages | **Automated 3-Stage PGO Pipeline** (`-fprofile-generate` → Training → `-fprofile-use` + LTO) |
-| **Internationalization (l10n)** | English only | **Zero-cost 13-language matrix** in `.rodata` with automatic system-locale detection |
+| **Internationalization (l10n)** | English only | **Zero-cost 14-language matrix** in `.rodata` with automatic system-locale detection |
 
 ---
 
@@ -141,9 +141,9 @@ Want to contribute a screenshot from your own machine? Open a PR adding it under
 
 ---
 
-## 🌐 Zero-Cost 13-Language Internationalization (l10n)
+## 🌐 Zero-Cost 14-Language Internationalization (l10n)
 
-WattCurb ships a compile-time translation matrix for **13 major world languages** — the 12 most spoken languages plus Korean — covering over **4.5 billion native speakers**:
+WattCurb ships a compile-time translation matrix for **14 major world languages** — the most spoken languages globally plus Korean and Japanese — covering over **4.6 billion native speakers**:
 
 <div align="center">
 
@@ -155,7 +155,7 @@ WattCurb ships a compile-time translation matrix for **13 major world languages*
 | `bn` | **Bengali** | বাংলা | `fr` | **French** | Français |
 | `ru` | **Russian** | Русский | `pt` | **Portuguese** | Português |
 | `ur` | **Urdu** | اردو | `id` | **Indonesian** | Bahasa Indonesia |
-| `de` | **German** | Deutsch | | | |
+| `de` | **German** | Deutsch | `ja` | **Japanese** | 日本語 |
 
 </div>
 

@@ -1,7 +1,7 @@
 # [REF-REQ-076] Multilingual Localization (l10n) and Automatic System Locale Selection
 
 ## 1. Overview & Business Rationale
-WattCurb is an ultra-low-overhead Linux power daemon and KDE Plasma 6 desktop power monitoring suite. To serve users across global Linux distributions and diverse regions, WattCurb must provide comprehensive native localization (l10n) covering the **top 12 languages in the world by population** (plus Korean as the native development and user interaction language), while adhering strictly to the **Zero-Allocation and Zero-Wakeup** design principles.
+WattCurb is an ultra-low-overhead Linux power daemon and KDE Plasma 6 desktop power monitoring suite. To serve users across global Linux distributions and diverse regions, WattCurb must provide comprehensive native localization (l10n) covering the **top 13 languages in the world by population** (plus Korean as the native development and user interaction language, total 14 languages), while adhering strictly to the **Zero-Allocation and Zero-Wakeup** design principles.
 
 Language selection must be fully automatic based on the user's host environment (`LANG`, `LC_MESSAGES`, `LC_ALL`), with immediate zero-overhead fallback to English for unsupported or malformed locales, and explicit override capabilities via `WATTCURB_LANG`.
 
@@ -23,6 +23,7 @@ Language selection must be fully automatic based on the user's host environment 
 | 10 | **Urdu** | `ur` | اردو | ~232 Million |
 | 11 | **Indonesian** | `id` | Bahasa Indonesia | ~200 Million |
 | 12 | **German** | `de` | Deutsch | ~135 Million |
+| 13 | **Japanese** | `ja` | 日本語 | ~125 Million |
 | **+** | **Korean** | `ko` | 한국어 (Native Dev / Desktop Language) | ~82 Million |
 
 ---

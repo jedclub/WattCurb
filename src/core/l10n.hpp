@@ -22,6 +22,7 @@ enum class Language : uint8_t {
     ID,     // Indonesian (Bahasa Indonesia)
     DE,     // German (Deutsch)
     KO,     // Korean (한국어)
+    JA,     // Japanese (日本語)
     COUNT
 };
 
