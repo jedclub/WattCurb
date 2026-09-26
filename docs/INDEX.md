@@ -322,6 +322,7 @@ All documents follow the Ref-ID naming standard:
 | [`REF-TEST-080`](file:///home/jedclub/Develop/WattCurb/tests/test_units.cpp) | SMU Power-Limit Clawback Verification Gate | `ryzenadj -i` row parser (line-bounded search, W/mW unit handling), clawback floor separates the EC's 6-10 W band from the accepted 22-25 W write, unreadable limit is never treated as healthy; recalibrates REF-TEST-072 gates (0.85 x hw_max clock, 0.25 x ncpu load) so the P-state-floor pin trips | Approved |
 | [`REF-TEST-082`](file:///home/jedclub/Develop/WattCurb/tests/test_units.cpp) | Window-Minimized Progressive C-State Governor Gate | Progressive demotion timing (Perf 10m, Bal 1m, Save 0s), audio exemption, immediate focus restore | Approved |
 | [`REF-TEST-083`](file:///home/jedclub/Develop/WattCurb/tests/test_units.cpp) | Low-Overhead Memory Metrics SHM Persistence Gate | 32B POD/HistoryPoint memory fields, zero-allocation propagation, ring buffer round-trip | Approved |
+| [`REF-TEST-084`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-130-safe-non-destructive-memory-reclaim.md) | Safe Non-Destructive 3-Tier Memory Reclamation Gate | Phase 1 GC D-Bus level 100/255, Phase 2 RAM compression immunity (focus/audio), Phase 3 ZRAM priority hierarchy & saturation check | Approved |
 
 
 

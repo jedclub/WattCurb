@@ -107,14 +107,18 @@ set(WATTCURB_LIB_SOURCES
     src/policy/battery_feature.cpp
     src/policy/memory_pressure_guard.cpp
     src/policy/swap_expander.cpp
+    src/policy/low_memory_notifier.cpp
+    src/policy/process_pageout_actuator.cpp
+    src/policy/swap_tier_manager.cpp
     src/report/report_generator.cpp
     src/report/battery_history_analyzer.cpp
 )
 
 add_library(wattcurb_lib STATIC ${WATTCURB_LIB_SOURCES})
-target_include_directories(wattcurb_lib PUBLIC src)
+target_include_directories(wattcurb_lib PUBLIC src ${SYSTEMD_INCLUDE_DIRS})
+target_link_libraries(wattcurb_lib PUBLIC ${SYSTEMD_LIBRARIES})
 
-# Main Executable (Daemon - zero D-Bus / GUI dependency)
+# Main Executable (Daemon)
 add_executable(wattcurb src/main.cpp)
 target_link_libraries(wattcurb PRIVATE wattcurb_lib)
 

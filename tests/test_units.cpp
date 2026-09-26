@@ -5314,6 +5314,84 @@ void test_performance_swap_expansion_policy() {
                  "brake-only-when-exhausted, sandbox containment verified)\n";
 }
 
+// Implements REF-TEST-084, REF-REQ-130 & REF-ARCH-077:
+// Safe Non-Destructive 3-Tier Memory Reclamation Engine (GC -> RAM Compression -> Disk Swap)
+void test_safe_three_tier_memory_reclamation() {
+    using namespace wattcurb;
+    using namespace wattcurb::policy;
+
+    std::cout << "\n--- [REF-TEST-084] Safe 3-Tier Memory Reclamation (GC -> RAM Compression -> Disk Swap) ---\n";
+
+    // 1. Phase 1: LowMemoryNotifier Levels & D-Bus Specifications
+    {
+        assert(LowMemoryNotifier::LEVEL_NORMAL == 0);
+        assert(LowMemoryNotifier::LEVEL_MODERATE == 100);
+        assert(LowMemoryNotifier::LEVEL_CRITICAL == 255);
+
+        LowMemoryNotifier notifier;
+        assert(!notifier.is_connected());
+        assert(notifier.last_level() == 0);
+        assert(notifier.last_emit_timestamp() == 0);
+    }
+
+    // 2. Phase 2: ProcessPageoutActuator Immunity & Candidate Selection Rules
+    {
+        // Invariant: pid 1, protected window, audio stream, and desktop system tiers are EXEMPT
+        assert(ProcessPageoutActuator::is_exempt(1, 0, 0, false));
+        assert(ProcessPageoutActuator::is_exempt(100, 100, 3, false)); // Active focused window
+        assert(ProcessPageoutActuator::is_exempt(200, 0, 3, true));  // Active audio stream
+        assert(ProcessPageoutActuator::is_exempt(300, 0, static_cast<uint8_t>(ProcessSafetyTier::CriticalImmune), false));
+        assert(ProcessPageoutActuator::is_exempt(301, 0, static_cast<uint8_t>(ProcessSafetyTier::DesktopCore), false));
+        assert(ProcessPageoutActuator::is_exempt(302, 0, static_cast<uint8_t>(ProcessSafetyTier::DesktopShell), false));
+
+        // Background worker and interactive background candidates are NOT exempt (eligible for RAM pageout)
+        assert(!ProcessPageoutActuator::is_exempt(400, 0, static_cast<uint8_t>(ProcessSafetyTier::BackgroundWorker), false));
+        assert(!ProcessPageoutActuator::is_exempt(401, 0, static_cast<uint8_t>(ProcessSafetyTier::RunawayCandidate), false));
+        assert(!ProcessPageoutActuator::is_exempt(402, 0, static_cast<uint8_t>(ProcessSafetyTier::UserInteractive), false));
+    }
+
+    // 3. Phase 3: SwapTierManager /proc/swaps Parser & Priority Hierarchy
+    {
+        const char* mock_swaps =
+            "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n"
+            "/dev/zram0                              partition\t6291452\t\t128\t\t100\n"
+            "/swap/swapfile                          file\t\t33554428\t0\t\t-1\n";
+
+        core::FixedVector<SwapDeviceEntry, SwapTierManager::MAX_SWAP_DEVICES> devices;
+        bool ok = SwapTierManager::parse_swaps_buffer(mock_swaps, std::strlen(mock_swaps), devices);
+        assert(ok && devices.size() == 2);
+
+        // Verify ZRAM entry
+        assert(devices[0].is_zram == true);
+        assert(std::strcmp(devices[0].name, "/dev/zram0") == 0);
+        assert(devices[0].size_kb == 6291452);
+        assert(devices[0].used_kb == 128);
+        assert(devices[0].priority == 100);
+
+        // Verify Secondary Disk Swapfile entry
+        assert(devices[1].is_zram == false);
+        assert(std::strcmp(devices[1].name, "/swap/swapfile") == 0);
+        assert(devices[1].size_kb == 33554428);
+        assert(devices[1].used_kb == 0);
+        assert(devices[1].priority == -1);
+
+        // Verify priority comparison
+        assert(devices[0].priority > devices[1].priority); // ZRAM higher priority than disk
+    }
+
+    // 4. Integrated MemoryPressureGuard 3-Tier Pipeline Invariants
+    {
+        MemoryPressureGuard guard;
+        // Verify sub-engines are accessible and integrated
+        assert(guard.tier() == MemoryPressureTier::Normal);
+        assert(guard.throttled_count() == 0);
+        assert(!guard.swap_tier().is_zram_saturated());
+    }
+
+    std::cout << " [PASS] test_safe_three_tier_memory_reclamation (REF-TEST-084: Phase 1 GC levels, "
+                 "Phase 2 RAM compression immunity, Phase 3 ZRAM priority hierarchy verified)\n";
+}
+
 // Implements REF-TEST-062 & REF-REQ-111: the four defects found by the
 // REF-RES-029 audit.
 void test_audit_defect_remediation() {
@@ -6205,6 +6283,7 @@ int main() {
     test::test_memory_pressure_ladder();
     test::test_memory_pressure_parsers();
     test::test_performance_swap_expansion_policy();
+    test::test_safe_three_tier_memory_reclamation();
     test::test_multilingual_l10n_and_auto_system_locale();
     test::test_anti_starvation_and_greedy_capping();
     test::test_adaptive_c1_c2_cluster_dispersion();

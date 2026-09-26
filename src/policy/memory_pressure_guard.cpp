@@ -91,6 +91,10 @@ bool MemoryPressureGuard::initialize() noexcept {
     // before any decision is taken on current capacity.
     m_expander.initialize();
 
+    // REF-REQ-130: initialize cooperative D-Bus LowMemoryMonitor emitter and swap tier manager
+    m_notifier.initialize();
+    m_swap_tier.refresh();
+
     // The PSI trigger is what makes this guard event-driven instead of polled.
     // It is optional: a kernel without CONFIG_PSI, or a container without write
     // access, leaves m_psi_fd at -1 and the guard still runs on the daemon's
@@ -119,6 +123,7 @@ bool MemoryPressureGuard::initialize() noexcept {
 
 void MemoryPressureGuard::shutdown() noexcept {
     release_all();
+    m_notifier.shutdown();
     if (m_psi_fd >= 0) {
         ::close(m_psi_fd);
         m_psi_fd = -1;
@@ -243,6 +248,16 @@ bool MemoryPressureGuard::is_throttle_candidate(const ProcessAttributedPower& p,
     return true;
 }
 
+void MemoryPressureGuard::actuate_pageout(const AnalysisReportData& report,
+                                           int32_t protected_pid) noexcept {
+    // Phase 2 (REF-REQ-130 / REF-ARCH-077): High-Speed RAM-Internal Anonymous Pageout
+    // Ensure ZRAM exists and is not saturated (> 85%) so pageout incurs ZERO Disk I/O.
+    m_swap_tier.refresh();
+    if (m_swap_tier.has_zram() && !m_swap_tier.is_zram_saturated()) {
+        m_actuator.pageout_candidates(report, protected_pid);
+    }
+}
+
 void MemoryPressureGuard::actuate_throttle(const AnalysisReportData& report,
                                            int32_t protected_pid) noexcept {
     for (size_t i = 0; i < report.top_processes.size(); ++i) {
@@ -314,20 +329,25 @@ MemoryPressureTier MemoryPressureGuard::evaluate_and_actuate(const AnalysisRepor
         const bool growing = m_expander.ensure_headroom(s.swap_total_kb, s.swap_free_kb);
 
         if (next == MemoryPressureTier::Normal) {
+            m_notifier.notify(LowMemoryNotifier::LEVEL_NORMAL);
             if (previous != MemoryPressureTier::Normal) release_all();
             m_expander.maybe_release(s.swap_total_kb, s.swap_free_kb);
             return next;
         }
 
-        // File-backed reclaim only - it frees page cache, it does not slow the
-        // foreground, and it does not consume the swap tier being defended.
+        // Phase 1 (REF-REQ-130): Cooperative in-app GC & file cache reclaim (0 I/O)
+        m_notifier.notify(LowMemoryNotifier::LEVEL_MODERATE);
         actuate_advisory(report);
+
+        // Phase 2 (REF-REQ-130): In-memory RAM compression to ZRAM (0 disk I/O)
+        actuate_pageout(report, protected_pid);
 
         const bool exhausted = m_expander.budget_exhausted();
         if (next == MemoryPressureTier::Throttle &&
             throttle_permitted(profile, growing, exhausted)) {
             // No capacity left to add. The remaining choice is the brake or a
             // kernel SIGKILL, and REF-REQ-112 exists to avoid the latter.
+            m_notifier.notify(LowMemoryNotifier::LEVEL_CRITICAL);
             if (!m_logged_budget_exhausted) {
                 m_logged_budget_exhausted = true;
                 core::EventLogger::log_alert(
@@ -347,16 +367,34 @@ MemoryPressureTier MemoryPressureGuard::evaluate_and_actuate(const AnalysisRepor
 
     switch (next) {
     case MemoryPressureTier::Normal:
+        // Recovery: reset LowMemoryMonitor level, release CPU throttles, trim dynamic swap
+        m_notifier.notify(LowMemoryNotifier::LEVEL_NORMAL);
         if (previous != MemoryPressureTier::Normal) release_all();
         m_expander.maybe_release(s.swap_total_kb, s.swap_free_kb);
         break;
+
     case MemoryPressureTier::Advisory:
         // Stepping down from Throttle releases the CPU caps but keeps reclaiming.
         if (previous == MemoryPressureTier::Throttle) release_all();
+
+        // Phase 1 (REF-REQ-130): Cooperative in-app GC (Moderate, 100) + clean file cache reclaim
+        m_notifier.notify(LowMemoryNotifier::LEVEL_MODERATE);
         actuate_advisory(report);
+
+        // Phase 2 (REF-REQ-130): In-RAM compression to ZRAM (0 disk I/O, < 5µs fault latency)
+        actuate_pageout(report, protected_pid);
         break;
+
     case MemoryPressureTier::Throttle:
+        // Phase 1 (REF-REQ-130): Cooperative in-app GC (Critical, 255) + clean file cache reclaim
+        m_notifier.notify(LowMemoryNotifier::LEVEL_CRITICAL);
         actuate_advisory(report);
+
+        // Phase 2 (REF-REQ-130): In-RAM compression to ZRAM continues
+        actuate_pageout(report, protected_pid);
+
+        // Phase 3 (REF-REQ-130): Ensure swap backing store headroom & apply CPU allocation rate brake
+        m_expander.ensure_headroom(s.swap_total_kb, s.swap_free_kb);
         actuate_throttle(report, protected_pid);
         break;
     }

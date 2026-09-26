@@ -3,6 +3,9 @@
 #include "core/types.hpp"
 #include "core/custom_containers.hpp"
 #include "policy/swap_expander.hpp"
+#include "policy/low_memory_notifier.hpp"
+#include "policy/process_pageout_actuator.hpp"
+#include "policy/swap_tier_manager.hpp"
 
 #include <cstdint>
 
@@ -172,6 +175,14 @@ public:
     [[nodiscard]] const SwapExpander& swap_expander() const noexcept { return m_expander; }
     [[nodiscard]] SwapExpander& swap_expander() noexcept { return m_expander; }
 
+    // REF-REQ-130 / REF-ARCH-077 3-Tier Non-Destructive Reclamation Accessors
+    [[nodiscard]] const LowMemoryNotifier& notifier() const noexcept { return m_notifier; }
+    [[nodiscard]] LowMemoryNotifier& notifier() noexcept { return m_notifier; }
+    [[nodiscard]] const ProcessPageoutActuator& actuator() const noexcept { return m_actuator; }
+    [[nodiscard]] ProcessPageoutActuator& actuator() noexcept { return m_actuator; }
+    [[nodiscard]] const SwapTierManager& swap_tier() const noexcept { return m_swap_tier; }
+    [[nodiscard]] SwapTierManager& swap_tier() noexcept { return m_swap_tier; }
+
     // True while the guard wants the power-side reclaim ladder to stop pushing
     // anonymous pages into swap. REF-REQ-112.3.
     [[nodiscard]] static bool swap_feeding_suspended() noexcept { return s_suspend_swap_feed; }
@@ -184,9 +195,13 @@ private:
     };
 
     void actuate_advisory(const AnalysisReportData& report) noexcept;
+    void actuate_pageout(const AnalysisReportData& report, int32_t protected_pid) noexcept;
     void actuate_throttle(const AnalysisReportData& report, int32_t protected_pid) noexcept;
 
     SwapExpander m_expander{};
+    LowMemoryNotifier m_notifier{};
+    ProcessPageoutActuator m_actuator{};
+    SwapTierManager m_swap_tier{};
     bool m_logged_budget_exhausted{false};
 
     int m_meminfo_fd{-1};
