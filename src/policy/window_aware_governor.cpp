@@ -11,13 +11,28 @@
 
 namespace wattcurb::policy {
 
-// Implements REF-REQ-033, REF-REQ-085 & REF-ARCH-062:
-// Non-Halting Graceful Throttle Engine & Active Window Resource Guarantee
+// Implements REF-REQ-033, REF-REQ-128, REF-REQ-085 & REF-ARCH-075:
+// Non-Halting Graceful Progressive C-State Governor for Minimized Windows
+
+static constexpr uint64_t get_c2_escalation_threshold_sec(PowerProfileMode mode) noexcept {
+    switch (mode) {
+        case PowerProfileMode::Performance:
+            return 600; // 10 minutes (REF-REQ-128)
+        case PowerProfileMode::Balanced:
+            return 60;  // 1 minute (REF-REQ-128)
+        case PowerProfileMode::PowerSaver:
+        case PowerProfileMode::UltraEndurance:
+        default:
+            return 0;   // Immediate Stage 2 (REF-REQ-128)
+    }
+}
+
 void WindowAwareGovernor::on_window_state_changed(
     int32_t pid, 
     bool minimized, 
     bool active, 
     uint64_t now_sec,
+    PowerProfileMode mode,
     bool is_audio_active
 ) noexcept {
     // Self-Safety Invariant: Ignore daemon self and parent process
@@ -34,13 +49,13 @@ void WindowAwareGovernor::on_window_state_changed(
         release_active_window();
     }
 
-    // Fast-path 2: Unminimized window immediately unthrottles to normal CFS
+    // Fast-path 2: Unminimized window immediately unthrottles to normal CFS (< 50µs)
     if (!minimized) {
         unthrottle_immediate(pid);
         return;
     }
 
-    // Minimized path:
+    // Minimized path (REF-REQ-128, REF-ARCH-075):
     auto* entry = find_entry_mut(pid);
     if (!entry) {
         if (m_windows.size() >= MAX_TRACKED_WINDOWS) {
@@ -51,26 +66,73 @@ void WindowAwareGovernor::on_window_state_changed(
         new_entry.minimized_timestamp_sec = now_sec;
         new_entry.state = WindowSuppressionState::ActiveForeground;
         new_entry.has_active_audio = is_audio_active;
+
+        errno = 0;
+        int cur_nice = ::getpriority(PRIO_PROCESS, static_cast<id_t>(pid));
+        int cur_policy = ::sched_getscheduler(pid);
+        new_entry.original_nice = (errno == 0 ? cur_nice : 0);
+        new_entry.original_sched_policy = (cur_policy >= 0 ? cur_policy : SCHED_OTHER);
+        new_entry.original_timerslack_ns = 50'000ULL;
+
         m_windows.push_back(new_entry);
         entry = &m_windows.back();
     } else {
-        entry->minimized_timestamp_sec = now_sec;
         entry->has_active_audio = is_audio_active;
+        if (entry->state == WindowSuppressionState::ActiveForeground) {
+            entry->minimized_timestamp_sec = now_sec;
+        }
     }
 
-    // Non-Halting Graceful Throttle:
-    // Process is NEVER halted. It runs under SCHED_IDLE (only utilizing spare CPU cycles)
-    // with timers relaxed to 50ms to prevent high-frequency CPU package wakeups.
-    if (entry->state == WindowSuppressionState::ActiveForeground) {
-        MitigationEngine::apply_sched_idle(pid);
-        MitigationEngine::apply_timer_slack(pid, 50'000'000ULL); // 50ms graceful timer slack
-        entry->state = WindowSuppressionState::GracefulIdleThrottled;
+    // REF-REQ-128.3: Profile-Adaptive Stage Selection
+    const uint64_t threshold_sec = get_c2_escalation_threshold_sec(mode);
+    const bool actuate = !MitigationEngine::actuation_sandboxed();
+
+    if (threshold_sec == 0 && !is_audio_active) {
+        // Immediate Stage 2: Deep C2 Idle Throttle (PowerSaver / UltraEndurance)
+        if (entry->state != WindowSuppressionState::C2_DeepIdleThrottled) {
+            if (actuate) {
+                MitigationEngine::apply_sched_idle(pid);
+                MitigationEngine::apply_timer_slack(pid, 1'000'000'000ULL); // 1.0s deep timer coalescing
+            }
+            entry->state = WindowSuppressionState::C2_DeepIdleThrottled;
+        }
+    } else {
+        // Stage 1: Soft C1 Coalescing (Performance / Balanced initial phase or Audio Active)
+        if (entry->state == WindowSuppressionState::ActiveForeground) {
+            if (actuate) {
+                int target_nice = std::min(19, entry->original_nice + 10);
+                ::setpriority(PRIO_PROCESS, static_cast<id_t>(pid), target_nice);
+                MitigationEngine::apply_timer_slack(pid, 100'000'000ULL); // 100ms soft timer slack
+            }
+            entry->state = WindowSuppressionState::C1_SoftCoalesced;
+        }
     }
 }
 
-void WindowAwareGovernor::evaluate_hysteresis(uint64_t /*now_sec*/) noexcept {
-    // Non-Halting Invariant: No escalation to hard freeze.
-    // Applications remain active and responsive in GracefulIdleThrottled state.
+void WindowAwareGovernor::evaluate_hysteresis(uint64_t now_sec, PowerProfileMode mode) noexcept {
+    // REF-REQ-128.2 & REF-REQ-128.3:
+    // Evaluate progressive transition from Stage 1 (Soft C1) to Stage 2 (Deep C2)
+    const uint64_t threshold_sec = get_c2_escalation_threshold_sec(mode);
+    const bool actuate = !MitigationEngine::actuation_sandboxed();
+
+    for (size_t i = 0; i < m_windows.size(); ++i) {
+        auto& entry = m_windows[i];
+        if (entry.state == WindowSuppressionState::C1_SoftCoalesced) {
+            // Audio Guard: Audio playback must never be throttled to 1s idle
+            if (entry.has_active_audio) {
+                continue;
+            }
+            if (now_sec >= entry.minimized_timestamp_sec && 
+                (now_sec - entry.minimized_timestamp_sec >= threshold_sec)) {
+                // Escalate to Stage 2: Deep C2 Idle Throttle
+                if (actuate) {
+                    MitigationEngine::apply_sched_idle(entry.pid);
+                    MitigationEngine::apply_timer_slack(entry.pid, 1'000'000'000ULL); // 1.0s deep slack
+                }
+                entry.state = WindowSuppressionState::C2_DeepIdleThrottled;
+            }
+        }
+    }
 }
 
 bool WindowAwareGovernor::unthrottle_immediate(int32_t pid) noexcept {
@@ -81,11 +143,24 @@ bool WindowAwareGovernor::unthrottle_immediate(int32_t pid) noexcept {
         return true;
     }
 
-    // 1. Restore CFS scheduler (SCHED_OTHER, normal CFS weight)
-    MitigationEngine::restore_sched_normal(pid);
+    const bool actuate = !MitigationEngine::actuation_sandboxed();
+
+    // 1. Restore CFS scheduler (SCHED_OTHER, baseline policy & nice)
+    if (actuate) {
+        if (entry->original_sched_policy >= 0) {
+            struct sched_param sp{};
+            sp.sched_priority = 0;
+            ::sched_setscheduler(pid, entry->original_sched_policy, &sp);
+        } else {
+            MitigationEngine::restore_sched_normal(pid);
+        }
+        ::setpriority(PRIO_PROCESS, static_cast<id_t>(pid), entry->original_nice);
+    }
 
     // 2. Restore standard 50µs timer slack for high frame-rate rendering
-    MitigationEngine::apply_timer_slack(pid, 50'000ULL);
+    if (actuate) {
+        MitigationEngine::apply_timer_slack(pid, entry->original_timerslack_ns > 0 ? entry->original_timerslack_ns : 50'000ULL);
+    }
 
     entry->state = WindowSuppressionState::ActiveForeground;
     return true;
@@ -209,12 +284,7 @@ void WindowAwareGovernor::release_active_window() noexcept {
 void WindowAwareGovernor::rollback_all() noexcept {
     release_active_window();
     for (size_t i = 0; i < m_windows.size(); ++i) {
-        auto& entry = m_windows[i];
-        if (entry.state != WindowSuppressionState::ActiveForeground) {
-            MitigationEngine::restore_sched_normal(entry.pid);
-            MitigationEngine::apply_timer_slack(entry.pid, 50'000ULL);
-            entry.state = WindowSuppressionState::ActiveForeground;
-        }
+        unthrottle_immediate(m_windows[i].pid);
     }
     m_windows.clear();
 }

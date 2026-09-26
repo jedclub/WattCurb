@@ -1833,6 +1833,7 @@ void test_tray_binary_shared_state() {
 
 void test_window_aware_governor() {
     using namespace wattcurb::policy;
+    using wattcurb::PowerProfileMode;
     WindowAwareGovernor gov;
 
     // 0. Test Self-Safety Invariant (Never throttle daemon itself)
@@ -1840,7 +1841,7 @@ void test_window_aware_governor() {
     gov.on_window_state_changed(self_pid, true, false, 1000, false);
     assert(gov.tracked_count() == 0 && "Governor must reject tracking self-PID");
 
-    // 1. Initial minimization: Non-Halting Graceful Throttle (SCHED_IDLE + 50ms timerslack)
+    // 1. Initial minimization: Stage 1 Soft C1 Coalescing (Nice +10, 100ms timerslack, REF-REQ-128)
     int32_t browser_pid = 88888; 
     uint64_t t0 = 1000;
     gov.on_window_state_changed(browser_pid, true, false, t0, false);
@@ -1848,20 +1849,22 @@ void test_window_aware_governor() {
     assert(gov.tracked_count() == 1);
     const auto* entry = gov.find_entry(browser_pid);
     assert(entry != nullptr);
-    assert(entry->state == WindowSuppressionState::GracefulIdleThrottled);
+    assert(entry->state == WindowSuppressionState::C1_SoftCoalesced);
     assert(entry->has_active_audio == false);
 
-    // 2. Non-Halting Invariant: Even after long minimization, process remains alive in GracefulIdleThrottled!
-    gov.evaluate_hysteresis(t0 + 60);
-    assert(entry->state == WindowSuppressionState::GracefulIdleThrottled);
+    // 2. Progressive escalation: After 1 minute in Balanced mode, escalates to Stage 2 Deep C2 Idle!
+    gov.evaluate_hysteresis(t0 + 60, PowerProfileMode::Balanced);
+    assert(entry->state == WindowSuppressionState::C2_DeepIdleThrottled);
 
-    // 3. Audio/media app test: Also remains alive in GracefulIdleThrottled
+    // 3. Audio/media app test: Protected by Audio Guard, stays in C1_SoftCoalesced
     int32_t audio_pid = 99999;
     gov.on_window_state_changed(audio_pid, true, false, t0, true);
     const auto* audio_entry = gov.find_entry(audio_pid);
     assert(audio_entry != nullptr);
-    assert(audio_entry->state == WindowSuppressionState::GracefulIdleThrottled);
+    assert(audio_entry->state == WindowSuppressionState::C1_SoftCoalesced);
     assert(audio_entry->has_active_audio == true);
+    gov.evaluate_hysteresis(t0 + 60, PowerProfileMode::Balanced);
+    assert(audio_entry->state == WindowSuppressionState::C1_SoftCoalesced && "Audio active window must be protected from C2 throttle");
 
     // 4. Instant Unthrottle on window focus recovery
     auto start = std::chrono::high_resolution_clock::now();
@@ -1879,6 +1882,70 @@ void test_window_aware_governor() {
 
     std::cout << " [PASS] test_window_aware_governor (Non-Halting Graceful Throttle, Always-Alive Invariant verified: " 
               << elapsed_us << "us)\n";
+}
+
+void test_window_minimized_progressive_cstate_governor() {
+    using namespace wattcurb::policy;
+    using wattcurb::PowerProfileMode;
+    WindowAwareGovernor gov;
+    uint64_t t0 = 10000;
+
+    // A. Performance Mode: 10-minute threshold (REF-REQ-128.3)
+    int32_t perf_pid = 70001;
+    gov.on_window_state_changed(perf_pid, true, false, t0, PowerProfileMode::Performance, false);
+    const auto* perf_entry = gov.find_entry(perf_pid);
+    assert(perf_entry != nullptr);
+    assert(perf_entry->state == WindowSuppressionState::C1_SoftCoalesced && "Performance mode must start in C1 Soft Coalesced");
+
+    // 5 minutes later: still Stage 1
+    gov.evaluate_hysteresis(t0 + 300, PowerProfileMode::Performance);
+    assert(perf_entry->state == WindowSuppressionState::C1_SoftCoalesced && "Performance mode must stay in C1 under 10 minutes");
+
+    // 10 minutes later (600s): escalates to Stage 2 Deep C2 Idle!
+    gov.evaluate_hysteresis(t0 + 600, PowerProfileMode::Performance);
+    assert(perf_entry->state == WindowSuppressionState::C2_DeepIdleThrottled && "Performance mode must escalate to C2 after 10 minutes");
+
+    // B. Balanced Mode: 1-minute threshold (REF-REQ-128.3)
+    int32_t bal_pid = 70002;
+    gov.on_window_state_changed(bal_pid, true, false, t0, PowerProfileMode::Balanced, false);
+    const auto* bal_entry = gov.find_entry(bal_pid);
+    assert(bal_entry != nullptr);
+    assert(bal_entry->state == WindowSuppressionState::C1_SoftCoalesced && "Balanced mode must start in C1 Soft Coalesced");
+
+    // 30 seconds later: still Stage 1
+    gov.evaluate_hysteresis(t0 + 30, PowerProfileMode::Balanced);
+    assert(bal_entry->state == WindowSuppressionState::C1_SoftCoalesced && "Balanced mode must stay in C1 under 1 minute");
+
+    // 1 minute later (60s): escalates to Stage 2 Deep C2 Idle!
+    gov.evaluate_hysteresis(t0 + 60, PowerProfileMode::Balanced);
+    assert(bal_entry->state == WindowSuppressionState::C2_DeepIdleThrottled && "Balanced mode must escalate to C2 after 1 minute");
+
+    // C. PowerSaver / UltraEndurance Mode: Immediate Stage 2 (REF-REQ-128.3)
+    int32_t save_pid = 70003;
+    gov.on_window_state_changed(save_pid, true, false, t0, PowerProfileMode::PowerSaver, false);
+    const auto* save_entry = gov.find_entry(save_pid);
+    assert(save_entry != nullptr);
+    assert(save_entry->state == WindowSuppressionState::C2_DeepIdleThrottled && "PowerSaver mode must immediately engage Stage 2 C2 Idle");
+
+    // D. Audio Guard in PowerSaver Mode (REF-REQ-128.5)
+    int32_t audio_pid = 70004;
+    gov.on_window_state_changed(audio_pid, true, false, t0, PowerProfileMode::PowerSaver, true);
+    const auto* audio_entry = gov.find_entry(audio_pid);
+    assert(audio_entry != nullptr);
+    assert(audio_entry->state == WindowSuppressionState::C1_SoftCoalesced && "Audio active window must be protected from immediate C2 throttle");
+
+    // E. Instant Unthrottle (< 50µs)
+    assert(gov.unthrottle_immediate(perf_pid));
+    assert(perf_entry->state == WindowSuppressionState::ActiveForeground);
+    assert(gov.unthrottle_immediate(bal_pid));
+    assert(bal_entry->state == WindowSuppressionState::ActiveForeground);
+    assert(gov.unthrottle_immediate(save_pid));
+    assert(save_entry->state == WindowSuppressionState::ActiveForeground);
+
+    gov.rollback_all();
+    assert(gov.tracked_count() == 0);
+
+    std::cout << " [PASS] test_window_minimized_progressive_cstate_governor (REF-TEST-082: Performance 10m, Balanced 1m, PowerSaver 0s, Audio Guard verified)\n";
 }
 
 void test_unified_rapid_rollback() {
@@ -2536,11 +2603,13 @@ void test_active_window_resource_guarantee_and_c0_qos() {
     gov.on_window_state_changed(child, false, false, now_sec, false);
     assert(!gov.is_active_window_engaged() && "on_window_state_changed(active=false) must release active window");
 
-    // 5. Minimized Throttling and Rapid Rollback Integration
+    // 5. Minimized Throttling and Rapid Rollback Integration (REF-REQ-128)
     gov.on_window_state_changed(child, true, false, now_sec, false);
     assert(gov.tracked_count() == 1 && "Minimized window must be tracked");
     const auto* entry = gov.find_entry(child);
-    assert(entry != nullptr && entry->state == WindowSuppressionState::GracefulIdleThrottled);
+    assert(entry != nullptr && entry->state == WindowSuppressionState::C1_SoftCoalesced);
+    gov.evaluate_hysteresis(now_sec + 60, PowerProfileMode::Balanced);
+    assert(entry != nullptr && entry->state == WindowSuppressionState::C2_DeepIdleThrottled);
 
     // Rollback all
     gov.rollback_all();
@@ -6051,6 +6120,7 @@ int main() {
     test::test_syscall_storm_suppression_and_lazy_fd_bypass();
     test::test_tray_binary_shared_state();
     test::test_window_aware_governor();
+    test::test_window_minimized_progressive_cstate_governor();
     test::test_unified_rapid_rollback();
     test::test_thinkpower_tray_client();
     test::test_effective_total_power_fallback();

@@ -650,6 +650,10 @@ void DaemonRunner::process_observation_cycle() {
     // no writes at all.
     memory_guard_.evaluate_and_actuate(cached_report_, window_governor_.active_window_pid(),
                                        policy::MitigationEngine::effective_profile());
+
+    // REF-REQ-128: Progressive C-State Governor evaluation for minimized windows
+    uint64_t now_sec = static_cast<uint64_t>(std::time(nullptr));
+    window_governor_.evaluate_hysteresis(now_sec, policy::MitigationEngine::effective_profile());
 }
 
 int DaemonRunner::run() {
@@ -990,8 +994,49 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
         ::sendto(fd, err, sizeof(err) - 1, 0,
                  reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
         return;
+    } else if (req.rfind("WINDOW_MINIMIZED ", 0) == 0 && bytes >= 17) {
+        // Parse "WINDOW_MINIMIZED <pid> [is_audio:0|1]" (REF-REQ-128)
+        int32_t target_pid = 0;
+        int audio_val = 0;
+        int parsed = std::sscanf(req.data() + 17, "%d %d", &target_pid, &audio_val);
+        if (parsed >= 1 && target_pid > 1) {
+            uint64_t now_sec = static_cast<uint64_t>(std::time(nullptr));
+            window_governor_.on_window_state_changed(
+                target_pid, true, false, now_sec,
+                policy::MitigationEngine::effective_profile(),
+                audio_val != 0
+            );
+            const char ack[] = "OK\n";
+            ::sendto(fd, ack, sizeof(ack) - 1, 0,
+                     reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+            return;
+        }
+        const char err[] = "ERR: Invalid PID\n";
+        ::sendto(fd, err, sizeof(err) - 1, 0,
+                 reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+        return;
+    } else if (req.rfind("WINDOW_RESTORED ", 0) == 0 && bytes >= 16) {
+        // Parse "WINDOW_RESTORED <pid>" (REF-REQ-128)
+        int32_t target_pid = 0;
+        int parsed = std::sscanf(req.data() + 16, "%d", &target_pid);
+        if (parsed >= 1 && target_pid > 1) {
+            uint64_t now_sec = static_cast<uint64_t>(std::time(nullptr));
+            window_governor_.on_window_state_changed(
+                target_pid, false, true, now_sec,
+                policy::MitigationEngine::effective_profile(),
+                false
+            );
+            const char ack[] = "OK\n";
+            ::sendto(fd, ack, sizeof(ack) - 1, 0,
+                     reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+            return;
+        }
+        const char err[] = "ERR: Invalid PID\n";
+        ::sendto(fd, err, sizeof(err) - 1, 0,
+                 reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+        return;
     } else if (req.rfind("WINDOW_STATE ", 0) == 0 && bytes >= 13) {
-        // Parse "WINDOW_STATE <pid> <minimized:0|1> <active:0|1> [is_audio:0|1]" (REF-REQ-033, REF-REQ-085)
+        // Parse "WINDOW_STATE <pid> <minimized:0|1> <active:0|1> [is_audio:0|1]" (REF-REQ-033, REF-REQ-085, REF-REQ-128)
         int32_t target_pid = 0;
         int min_val = 0;
         int act_val = 0;
@@ -999,7 +1044,11 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
         int parsed = std::sscanf(req.data() + 13, "%d %d %d %d", &target_pid, &min_val, &act_val, &audio_val);
         if (parsed >= 3 && target_pid > 1) {
             uint64_t now_sec = static_cast<uint64_t>(std::time(nullptr));
-            window_governor_.on_window_state_changed(target_pid, min_val != 0, act_val != 0, now_sec, audio_val != 0);
+            window_governor_.on_window_state_changed(
+                target_pid, min_val != 0, act_val != 0, now_sec,
+                policy::MitigationEngine::effective_profile(),
+                audio_val != 0
+            );
             const char ack[] = "OK\n";
             ::sendto(fd, ack, sizeof(ack) - 1, 0,
                      reinterpret_cast<struct sockaddr*>(&client_addr), client_len);

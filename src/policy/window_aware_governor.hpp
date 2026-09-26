@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/custom_containers.hpp"
+#include "core/types.hpp"
 #include "policy/process_classifier.hpp"
 #include "policy/mitigation_engine.hpp"
 #include "policy/pm_qos_controller.hpp"
@@ -9,14 +10,16 @@
 
 namespace wattcurb::policy {
 
-// Implements REF-REQ-033, REF-ARCH-023:
-// Non-Halting Graceful Throttle & Window-Aware Desktop Governor for KDE Plasma 6 (Wayland)
-// Core Invariant: NEVER freeze or halt background applications completely.
-// Processes remain 100% alive for WebSockets, background notifications, and IPC,
-// while yielding CPU runqueue priority (SCHED_IDLE) and coalescing wakeup timers.
+// Implements REF-REQ-033, REF-REQ-128, REF-ARCH-075:
+// Non-Halting Graceful Progressive C-State Governor for Minimized Windows
+// Core Invariant: NEVER freeze or halt background applications completely (REF-REQ-044).
+// Processes remain 100% alive for WebSockets, background notifications, and downloads,
+// while yielding CPU runqueue priority and coalescing wakeup timers (C0 -> C1 -> C2).
 enum class WindowSuppressionState : uint8_t {
     ActiveForeground     = 0, // Uninhibited (SCHED_OTHER, 50µs timerslack)
-    GracefulIdleThrottled = 1  // Non-Halting Throttle (SCHED_IDLE, 50ms timerslack, IOPRIO_IDLE)
+    C1_SoftCoalesced    = 1, // Stage 1: Soft C1 Coalescing (Nice +10, 100ms timerslack)
+    C2_DeepIdleThrottled = 2, // Stage 2: Deep C2 Idle Throttle (SCHED_IDLE, 1,000ms timerslack, IOPRIO_IDLE)
+    GracefulIdleThrottled = C2_DeepIdleThrottled // Backward compatibility alias
 };
 
 struct alignas(32) WindowStateEntry {
@@ -25,6 +28,8 @@ struct alignas(32) WindowStateEntry {
     WindowSuppressionState state{WindowSuppressionState::ActiveForeground};
     bool has_active_audio{false};
     bool is_terminal{false};
+    int original_nice{0};
+    int original_sched_policy{0};
     uint64_t original_timerslack_ns{50000};
 };
 
@@ -47,17 +52,37 @@ public:
     WindowAwareGovernor() noexcept = default;
     ~WindowAwareGovernor() noexcept { rollback_all(); }
 
-    // Ingests window state events from KWin Scripting / D-Bus
+    // Ingests window state events from KWin Scripting / D-Bus (REF-REQ-128)
     void on_window_state_changed(
         int32_t pid, 
         bool minimized, 
         bool active, 
         uint64_t now_sec,
+        PowerProfileMode mode,
         bool is_audio_active = false
     ) noexcept;
 
-    // Evaluates non-halting graceful throttle state
-    void evaluate_hysteresis(uint64_t now_sec) noexcept;
+    void on_window_state_changed(
+        int32_t pid, 
+        bool minimized, 
+        bool active, 
+        uint64_t now_sec,
+        bool is_audio_active
+    ) noexcept {
+        on_window_state_changed(pid, minimized, active, now_sec, PowerProfileMode::Balanced, is_audio_active);
+    }
+
+    void on_window_state_changed(
+        int32_t pid, 
+        bool minimized, 
+        bool active, 
+        uint64_t now_sec
+    ) noexcept {
+        on_window_state_changed(pid, minimized, active, now_sec, PowerProfileMode::Balanced, false);
+    }
+
+    // Evaluates progressive C-State throttle escalation (REF-REQ-128, REF-ARCH-075)
+    void evaluate_hysteresis(uint64_t now_sec, PowerProfileMode mode = PowerProfileMode::Balanced) noexcept;
 
     // Instantaneous unthrottle and scheduler restoration (< 50µs)
     bool unthrottle_immediate(int32_t pid) noexcept;
