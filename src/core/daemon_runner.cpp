@@ -134,6 +134,25 @@ size_t load_profile_mode(char* buf, size_t cap) noexcept {
     return static_cast<size_t>(n);
 }
 
+// Implements REF-REQ-129 & REF-ARCH-076: Zero-Allocation Process & System Memory History Export
+void populate_history_memory_fields(ipc::HistoryPoint& pt,
+                                    const policy::MemoryPressureGuard& guard,
+                                    const AnalysisReportData& report) noexcept {
+    policy::MemoryPressureSample s = guard.last_sample();
+    if (s.mem_total_kb == 0) {
+        (void)guard.sample(s);
+    }
+    if (s.mem_total_kb > s.mem_available_kb) {
+        pt.mem_used_mb = static_cast<uint16_t>((s.mem_total_kb - s.mem_available_kb) / 1024);
+    }
+    if (s.swap_total_kb > s.swap_free_kb) {
+        pt.swap_used_mb = static_cast<uint16_t>((s.swap_total_kb - s.swap_free_kb) / 1024);
+    }
+    if (!report.top_processes.empty()) {
+        pt.top_proc_pss_mb = static_cast<uint16_t>(report.top_processes[0].pss_kib / 1024);
+    }
+}
+
 } // namespace
 
 
@@ -455,6 +474,7 @@ bool DaemonRunner::process_light_probe_cycle() {
         pt.power_profile_mode = static_cast<uint8_t>(cached_report_.mitigation_status.current_profile);
         pt.cstate_c3_percent = static_cast<uint8_t>(cached_report_.hardware.cstate_c3_deep_percent);
         pt.active_mitigations = static_cast<uint8_t>(cached_report_.mitigation_status.feature_summary_count);
+        populate_history_memory_fields(pt, memory_guard_, cached_report_);
 
         shm_history_->append(pt);
     }
@@ -574,6 +594,7 @@ void DaemonRunner::process_deep_observation_cycle() {
             pt.power_profile_mode = static_cast<uint8_t>(cached_report_.mitigation_status.current_profile);
             pt.cstate_c3_percent = static_cast<uint8_t>(cached_report_.hardware.cstate_c3_deep_percent);
             pt.active_mitigations = static_cast<uint8_t>(cached_report_.mitigation_status.feature_summary_count);
+            populate_history_memory_fields(pt, memory_guard_, cached_report_);
 
             shm_history_->append(pt);
         }

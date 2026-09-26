@@ -461,6 +461,7 @@ struct ProcessAttributedPower {
     bool cross_ccx_migration{false};
     uint64_t timerslack_ns{50000};
     uint64_t pss_kib{0};
+    uint64_t rss_kib{0};
     uint64_t minflt_per_sec{0};
     uint64_t majflt_per_sec{0};
     uint32_t open_sockets{0};

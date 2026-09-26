@@ -491,6 +491,7 @@ AnalysisReportData AttributionEngine::compute_attribution(
             pap.cross_ccx_migration = d.cross_ccx_migration;
             pap.timerslack_ns = d.timerslack_ns;
             pap.pss_kib = d.pss_kib;
+            pap.rss_kib = d.rss_kib;
             pap.open_sockets = d.open_sockets;
             pap.minflt_per_sec = static_cast<uint64_t>(static_cast<double>(d.delta_minflt) / delta_sec);
             pap.majflt_per_sec = static_cast<uint64_t>(static_cast<double>(d.delta_majflt) / delta_sec);

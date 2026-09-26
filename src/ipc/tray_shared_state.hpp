@@ -7,14 +7,16 @@
 
 namespace wattcurb::ipc {
 
-// REF-REQ-028, REF-ARCH-018: 32-byte POD Culprit Record
+// REF-REQ-028, REF-REQ-129, REF-ARCH-076: 32-byte POD Culprit Record with Memory Telemetry
 struct SharedCulprit {
     char     comm[16]{};
     int32_t  pid{0};
     uint32_t drain_mw{0};
     uint8_t  domain_id{0};
     uint8_t  tier{0};
-    uint8_t  padding[6]{0};
+    uint16_t rss_mb{0};   // Resident Set Size in MB (REF-REQ-129)
+    uint16_t pss_mb{0};   // Proportional Set Size in MB (REF-REQ-129)
+    uint16_t majflt_s{0}; // Major page faults per second (REF-REQ-129)
 };
 static_assert(sizeof(SharedCulprit) == 32, "SharedCulprit must be exactly 32 bytes");
 
@@ -66,7 +68,7 @@ struct alignas(64) WattCurbSharedState {
         battery_health_percent = static_cast<uint8_t>(std::clamp(static_cast<int>(r.hardware.battery_health_percent), 0, 100));
         power_profile_mode = static_cast<uint8_t>(r.mitigation_status.current_profile);
 
-        // Copy top 2 culprits
+        // Copy top 2 culprits (REF-REQ-129: include memory telemetry)
         size_t n = std::min(size_t{2}, r.top_processes.size());
         for (size_t i = 0; i < n; ++i) {
             const auto& p = r.top_processes[i];
@@ -76,6 +78,9 @@ struct alignas(64) WattCurbSharedState {
             culprits[i].drain_mw = static_cast<uint32_t>(p.total_attributed_watts * 1000.0);
             culprits[i].tier = static_cast<uint8_t>(p.safety_tier);
             culprits[i].domain_id = 0;
+            culprits[i].rss_mb = static_cast<uint16_t>(std::clamp(static_cast<double>(p.rss_kib) / 1024.0, 0.0, 65535.0));
+            culprits[i].pss_mb = static_cast<uint16_t>(std::clamp(static_cast<double>(p.pss_kib) / 1024.0, 0.0, 65535.0));
+            culprits[i].majflt_s = static_cast<uint16_t>(std::clamp(static_cast<double>(p.majflt_per_sec), 0.0, 65535.0));
         }
 
         __atomic_store_n(&seq_version, ver + 2, __ATOMIC_RELEASE); // Mark writer stable (even)

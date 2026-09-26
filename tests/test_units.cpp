@@ -6079,6 +6079,64 @@ void test_actuation_sandbox_blocks_window_governor() {
               << "mock PM QoS untouched under sandbox, 4-byte pin when off)\n";
 }
 
+// Implements REF-TEST-083, REF-REQ-129 & REF-ARCH-076: Low-Overhead Memory Metrics SHM Persistence
+void test_process_and_system_memory_shm_persistence() {
+    std::cout << "--- [REF-TEST-083] Low-Overhead Memory Metrics SHM Persistence Verification ---\n";
+
+    // 1. Static Invariants Verification
+    static_assert(sizeof(wattcurb::ipc::SharedCulprit) == 32, "SharedCulprit must be exactly 32 bytes");
+    static_assert(sizeof(wattcurb::ipc::WattCurbSharedState) == 128, "WattCurbSharedState must be exactly 128 bytes");
+    static_assert(sizeof(wattcurb::ipc::HistoryPoint) == 32, "HistoryPoint must be exactly 32 bytes");
+    static_assert(sizeof(wattcurb::ipc::HistoryRingBufferShm) == 64 + 60480 * 32, "HistoryRingBufferShm size invariant");
+
+    // 2. SharedCulprit Memory Field Propagation
+    wattcurb::AnalysisReportData report{};
+    wattcurb::ProcessAttributedPower p1{};
+    p1.pid = 12345;
+    p1.comm = "test_worker";
+    p1.total_attributed_watts = 3.5;
+    p1.pss_kib = 512 * 1024; // 512 MB
+    p1.rss_kib = 1024 * 1024; // 1024 MB
+    p1.majflt_per_sec = 42;
+    p1.cstate_affinity = "C2";
+    report.top_processes.push_back(p1);
+
+    wattcurb::ipc::WattCurbSharedState state{};
+    state.update_from_report(report);
+
+    assert(state.culprits[0].pid == 12345);
+    assert(state.culprits[0].rss_mb == 1024);
+    assert(state.culprits[0].pss_mb == 512);
+    assert(state.culprits[0].majflt_s == 42);
+
+    // 3. HistoryPoint Memory Field Invariant & Ring Buffer Round-Trip
+    wattcurb::ipc::HistoryPoint pt{};
+    pt.timestamp_sec = 1700000000;
+    pt.total_system_mw = 15000;
+    pt.mem_used_mb = 8192;
+    pt.swap_used_mb = 1024;
+    pt.top_proc_pss_mb = 512;
+
+    alignas(64) wattcurb::ipc::HistoryRingBufferShm ring{};
+    ring.append(pt);
+
+    assert(ring.count == 1);
+    assert(ring.entries[0].mem_used_mb == 8192);
+    assert(ring.entries[0].swap_used_mb == 1024);
+    assert(ring.entries[0].top_proc_pss_mb == 512);
+
+    wattcurb::ipc::HistoryPoint snapshot[2]{};
+    uint32_t out_count = 0;
+    assert(ring.read_snapshot(snapshot, 2, out_count));
+    assert(out_count == 1);
+    assert(snapshot[0].mem_used_mb == 8192);
+    assert(snapshot[0].swap_used_mb == 1024);
+    assert(snapshot[0].top_proc_pss_mb == 512);
+
+    std::cout << " [PASS] test_process_and_system_memory_shm_persistence (REF-TEST-083: "
+              << "32B POD/HistoryPoint memory fields, zero-allocation propagation verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -6153,6 +6211,7 @@ int main() {
     test::test_active_window_resource_guarantee_and_c0_qos();
     test::test_desktop_session_token_shell_safety();
     test::test_actuation_sandbox_blocks_window_governor();
+    test::test_process_and_system_memory_shm_persistence();
     test::test_state_journaling_and_faithful_restoration();
     test::test_zero_disk_wakeup_logging_and_history_ring_buffer();
     test::test_circular_power_share_visualization();

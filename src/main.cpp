@@ -228,7 +228,12 @@ int query_daemon_status() {
                 if (state.culprits[0].pid > 0) {
                     std::cout << "  - " << wattcurb::core::l10n::tr(wattcurb::core::l10n::StringId::CLI_TOP_CULPRIT)
                               << "  : PID " << state.culprits[0].pid << " (" << state.culprits[0].comm
-                              << ") -> " << (state.culprits[0].drain_mw / 1000.0) << " W\n";
+                              << ") -> " << (state.culprits[0].drain_mw / 1000.0) << " W";
+                    if (state.culprits[0].pss_mb > 0 || state.culprits[0].rss_mb > 0) {
+                        std::cout << " (PSS: " << state.culprits[0].pss_mb << " MB, RSS: "
+                                  << state.culprits[0].rss_mb << " MB)";
+                    }
+                    std::cout << "\n";
                 }
                 ::munmap(ptr, sizeof(wattcurb::ipc::WattCurbSharedState));
                 ::close(fd);

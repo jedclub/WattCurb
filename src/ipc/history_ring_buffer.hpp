@@ -10,7 +10,7 @@ namespace wattcurb::ipc {
 
 constexpr const char* HISTORY_SHM_PATH = "/dev/shm/wattcurb_history.shm";
 
-// Implements REF-REQ-059 & REF-ARCH-035: 32-Byte Packed History Point
+// Implements REF-REQ-059, REF-REQ-129 & REF-ARCH-035, REF-ARCH-076: 32-Byte Packed History Point
 struct alignas(32) HistoryPoint {
     uint64_t timestamp_sec{0};
     uint32_t total_system_mw{0};
@@ -23,7 +23,10 @@ struct alignas(32) HistoryPoint {
     uint8_t  power_profile_mode{0}; // 0=Perf, 1=Balanced, 2=Save, 3=Ultra
     uint8_t  cstate_c3_percent{0};
     uint8_t  active_mitigations{0};
-    uint8_t  reserved[7]{0};
+    uint8_t  reserved[1]{0};
+    uint16_t mem_used_mb{0};        // REF-REQ-129: System memory used (MB)
+    uint16_t swap_used_mb{0};       // REF-REQ-129: System swap used (MB)
+    uint16_t top_proc_pss_mb{0};    // REF-REQ-129: Top process PSS (MB)
 };
 static_assert(sizeof(HistoryPoint) == 32, "HistoryPoint must be exactly 32 bytes");
 static_assert(std::is_trivially_copyable_v<HistoryPoint>, "HistoryPoint must be TriviallyCopyable");
