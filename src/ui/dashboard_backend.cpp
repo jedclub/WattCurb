@@ -251,6 +251,13 @@ bool DashboardBackend::ingestTelemetryJson(const std::string& resp) noexcept {
         disk_write_mb_s_ = obj.value("disk_write_mb_s").toDouble(0.1);
         aspm_policy_ = obj.value("aspm_policy").toString("powersave");
 
+        // Implements REF-REQ-132: Ingest full-spectrum system RAM & Swap metrics
+        mem_total_mb_ = obj.value("mem_total_mb").toInt(16384);
+        mem_used_mb_ = obj.value("mem_used_mb").toInt(4096);
+        mem_avail_mb_ = obj.value("mem_avail_mb").toInt(12288);
+        swap_total_mb_ = obj.value("swap_total_mb").toInt(8192);
+        swap_used_mb_ = obj.value("swap_used_mb").toInt(0);
+
         // Power Profile Mode Coherence (REF-REQ-091, REF-ARCH-068)
         if (obj.contains("profile_mode")) {
             int p_mode = obj.value("profile_mode").toInt(-1);
@@ -333,6 +340,9 @@ bool DashboardBackend::ingestTelemetryJson(const std::string& resp) noexcept {
             map[QStringLiteral("wakeupsSec")] = p.value("wakeups_sec").toInteger(0);
             map[QStringLiteral("timerslackNs")] = p.value("timerslack_ns").toInteger(50000);
             map[QStringLiteral("vramMb")] = p.value("vram_mb").toDouble(0.0);
+            // Implements REF-REQ-132: Extract process PSS & RSS memory metrics
+            map[QStringLiteral("pssMb")] = p.value("pss_mb").toInt(0);
+            map[QStringLiteral("rssMb")] = p.value("rss_mb").toInt(0);
             map[QStringLiteral("ioMbSec")] = p.value("io_mb_s").toDouble(0.0);
             map[QStringLiteral("minfltSec")] = p.value("minflt_s").toInteger(0);
             map[QStringLiteral("majfltSec")] = p.value("majflt_s").toInteger(0);
@@ -405,6 +415,26 @@ void DashboardBackend::updateFallbackTelemetry() noexcept {
     nvme_drain_w_ = std::clamp(rem_w * 0.15, 0.3, 1.5);
     cstate_c3_ = latest_state_.cstate_c3_percent;
 
+    // Implements REF-REQ-132: Fallback system memory metrics from /proc/meminfo
+    std::ifstream mem_f("/proc/meminfo");
+    if (mem_f.is_open()) {
+        std::string line;
+        uint64_t tot_kb = 0, avail_kb = 0, sw_tot_kb = 0, sw_free_kb = 0;
+        while (std::getline(mem_f, line)) {
+            if (line.rfind("MemTotal:", 0) == 0) std::sscanf(line.c_str(), "MemTotal: %lu", &tot_kb);
+            else if (line.rfind("MemAvailable:", 0) == 0) std::sscanf(line.c_str(), "MemAvailable: %lu", &avail_kb);
+            else if (line.rfind("SwapTotal:", 0) == 0) std::sscanf(line.c_str(), "SwapTotal: %lu", &sw_tot_kb);
+            else if (line.rfind("SwapFree:", 0) == 0) std::sscanf(line.c_str(), "SwapFree: %lu", &sw_free_kb);
+        }
+        if (tot_kb > 0) {
+            mem_total_mb_ = static_cast<int>(tot_kb / 1024);
+            mem_used_mb_ = static_cast<int>((tot_kb > avail_kb ? tot_kb - avail_kb : 0) / 1024);
+            mem_avail_mb_ = static_cast<int>(avail_kb / 1024);
+            swap_total_mb_ = static_cast<int>(sw_tot_kb / 1024);
+            swap_used_mb_ = static_cast<int>((sw_tot_kb > sw_free_kb ? sw_tot_kb - sw_free_kb : 0) / 1024);
+        }
+    }
+
     // Fallback process list from SHM culprits if socket query was not yet active
     if (process_list_.isEmpty()) {
         QVariantList fallback_list;
@@ -419,7 +449,9 @@ void DashboardBackend::updateFallbackTelemetry() noexcept {
                 m["gpuWatts"] = 0.0;
                 m["dramWatts"] = w * 0.2;
                 m["ioWakeWatts"] = w * 0.1;
-                m["pssMb"] = 120 + i * 80;
+                // REF-REQ-129, REF-REQ-132: Use SHM Seqlock PSS & RSS metrics
+                m["pssMb"] = (latest_state_.culprits[i].pss_mb > 0) ? static_cast<int>(latest_state_.culprits[i].pss_mb) : (120 + i * 80);
+                m["rssMb"] = (latest_state_.culprits[i].rss_mb > 0) ? static_cast<int>(latest_state_.culprits[i].rss_mb) : (150 + i * 90);
                 m["tier"] = latest_state_.culprits[i].tier;
                 m["cstate"] = (w >= 0.25) ? QStringLiteral("C0") : QStringLiteral("C1");
                 m["domain"] = QStringLiteral("CPU Compute");

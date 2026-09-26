@@ -39,6 +39,15 @@ class DashboardBackend : public QObject {
     Q_PROPERTY(double cstateC2Percent READ cstateC2Percent NOTIFY telemetryChanged)
     Q_PROPERTY(double cstateC3Percent READ cstateC3Percent NOTIFY telemetryChanged)
 
+    // System Memory & Swap Telemetry (REF-REQ-132)
+    Q_PROPERTY(int memTotalMb READ memTotalMb NOTIFY telemetryChanged)
+    Q_PROPERTY(int memUsedMb READ memUsedMb NOTIFY telemetryChanged)
+    Q_PROPERTY(int memAvailMb READ memAvailMb NOTIFY telemetryChanged)
+    Q_PROPERTY(int swapTotalMb READ swapTotalMb NOTIFY telemetryChanged)
+    Q_PROPERTY(int swapUsedMb READ swapUsedMb NOTIFY telemetryChanged)
+    Q_PROPERTY(double memUsedPercent READ memUsedPercent NOTIFY telemetryChanged)
+    Q_PROPERTY(QString memorySummaryString READ memorySummaryString NOTIFY telemetryChanged)
+
     // GPU & Display Subsystems
     Q_PROPERTY(double gpuDrainWatts READ gpuDrainWatts NOTIFY telemetryChanged)
     Q_PROPERTY(int gpuLoadPercent READ gpuLoadPercent NOTIFY telemetryChanged)
@@ -140,6 +149,21 @@ public:
     double cstateC1Percent() const noexcept { return cstate_c1_; }
     double cstateC2Percent() const noexcept { return cstate_c2_; }
     double cstateC3Percent() const noexcept;
+
+    // System Memory Getters (REF-REQ-132)
+    int memTotalMb() const noexcept { return mem_total_mb_; }
+    int memUsedMb() const noexcept { return mem_used_mb_; }
+    int memAvailMb() const noexcept { return mem_avail_mb_; }
+    int swapTotalMb() const noexcept { return swap_total_mb_; }
+    int swapUsedMb() const noexcept { return swap_used_mb_; }
+    double memUsedPercent() const noexcept {
+        return (mem_total_mb_ > 0) ? (static_cast<double>(mem_used_mb_) / mem_total_mb_ * 100.0) : 0.0;
+    }
+    QString memorySummaryString() const {
+        double used_gb = mem_used_mb_ / 1024.0;
+        double tot_gb = mem_total_mb_ / 1024.0;
+        return QString::asprintf("%.1fG / %.1fG (%.0f%%)", used_gb, tot_gb, memUsedPercent());
+    }
 
     double gpuDrainWatts() const noexcept;
     int gpuLoadPercent() const noexcept { return gpu_load_pct_; }
@@ -282,6 +306,13 @@ private:
     double disk_read_mb_s_{0.0};
     double disk_write_mb_s_{0.1};
     QString aspm_policy_{"powersave"};
+
+    // System Memory & Swap Telemetry Cache (REF-REQ-132)
+    int mem_total_mb_{16384};
+    int mem_used_mb_{4096};
+    int mem_avail_mb_{12288};
+    int swap_total_mb_{8192};
+    int swap_used_mb_{0};
 
     QVariantList process_list_{};
 

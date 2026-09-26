@@ -63,7 +63,12 @@ bool LowMemoryNotifier::notify(uint8_t level, uint64_t now_sec) noexcept {
         now_sec = get_monotonic_sec();
     }
 
-    // Rate-limit identical signals to avoid spamming recipient process main loops
+    // Do not continuously spam D-Bus or audit logs if memory remains at Normal (0)
+    if (level == LEVEL_NORMAL && m_last_level == LEVEL_NORMAL) {
+        return true;
+    }
+
+    // Rate-limit identical warning signals to avoid spamming recipient process main loops
     if (level == m_last_level && (now_sec - m_last_emit_sec) < REPEAT_COOLDOWN_SEC) {
         return false;
     }

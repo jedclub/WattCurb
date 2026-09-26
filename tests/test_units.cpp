@@ -4003,6 +4003,79 @@ void test_ultimate_performance_unleash_actuation() {
 
     std::cout << " [PASS] test_ultimate_performance_unleash_actuation (REF-TEST-056: C0 Clamp, GPU 3D, APST 0, Rollback verified)\n";
 }
+
+// Implements REF-TEST-086, REF-REQ-132 & REF-ARCH-079: Matrix Dashboard Memory Telemetry Ingestion Verification
+void test_matrix_dashboard_memory_telemetry_visualization() {
+    using namespace wattcurb::ui;
+
+    std::cout << "\n--- [REF-TEST-086] Matrix Dashboard System & Process Memory Telemetry Visualization (REF-REQ-132, REF-ARCH-079) ---\n";
+
+    int fake_argc = 1;
+    char fake_name[] = "wattcurb_tests";
+    char* fake_argv[] = { fake_name, nullptr };
+    QCoreApplication* app = QCoreApplication::instance();
+    std::unique_ptr<QCoreApplication> own_app;
+    if (!app) {
+        own_app = std::make_unique<QCoreApplication>(fake_argc, fake_argv);
+    }
+
+    DashboardBackend backend;
+
+    // 1. Construct JSON containing full system RAM, Swap and process PSS/RSS fields
+    std::string json = R"({
+  "system_watts": 11.20,
+  "battery_pct": 80,
+  "battery_state": 2,
+  "cpu_package_w": 5.40,
+  "cpu_core_w": 4.10,
+  "cpu_uncore_w": 1.30,
+  "cpu_dram_w": 0.95,
+  "mem_total_mb": 16384,
+  "mem_used_mb": 7420,
+  "mem_avail_mb": 8964,
+  "swap_total_mb": 8192,
+  "swap_used_mb": 512,
+  "processes": [
+    {
+      "pid": 48310,
+      "comm": "agy",
+      "uid": 1000,
+      "total_w": 3.86,
+      "cpu_w": 2.10,
+      "gpu_w": 0.05,
+      "dram_w": 0.02,
+      "pss_mb": 358,
+      "rss_mb": 412,
+      "tier": 1,
+      "cstate": "C0",
+      "domain": "WiFi Radio CAM",
+      "mechanism": "Active Network Sockets"
+    }
+  ]
+})";
+
+    bool ok = backend.ingestTelemetryJson(json);
+    assert(ok && "DashboardBackend::ingestTelemetryJson must parse memory telemetry JSON");
+
+    // 2. Validate System Memory Getters
+    assert(backend.memTotalMb() == 16384 && "memTotalMb must be 16384 MB");
+    assert(backend.memUsedMb() == 7420 && "memUsedMb must be 7420 MB");
+    assert(backend.memAvailMb() == 8964 && "memAvailMb must be 8964 MB");
+    assert(backend.swapTotalMb() == 8192 && "swapTotalMb must be 8192 MB");
+    assert(backend.swapUsedMb() == 512 && "swapUsedMb must be 512 MB");
+    assert(backend.memUsedPercent() > 45.0 && backend.memUsedPercent() < 46.0 && "memUsedPercent must be ~45.3%");
+
+    // 3. Validate Process PSS and RSS Ingestion
+    QVariantList procs = backend.processList();
+    assert(!procs.isEmpty() && "processList must not be empty");
+    QVariantMap p0 = procs.first().toMap();
+    assert(p0.contains("pssMb") && "process item must contain pssMb");
+    assert(p0.value("pssMb").toInt() == 358 && "process pssMb must match 358 MB");
+    assert(p0.contains("rssMb") && "process item must contain rssMb");
+    assert(p0.value("rssMb").toInt() == 412 && "process rssMb must match 412 MB");
+
+    std::cout << " [PASS] test_matrix_dashboard_memory_telemetry_visualization (REF-TEST-086: System RAM/Swap & Process PSS/RSS ingestion verified)\n";
+}
 #endif
 
 // Implements REF-TEST-058 & REF-REQ-095: Watt-Reactive Procedural Tray Icon Oracle Gate
@@ -6319,6 +6392,7 @@ int main() {
     test::test_process_cstate_affinity_and_badges();
     test::test_bi_directional_power_profile_coherence();
     test::test_ultimate_performance_unleash_actuation();
+    test::test_matrix_dashboard_memory_telemetry_visualization();
 #endif
     test::test_watt_reactive_tray_icon();
     test::test_audio_continuity_guarantee();

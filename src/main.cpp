@@ -322,9 +322,11 @@ int query_daemon_history() {
     return 0;
 }
 
-int query_daemon_logs() {
+int query_daemon_logs(size_t lines = 60) {
     std::cout << "\033[1m[WattCurb Event-Driven Audit Journal (REF-REQ-059)]\033[0m\n";
-    int ret = ::system("journalctl -u wattcurb.service -n 25 --no-pager 2>/dev/null");
+    char cmd[128];
+    std::snprintf(cmd, sizeof(cmd), "journalctl -u wattcurb.service -n %zu --no-pager 2>/dev/null", lines);
+    int ret = ::system(cmd);
     if (ret != 0) {
         int log_fd = ::open("/var/log/wattcurb/audit.log", O_RDONLY | O_CLOEXEC);
         if (log_fd >= 0) {
@@ -418,7 +420,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (logs_query) {
-        return query_daemon_logs();
+        return query_daemon_logs(top_n != 15 ? top_n : 60);
     }
 
     if (battery_report_mode) {

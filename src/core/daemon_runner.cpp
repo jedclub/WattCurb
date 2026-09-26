@@ -869,6 +869,22 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
         ss << "  \"battery_full_wh\": " << hw.battery_energy_full_wh << ",\n";
         ss << "  \"battery_now_wh\": " << hw.battery_energy_now_wh << ",\n";
         ss << "  \"aspm_policy\": \"" << (hw.aspm_policy.empty() ? "powersave" : hw.aspm_policy.c_str()) << "\",\n";
+        // Implements REF-REQ-132: Export full-spectrum system RAM & Swap metrics to Matrix Dashboard
+        policy::MemoryPressureSample mem_s = memory_guard_.last_sample();
+        if (mem_s.mem_total_kb == 0) {
+            (void)memory_guard_.sample(mem_s);
+        }
+        uint64_t mem_tot_mb = mem_s.mem_total_kb / 1024;
+        uint64_t mem_avail_mb = mem_s.mem_available_kb / 1024;
+        uint64_t mem_used_mb = (mem_s.mem_total_kb > mem_s.mem_available_kb) ? ((mem_s.mem_total_kb - mem_s.mem_available_kb) / 1024) : 0;
+        uint64_t swap_tot_mb = mem_s.swap_total_kb / 1024;
+        uint64_t swap_used_mb = (mem_s.swap_total_kb > mem_s.swap_free_kb) ? ((mem_s.swap_total_kb - mem_s.swap_free_kb) / 1024) : 0;
+
+        ss << "  \"mem_total_mb\": " << mem_tot_mb << ",\n";
+        ss << "  \"mem_used_mb\": " << mem_used_mb << ",\n";
+        ss << "  \"mem_avail_mb\": " << mem_avail_mb << ",\n";
+        ss << "  \"swap_total_mb\": " << swap_tot_mb << ",\n";
+        ss << "  \"swap_used_mb\": " << swap_used_mb << ",\n";
         ss << "  \"profile_mode\": " << static_cast<int>(cached_report_.mitigation_status.current_profile) << ",\n";
         ss << "  \"active_mitigations\": " << cached_report_.mitigation_status.feature_summary_count << ",\n";
         ss << "  \"wakeups_per_sec\": " << cached_report_.total_system_wakeups_per_sec << ",\n";
@@ -892,6 +908,7 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
             ss << "      \"wifi_w\": " << p.wifi_attributed_watts << ",\n";
             ss << "      \"wdi_score\": " << p.wdi_score << ",\n";
             ss << "      \"pss_mb\": " << (p.pss_kib / 1024) << ",\n";
+            ss << "      \"rss_mb\": " << (p.rss_kib / 1024) << ",\n";
             ss << "      \"tier\": " << static_cast<int>(p.safety_tier) << ",\n";
             ss << "      \"cstate\": \"" << (p.cstate_affinity.empty() ? "C3" : p.cstate_affinity.c_str()) << "\",\n";
             ss << "      \"cpu_core\": " << p.cpu_core << ",\n";

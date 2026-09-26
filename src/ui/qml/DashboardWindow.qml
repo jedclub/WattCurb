@@ -294,7 +294,7 @@ ApplicationWindow {
                 // CARD 1: CPU & Memory Subsystem (RAPL) + Real-Time Sparkline
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 220
+                    Layout.preferredHeight: 252
                     color: cpuMa.containsMouse ? "#161b24" : root.bgPanel
                     border.color: cpuMa.containsMouse ? root.colCyan : root.borderPanel
                     radius: 6
@@ -356,6 +356,36 @@ ApplicationWindow {
                             }
                             Text { text: "Freq: " + backend.cpuFreqMhz + " MHz (" + backend.cpuGovernor + ")"; color: root.textMain; font.pixelSize: 12; font.family: "Monospace" }
                             Text { text: "Fan: " + backend.fanRpm + " RPM"; color: root.textDim; font.pixelSize: 12 }
+                        }
+
+                        // System Memory (RAM & Swap) Telemetry (REF-REQ-132)
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            Text {
+                                text: "🧠 RAM: " + (backend.memUsedMb >= 1024 ? (backend.memUsedMb / 1024.0).toFixed(1) + "G" : backend.memUsedMb + "M") +
+                                      " / " + (backend.memTotalMb / 1024.0).toFixed(1) + "G (" + backend.memUsedPercent.toFixed(0) + "%)"
+                                color: backend.memUsedPercent > 85 ? root.colRed : (backend.memUsedPercent > 70 ? root.colOrange : root.colCyan)
+                                font.pixelSize: 12
+                                font.bold: true
+                                font.family: "Monospace"
+                            }
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 6; radius: 3; color: "#222a36"
+                                Rectangle {
+                                    width: parent.width * Math.min(1.0, backend.memUsedPercent / 100.0)
+                                    height: parent.height; radius: 3
+                                    color: backend.memUsedPercent > 85 ? root.colRed : (backend.memUsedPercent > 70 ? root.colOrange : root.colCyan)
+                                }
+                            }
+                            Text {
+                                text: "Swap: " + (backend.swapUsedMb >= 1024 ? (backend.swapUsedMb / 1024.0).toFixed(1) + "G" : backend.swapUsedMb + "M") +
+                                      " / " + (backend.swapTotalMb / 1024.0).toFixed(1) + "G"
+                                color: backend.swapUsedMb > 1024 ? root.colOrange : root.textDim
+                                font.pixelSize: 11
+                                font.family: "Monospace"
+                            }
                         }
 
                         // [GRAPH] Real-Time CPU Power Sparkline Graph
@@ -1680,7 +1710,12 @@ ApplicationWindow {
 
             RowLayout {
                 Layout.fillWidth: true
-                Text { text: "정격 PSS: " + (root.hoverData ? root.hoverData["pssMb"] : 0) + " MB"; color: root.textMain; font.pixelSize: 11; font.family: "Monospace" }
+                Text {
+                    text: "정격 PSS: " + (root.hoverData ? root.hoverData["pssMb"] : 0) + " MB (RSS: " + (root.hoverData && root.hoverData["rssMb"] !== undefined ? root.hoverData["rssMb"] : 0) + " MB)"
+                    color: root.textMain
+                    font.pixelSize: 11
+                    font.family: "Monospace"
+                }
                 Item { Layout.fillWidth: true }
                 Text { text: "VRAM: " + (root.hoverData ? (root.hoverData["vramMb"] ? root.hoverData["vramMb"].toFixed(0) : "0") : "0") + " MB"; color: root.colGreen; font.pixelSize: 11; font.family: "Monospace" }
                 Item { Layout.fillWidth: true }
