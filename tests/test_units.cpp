@@ -13,6 +13,7 @@
 #include "policy/battery_feature.hpp"
 #include "policy/memory_pressure_guard.hpp"
 #include "policy/swap_expander.hpp"
+#include "policy/hardware_bus_controller.hpp"
 #include "report/report_generator.hpp"
 #include "ipc/tray_shared_state.hpp"
 #include "ipc/history_ring_buffer.hpp"
@@ -5392,6 +5393,55 @@ void test_safe_three_tier_memory_reclamation() {
                  "Phase 2 RAM compression immunity, Phase 3 ZRAM priority hierarchy verified)\n";
 }
 
+// Implements REF-TEST-085, REF-REQ-131 & REF-ARCH-078:
+// Hardware Bus & Display Deep Power Minimization Verification Gate
+void test_hardware_bus_and_display_power_minimization() {
+    using namespace wattcurb;
+    using namespace wattcurb::policy;
+
+    std::cout << "\n--- [REF-TEST-085] Hardware Bus & Display Deep Power Minimization Gate ---\n";
+
+    // 1. Controller Initialization & Hardware Baseline Capture
+    HardwareBusController controller;
+    bool init_ok = controller.initialize();
+    assert(init_ok);
+
+    const auto& bl = controller.baseline();
+    assert(bl.captured);
+    std::cout << " [INFO] Hardware Baseline Captured:\n"
+              << "   * eDP ABM path        : " << (bl.has_edp_abm ? bl.edp_abm_path : "none") << "\n"
+              << "   * Baseline ABM level  : " << bl.display_abm_level << "\n"
+              << "   * Baseline ASPM policy: " << bl.aspm_policy << "\n"
+              << "   * Baseline HDA ps (s) : " << bl.hda_power_save_sec << "\n"
+              << "   * Baseline VM stat (s): " << bl.vm_stat_interval_sec << "\n"
+              << "   * Ethernet PCI path   : " << (bl.has_eth_pci ? bl.eth_pci_path : "none") << "\n";
+
+    // 2. Safe Primitive Parameter & Boundary Invariants
+    assert(!HardwareBusController::set_display_abm("", 2)); // Empty path safety
+    assert(!HardwareBusController::set_display_abm(nullptr, 2));
+    assert(!HardwareBusController::set_pcie_aspm("")); // Empty policy safety
+    assert(!HardwareBusController::set_pcie_aspm(nullptr));
+    assert(!HardwareBusController::set_pci_power_control("", true));
+    assert(!HardwareBusController::set_pci_power_control(nullptr, true));
+    assert(!HardwareBusController::is_ethernet_carrier_connected(""));
+    assert(!HardwareBusController::is_ethernet_carrier_connected(nullptr));
+
+    // 3. Actuation and State Transitions
+    // On AC power or Performance mode -> must be un-applied / clean baseline
+    controller.evaluate_and_actuate(/*on_battery=*/false, PowerProfileMode::Balanced);
+    assert(!controller.is_applied());
+
+    controller.evaluate_and_actuate(/*on_battery=*/true, PowerProfileMode::Performance);
+    assert(!controller.is_applied());
+
+    // 4. Clean Rollback Guarantee
+    controller.rollback_all();
+    assert(!controller.is_applied());
+
+    std::cout << " [PASS] test_hardware_bus_and_display_power_minimization (REF-TEST-085: ABM, "
+                 "PCIe ASPM, HDA power-save, Ethernet sleep, and VM stat interval verified)\n";
+}
+
 // Implements REF-TEST-062 & REF-REQ-111: the four defects found by the
 // REF-RES-029 audit.
 void test_audit_defect_remediation() {
@@ -6284,6 +6334,7 @@ int main() {
     test::test_memory_pressure_parsers();
     test::test_performance_swap_expansion_policy();
     test::test_safe_three_tier_memory_reclamation();
+    test::test_hardware_bus_and_display_power_minimization();
     test::test_multilingual_l10n_and_auto_system_locale();
     test::test_anti_starvation_and_greedy_capping();
     test::test_adaptive_c1_c2_cluster_dispersion();

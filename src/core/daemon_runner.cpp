@@ -186,6 +186,7 @@ DaemonRunner::~DaemonRunner() {
     memory_guard_.shutdown();
 
     window_governor_.rollback_all();
+    hardware_bus_.rollback_all();
     policy::MitigationEngine::restore_hardware_baseline();
     cleanup_descriptors();
 }
@@ -330,6 +331,7 @@ bool DaemonRunner::initialize() {
 
     // REF-REQ-055: Capture exact hardware baseline state before any actuation
     policy::MitigationEngine::capture_hardware_baseline();
+    hardware_bus_.initialize(); // REF-REQ-131: Capture deep hardware bus & display baseline
 
     // Load persisted profile mode if available (REF-REQ-053)
     PowerProfileMode initial_mode = PowerProfileMode::Balanced;
@@ -675,6 +677,10 @@ void DaemonRunner::process_observation_cycle() {
     // REF-REQ-128: Progressive C-State Governor evaluation for minimized windows
     uint64_t now_sec = static_cast<uint64_t>(std::time(nullptr));
     window_governor_.evaluate_hysteresis(now_sec, policy::MitigationEngine::effective_profile());
+
+    // REF-REQ-131: Deep Hardware Bus, Display ABM, and Peripheral Power Minimization
+    hardware_bus_.evaluate_and_actuate(hw_prev_.is_discharging,
+                                       policy::MitigationEngine::effective_profile());
 }
 
 int DaemonRunner::run() {

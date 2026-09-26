@@ -110,6 +110,7 @@ set(WATTCURB_LIB_SOURCES
     src/policy/low_memory_notifier.cpp
     src/policy/process_pageout_actuator.cpp
     src/policy/swap_tier_manager.cpp
+    src/policy/hardware_bus_controller.cpp
     src/report/report_generator.cpp
     src/report/battery_history_analyzer.cpp
 )
