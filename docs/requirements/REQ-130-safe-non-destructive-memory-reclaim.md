@@ -11,34 +11,46 @@ WattCurb must shift from reactive killing to **proactive, safe, non-destructive 
 
 ---
 
-## 2. Functional Requirements
+## 2. Functional Requirements: The Strict Three-Phase Hierarchy (GC → Compression → Swap)
 
-### 2.1 REF-REQ-130.1: Cooperative D-Bus LowMemoryMonitor Notification
-- The daemon must implement or trigger the desktop standard `org.freedesktop.LowMemoryMonitor` D-Bus system bus interface:
-  - **Path**: `/org/freedesktop/LowMemoryMonitor`
-  - **Interface**: `org.freedesktop.LowMemoryMonitor`
-  - **Signal**: `LowMemoryWarning(uint8 level)`
-- **Threshold Escalation**:
-  - **Level 100 (Moderate)**: Emitted when system Available Memory drops below 18% or PSI memory `some.avg10` > 8.0. Prompts compliant applications (Chromium, Firefox, GTK4, WebKit) to drop ephemeral image/font caches and run minor GC.
-  - **Level 255 (Critical)**: Emitted when system Available Memory drops below 8% or PSI memory `full.avg10` > 15.0. Prompts compliant applications to perform major full GC, discard inactive browser tab renderers, and invoke `malloc_trim(0)`.
-- If another daemon (e.g. Canonical's `low-memory-monitor`) already owns the D-Bus well-known name, WattCurb must detect this gracefully and avoid registration conflicts.
+To guarantee minimum I/O latency, zero disk wear, and maximum user responsiveness, memory reclamation MUST strictly execute in the following sequential order:
 
-### 2.2 REF-REQ-130.2: Targeted `process_madvise(MADV_PAGEOUT)` for Minimized Windows
-- When window state transitions to minimized or inactive ([`REF-REQ-128`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-128-window-minimized-progressive-cstate-governor.md)):
-  - WattCurb opens a `pidfd` via `pidfd_open(pid, 0)`.
-  - Parses the target's `/proc/<pid>/maps` to identify writable, anonymous VMA ranges (excluding executable code or locked pages).
-  - Issues `process_madvise(pidfd, iov, vlen, MADV_PAGEOUT, 0)`.
-- **Non-Destructive Invariant**: The process continues running seamlessly. Paged-out memory is compressed into `zram` and transparently paged back in upon user re-activation with sub-millisecond latency.
+```
+[Phase 1: In-App GC & Trimming]  ──(If insufficient)──>  [Phase 2: In-Memory Compression]  ──(If ZRAM saturated)──>  [Phase 3: Disk Swap Spillover]
+• Zero I/O, Zero Paging                                  • Zero Disk I/O, RAM-only (ZRAM zstd)                 • Fallback disk swapfile
+• Drop caches, V8/JS GC, malloc_trim                     • process_madvise(MADV_PAGEOUT) into ZRAM             • SwapExpander dynamic growth
+• D-Bus LowMemoryWarning (100/255)                        • Cold anonymous heap compaction                      • CFS CPU quota allocation brake
+```
 
-### 2.3 REF-REQ-130.3: Cgroup v2 `memory.reclaim` Interface Integration
-- Under severe memory pressure (Available Memory < 10%), the daemon issues targeted write requests to `/sys/fs/cgroup/<slice>/memory.reclaim`:
-  - Target: Background slices (`user.slice`, background services) up to 256 MiB per cycle.
-  - Exemption: The currently focused/active window cgroup is strictly exempted from direct reclamation.
+### 2.1 Phase 1 (First Priority): Cooperative In-App GC & Runtime Heap Trimming
+- **I/O Cost**: **0 Bytes (Absolute Zero Disk/Swap Activity)**
+- **Latency Impact**: Zero system stall (cooperative asynchronous application cleanups).
+- **Specification (REF-REQ-130.1)**:
+  - The daemon monitors PSI memory pressure and available memory capacity.
+  - When memory pressure first emerges (Available Memory < 20% or PSI memory `some.avg10` > 5.0), WattCurb triggers **Phase 1** before performing any paging or compression:
+    1. **D-Bus `LowMemoryWarning(100)` (Moderate)**: Emitted via `org.freedesktop.LowMemoryMonitor` system bus. Instructs Chromium, Firefox, WebKit, Electron, and GTK4 apps to flush decoded image caches, glyph tables, and idle buffers.
+    2. **D-Bus `LowMemoryWarning(255)` (Critical)**: Emitted if pressure persists (Available Memory < 14% or PSI memory `some.avg10` > 12.0). Instructs applications to invoke full Garbage Collection (V8 Major GC, JVM `System.gc()`), unload inactive tab renderers, and invoke `malloc_trim(0)`.
+    3. **Page Cache Trimming**: Writes clean-cache reclaim requests to cgroup v2 `memory.reclaim` (reclaiming clean filesystem cache pages without touching anonymous heap).
 
-### 2.4 REF-REQ-130.4: High-Performance Compressed In-Memory Swap Prioritization
-- The daemon inspects active swap devices (`/proc/swaps`):
-  - Ensures `/dev/zram0` (compressed in-memory swap using `zstd`) has higher priority than disk-backed swapfiles (e.g. priority 100 vs -1).
-  - Monitors zram saturation; when zram usage exceeds 85%, triggers secondary disk swap creation ([`REF-REQ-113`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-113-performance-mode-dynamic-swap-expansion.md)) without latency spikes.
+### 2.2 Phase 2 (Second Priority): High-Speed In-Memory Compression (ZRAM zstd)
+- **I/O Cost**: **Zero Disk I/O (RAM-to-RAM CPU Compression only)**
+- **Latency Impact**: < 5 microseconds (sub-page decompression at memory bus speed).
+- **Specification (REF-REQ-130.2)**:
+  - If Phase 1 GC does not release sufficient memory and Available Memory remains < 12%:
+    1. **Targeted Cold Anonymous Paging**: The daemon identifies minimized or background windows ([`REF-REQ-128`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-128-window-minimized-progressive-cstate-governor.md)) with large anonymous heaps.
+    2. Issues `process_madvise(pidfd, iov, vlen, MADV_PAGEOUT, 0)` targeting cold heap segments.
+    3. **Strict ZRAM Destination Invariant**: The daemon ensures `/dev/zram0` (compressed in RAM using `zstd` with priority 100) absorbs 100% of these paged-out anonymous pages.
+    4. **Zero Disk I/O Guarantee**: No data is written to NVMe/SATA SSDs during Phase 2; compressed pages remain in physical RAM at a 2.5x to 3.5x compression ratio.
+
+### 2.3 Phase 3 (Third Priority / Last Resort): Disk Swap Spillover & Safe Allocation Braking
+- **I/O Cost**: Disk I/O to secondary swapfile (NVMe/SSD).
+- **Latency Impact**: 1ms ~ 10ms.
+- **Specification (REF-REQ-130.3)**:
+  - Phase 3 is engaged **ONLY when In-Memory ZRAM is nearly exhausted** (ZRAM capacity utilization > 85% and Available Memory < 6%):
+    1. **Secondary Disk Swap Engagement**: Allows memory to spill over to the disk-backed swapfile (`/swap/swapfile`, priority -1).
+    2. **Dynamic Backing Store Expansion**: Coordinates with `SwapExpander` ([`REF-REQ-113`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-113-performance-mode-dynamic-swap-expansion.md)) to dynamically stage incremental swap files if disk swap is nearing capacity.
+    3. **Safe Allocation Rate Quota (Allocation Brake)**: If swap capacity is completely exhausted, the daemon applies a CFS bandwidth quota (`cpu.max = 20000 100000`, 20ms per 100ms) to the single largest runaway allocator process, capping its page fault and dirty page generation rate.
+    4. **Zero-Kill Guarantee**: Under no circumstances is `SIGKILL` or `SIGTERM` issued. The process remains alive and responsive.
 
 ---
 

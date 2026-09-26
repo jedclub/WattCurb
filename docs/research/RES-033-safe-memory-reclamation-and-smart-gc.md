@@ -85,47 +85,46 @@ Recent breakthroughs from **Meta (TMO/Senpai, ASPLOS '22)**, **Google (MGLRU, An
 
 ---
 
-## 4. Architectural Synthesis: The 5-Tier Safe Memory Recovery Ladder
+## 4. Architectural Synthesis: The 3-Phase Non-Destructive Memory Recovery Pipeline (GC → Compression → Swap)
 
-Based on empirical research across Meta, Android, and freedesktop standards, WattCurb should establish a **5-Tier Non-Destructive Safe Memory Escalation Ladder**:
+Based on empirical research across Meta, Android, and freedesktop standards, WattCurb organizes memory mitigation into three strict, ordered phases—prioritizing zero-I/O in-app cleanups first, followed by RAM-only compression, and utilizing disk swap only as an unavoidable last resort:
 
 ```
-[Normal State]
+[Normal State: MemAvail >= 20%, PSI <= 5%]
       │
-      ▼ (Pressure: MemAvail < 20% or PSI Memory avg10 > 5%)
-┌─────────────────────────────────────────────────────────────┐
-│ Tier 1: Cooperative D-Bus LowMemoryMonitor (Moderate = 100) │
-│ - Broadcast org.freedesktop.LowMemoryMonitor.LowMemoryWarning│
-│ - Triggers in-app cache pruning & mild GC in browsers/apps  │
-└─────────────────────────────────────────────────────────────┘
+      ▼ (Pressure Detected: MemAvail < 20% or PSI Memory avg10 > 5%)
+═══════════════════════════════════════════════════════════════════════════════
+  PHASE 1: IN-APP GC & CLEAN TRIMMING (Zero I/O, Zero Disk/Swap Activity)
+═══════════════════════════════════════════════════════════════════════════════
+  1-A. Cooperative D-Bus LowMemoryMonitor (Moderate = 100)
+       - Broadcast org.freedesktop.LowMemoryMonitor.LowMemoryWarning(100)
+       - Triggers in-app cache pruning (images, fonts, render buffers) in Chromium/GTK4
+  1-B. Critical In-App GC & Page Cache Trimming (Critical = 255)
+       - Broadcast LowMemoryWarning(255) -> V8/JS Major GC, idle tab discard, malloc_trim(0)
+       - Clean page cache trimming via cgroup v2 memory.reclaim
       │
-      ▼ (Pressure: MemAvail < 12% or PSI Memory avg10 > 15%)
-┌─────────────────────────────────────────────────────────────┐
-│ Tier 2: Targeted process_madvise(MADV_PAGEOUT) on Minimized │
-│ - Target non-focused / minimized windows (REF-REQ-128)      │
-│ - Pushes cold anonymous pages into high-speed zram (zstd)   │
-└─────────────────────────────────────────────────────────────┘
+      ▼ (Insufficient: MemAvail < 12% or PSI Memory avg10 > 15%)
+═══════════════════════════════════════════════════════════════════════════════
+  PHASE 2: HIGH-SPEED IN-MEMORY COMPRESSION (RAM-Only, Zero Disk I/O)
+═══════════════════════════════════════════════════════════════════════════════
+  2-A. Targeted process_madvise(MADV_PAGEOUT) into ZRAM
+       - Target non-focused / minimized windows (REF-REQ-128)
+       - Pushes cold anonymous pages into high-speed /dev/zram0 (zstd compression)
+       - Zero flash write, sub-5µs RAM decompression on window refocus
+  2-B. MGLRU Proactive Cold-Generation Compaction
+       - Reclaims coldest generation into ZRAM buffer pool
       │
-      ▼ (Pressure: MemAvail < 8% or PSI Memory avg10 > 25%)
-┌─────────────────────────────────────────────────────────────┐
-│ Tier 3: Cgroup-Level memory.reclaim & Critical D-Bus (255)  │
-│ - Broadcast LowMemoryWarning(level = 255) (Major V8/JVM GC) │
-│ - Echo proactive reclaim target (e.g. 256M) to user.slice   │
-└─────────────────────────────────────────────────────────────┘
-      │
-      ▼ (Pressure: MemAvail < 5% or Swap Free < 10%)
-┌─────────────────────────────────────────────────────────────┐
-│ Tier 4: Dynamic Fast In-Memory zram Expansion               │
-│ - Expand zram capacity on-the-fly or attach secondary pool  │
-│ - Zero disk I/O, zero NVMe wear, 3x effective compression   │
-└─────────────────────────────────────────────────────────────┘
-      │
-      ▼ (Pressure: Extreme saturation, Swap fully exhausted)
-┌─────────────────────────────────────────────────────────────┐
-│ Tier 5: Non-Destructive CPU Allocation Rate Quota (cpu.max) │
-│ - Cap CPU quota of runaway allocators (10-20ms per 100ms)    │
-│ - Prevents dirty page generation without SIGKILLing process │
-└─────────────────────────────────────────────────────────────┘
+      ▼ (ZRAM Full: ZRAM usage > 85% & MemAvail < 5%)
+═══════════════════════════════════════════════════════════════════════════════
+  PHASE 3: DISK SWAP SPILLOVER & ALLOCATION BRAKING (Last Resort)
+═══════════════════════════════════════════════════════════════════════════════
+  3-A. Secondary Disk Swap Spillover
+       - Overflow pages route to disk-backed swapfile (/swap/swapfile, priority -1)
+  3-B. Dynamic Swapfile Expansion (SwapExpander, REF-REQ-113)
+       - Dynamically stages incremental swapfile chunks to prevent kernel panic
+  3-C. Non-Destructive CPU Allocation Rate Quota (cpu.max)
+       - Cap CPU quota of runaway allocators (10-20ms per 100ms)
+       - Halts runaway dirty page creation without killing processes (Zero Kill)
 ```
 
 This 5-Tier pipeline guarantees that memory is aggressively freed, compressed, and trimmed while **strictly preserving the Zero-Kill and Non-Halting Invariant** (`REF-REQ-044`).

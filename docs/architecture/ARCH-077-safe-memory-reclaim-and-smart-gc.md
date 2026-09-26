@@ -1,31 +1,25 @@
-# REF-ARCH-077: Non-Destructive Memory Recovery & Smart GC Architecture
-
-## 1. Architectural Overview
+## 1. Architectural Overview: The 3-Tier Non-Destructive Memory Pipeline
 
 ```
-                            ┌───────────────────────────────────────────────┐
-                            │   WattCurb Memory Pressure Supervisor         │
-                            │   (Event-Driven PSI & /proc/meminfo Monitor)  │
-                            └───────────────────────┬───────────────────────┘
-                                                    │
-                ┌───────────────────────────────────┼───────────────────────────────────┐
-                ▼                                   ▼                                   ▼
-   [Tier 1: Cooperative GC]            [Tier 2: Proactive Pageout]        [Tier 3: Cgroup Reclaim]
- ┌─────────────────────────────┐     ┌─────────────────────────────┐    ┌─────────────────────────────┐
- │ LowMemoryNotifier (D-Bus)   │     │ ProcessPageoutActuator      │    │ CgroupMemoryReclaimer       │
- │ - Broadcast D-Bus Signal    │     │ - pidfd_open(target_pid)    │    │ - Write to target slice     │
- │   LowMemoryWarning(100/255) │     │ - process_madvise()         │    │   memory.reclaim            │
- │ - In-app cache flush & GC   │     │   with MADV_PAGEOUT         │    │ - Reclaim unmapped pages    │
- └─────────────────────────────┘     └─────────────────────────────┘    └─────────────────────────────┘
-                │                                   │                                   │
-                ▼                                   ▼                                   ▼
- ┌─────────────────────────────┐     ┌─────────────────────────────┐    ┌─────────────────────────────┐
- │ Chromium, Firefox, WebKit,  │     │ Kernel Swap Subsystem       │    │ High-Speed In-Memory        │
- │ Electron, GTK4 Applications │     │ (Transparent Minor Faults)  │    │ /dev/zram0 (zstd Comp.)     │
- └─────────────────────────────┘     └─────────────────────────────┘    └─────────────────────────────┘
+                                 [Memory Saturation Signal (PSI / MemAvailable)]
+                                                        │
+                   ┌────────────────────────────────────┼────────────────────────────────────┐
+                   ▼                                    ▼                                    ▼
+       [PHASE 1: IN-APP GC & TRIM]            [PHASE 2: RAM COMPRESSION]            [PHASE 3: DISK SWAP FALLBACK]
+   ┌─────────────────────────────────┐   ┌─────────────────────────────────┐   ┌─────────────────────────────────┐
+   │ LowMemoryNotifier (D-Bus)       │   │ ProcessPageoutActuator          │   │ SwapTierManager & Expander      │
+   │ - Broadcast LowMemoryWarning    │   │ - process_madvise(PAGEOUT)      │   │ - Spillover to /swap/swapfile   │
+   │   (Level 100 Moderate/255 Crit) │   │ - Target minimized/idle windows │   │   only when ZRAM > 85% full     │
+   │ - Chromium/Electron/Firefox GC  │   │ - Force into /dev/zram0 (zstd)  │   │ - SwapExpander dynamic files    │
+   │ - In-app cache & malloc_trim    │   │ - ZERO disk I/O, RAM-to-RAM     │   │ - CFS cpu.max allocation brake  │
+   └─────────────────────────────────┘   └─────────────────────────────────┘   └─────────────────────────────────┘
+                   │                                     │                                     │
+                   ▼                                     ▼                                     ▼
+        I/O: 0 Bytes (Pure CPU)               I/O: 0 Disk (RAM Bus only)             I/O: Flash/Disk Spillover
+        Latency: 0ms System Stall             Latency: < 5µs Page Fault              Latency: 1ms ~ 10ms
 ```
 
-This subsystem extends WattCurb's `MemoryPressureGuard` ([`REF-ARCH-072`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-072-memory-pressure-guard-and-ceiling-assertion.md)) by introducing **three non-destructive memory recovery tiers** prior to any CPU throttling or swap file creation.
+This subsystem extends WattCurb's `MemoryPressureGuard` ([`REF-ARCH-072`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-072-memory-pressure-guard-and-ceiling-assertion.md)) by strictly enforcing a **Phase 1 (GC) → Phase 2 (RAM Compression) → Phase 3 (Disk Swap)** progression. Disk swap is never engaged early when memory can be freed via garbage collection or absorbed by fast in-memory compression.
 
 ---
 
@@ -80,15 +74,17 @@ This subsystem extends WattCurb's `MemoryPressureGuard` ([`REF-ARCH-072`](file:/
 
 ---
 
-## 3. Safe Memory Recovery Decision Matrix
+## 3. Safe Memory Recovery Decision Matrix (GC → Compression → Swap)
 
-| Metric Threshold | Escalation Tier | Primary Actuation | Expected Recovery |
-| :--- | :--- | :--- | :--- |
-| **MemAvail < 20%** or **PSI Memory > 5.0** | **Tier 1 (Advisory)** | D-Bus `LowMemoryWarning(100)` | 200MB ~ 1GB (In-app cache discard) |
-| **MemAvail < 12%** or **PSI Memory > 15.0** | **Tier 2 (Proactive Pageout)** | `process_madvise(MADV_PAGEOUT)` on minimized windows | 500MB ~ 3GB (Compressed into zram) |
-| **MemAvail < 8%** or **PSI Memory > 25.0** | **Tier 3 (Kernel Reclaim)** | D-Bus `LowMemoryWarning(255)` + `memory.reclaim` (256M) | 1GB ~ 4GB (V8 Major GC + Page cache) |
-| **MemAvail < 5%** & **zram > 85%** | **Tier 4 (Dynamic Swap Expand)** | `SwapExpander::expand()` (8GB file increment) | 8GB ~ 32GB backing store |
-| **Swap Space Fully Exhausted** | **Tier 5 (Allocation Brake)** | `cpu.max` CFS quota (20ms/100ms) on runaway PID | 100% halt of new dirty pages (No Kill) |
+| Phase & Escalation Stage | Metric Threshold | Primary Actuation | I/O & Latency Characteristic | Expected Recovery |
+| :--- | :--- | :--- | :--- | :--- |
+| **Phase 1-A (Moderate GC)** | **MemAvail < 20%** or **PSI > 5.0** | D-Bus `LowMemoryWarning(100)` | **0 I/O**, 0ms system pause | 200MB ~ 1GB (Image/font cache discard) |
+| **Phase 1-B (Critical GC)** | **MemAvail < 14%** or **PSI > 12.0** | D-Bus `LowMemoryWarning(255)` + clean page cache trim | **0 I/O**, in-app background sweep | 500MB ~ 2GB (V8 Major GC + malloc_trim) |
+| **Phase 2-A (RAM Compression)**| **MemAvail < 10%** or **PSI > 18.0** | `process_madvise(MADV_PAGEOUT)` on minimized windows | **0 Disk I/O**, RAM bus speed (<5µs)| 1GB ~ 4GB (Compressed into ZRAM zstd) |
+| **Phase 2-B (Deep Compaction)**| **MemAvail < 7%** or **PSI > 25.0** | MGLRU cold generation reclaim into ZRAM | **0 Disk I/O**, memory-to-memory | 500MB ~ 2GB (Inactive background heap) |
+| **Phase 3-A (Disk Spillover)** | **ZRAM > 85%** & **MemAvail < 5%** | Secondary `/swap/swapfile` engagement | Disk I/O (NVMe/SSD, 1~5ms latency) | Spills overflow to 32GB disk swap |
+| **Phase 3-B (Dynamic Expand)** | **Disk Swap > 80%** | `SwapExpander::expand()` (8GB increment) | Sequential allocation | 8GB ~ 32GB incremental disk headroom|
+| **Phase 3-C (Allocation Brake)**| **Total Swap Exhausted** | `cpu.max = 20000 100000` (CFS 20ms/100ms) | Zero I/O, rate throttling | Halts dirty page generation (**Zero Kill**)|
 
 ---
 
