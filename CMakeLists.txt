@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 project(WattCurb
-    VERSION 1.3.0
+    VERSION 1.3.1
     DESCRIPTION "Ultra-low-overhead Linux power profiling and mitigation daemon"
     LANGUAGES CXX
 )
