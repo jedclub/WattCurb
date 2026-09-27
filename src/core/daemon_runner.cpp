@@ -466,7 +466,7 @@ bool DaemonRunner::process_light_probe_cycle() {
     if (shm_history_ != nullptr) {
         ipc::HistoryPoint pt{};
         pt.timestamp_sec = static_cast<uint64_t>(::time(nullptr));
-        pt.total_system_mw = static_cast<uint32_t>(cached_report_.hardware.total_system_watts * 1000.0);
+        pt.total_system_mw = static_cast<uint32_t>(cached_report_.hardware.effective_total_watts() * 1000.0);
         pt.cpu_package_mw = static_cast<uint16_t>(cached_report_.hardware.cpu_package_watts * 1000.0);
         pt.gpu_mw = static_cast<uint16_t>(cached_report_.hardware.gpu_watts * 1000.0);
         pt.cpu_temp_c = static_cast<uint16_t>(cached_report_.hardware.cpu_temp_c);
@@ -586,7 +586,7 @@ void DaemonRunner::process_deep_observation_cycle() {
         if (shm_history_ != nullptr) {
             ipc::HistoryPoint pt{};
             pt.timestamp_sec = static_cast<uint64_t>(::time(nullptr));
-            pt.total_system_mw = static_cast<uint32_t>(cached_report_.hardware.total_system_watts * 1000.0);
+            pt.total_system_mw = static_cast<uint32_t>(cached_report_.hardware.effective_total_watts() * 1000.0);
             pt.cpu_package_mw = static_cast<uint16_t>(cached_report_.hardware.cpu_package_watts * 1000.0);
             pt.gpu_mw = static_cast<uint16_t>(cached_report_.hardware.gpu_watts * 1000.0);
             pt.cpu_temp_c = static_cast<uint16_t>(cached_report_.hardware.cpu_temp_c);

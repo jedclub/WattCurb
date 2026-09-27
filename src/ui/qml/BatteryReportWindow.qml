@@ -163,7 +163,7 @@ Window {
                         font.family: "Monospace"
                     }
                     Text {
-                        text: "누적 방전 로그 전수 분석 (" + (backend.batteryReportSummary.durationStr || "전체 히스토리") + " · " + (backend.batteryReportSummary.totalSamples || 0) + "개 샘플)"
+                        text: ((backend.batteryReportSummary.dischargingSamples > 0) ? "누적 배터리 방전 로그 전수 분석 (" : "⚡ 전원 연결(AC) 상태 텔레메트리 분석 (") + (backend.batteryReportSummary.durationStr || "전체 히스토리") + " · " + (backend.batteryReportSummary.totalSamples || 0) + "개 샘플)"
                         color: reportWin.textDim
                         font.pixelSize: 11
                     }
@@ -318,7 +318,14 @@ Window {
                     anchors.fill: parent
                     anchors.margins: 10
                     spacing: 2
-                    Text { text: "⚡ 총 방전 소모량 (Total Discharge)"; color: reportWin.textDim; font.pixelSize: 11; font.bold: true }
+                    Text {
+                        text: (backend.batteryReportSummary.dischargingSamples > 0)
+                            ? "⚡ 총 방전 소모량 (Total Discharge)"
+                            : "⚡ 총 소비 전력량 (AC 전원 분석)"
+                        color: reportWin.textDim
+                        font.pixelSize: 11
+                        font.bold: true
+                    }
                     Text {
                         text: (backend.batteryReportSummary.totalDischargeWh ? backend.batteryReportSummary.totalDischargeWh.toFixed(2) : "0.00") + " Wh"
                         color: reportWin.colCyan
@@ -327,7 +334,9 @@ Window {
                         font.family: "Monospace"
                     }
                     Text {
-                        text: (backend.batteryReportSummary.totalDischargeMah ? backend.batteryReportSummary.totalDischargeMah.toFixed(0) : "0") + " mAh · Δ " + (backend.batteryReportSummary.batteryDropPct || 0) + "% (" + (backend.batteryReportSummary.batteryStartPct || 0) + "% → " + (backend.batteryReportSummary.batteryEndPct || 0) + "%)"
+                        text: (backend.batteryReportSummary.dischargingSamples > 0)
+                            ? ((backend.batteryReportSummary.totalDischargeMah ? backend.batteryReportSummary.totalDischargeMah.toFixed(0) : "0") + " mAh · Δ " + (backend.batteryReportSummary.batteryDropPct || 0) + "% (" + (backend.batteryReportSummary.batteryStartPct || 0) + "% → " + (backend.batteryReportSummary.batteryEndPct || 0) + "%)")
+                            : ("전원 상태: AC 연결 중 (" + (backend.batteryReportSummary.batteryStartPct || 0) + "% 충전 보존/유지)")
                         color: reportWin.textMuted
                         font.pixelSize: 10
                     }
@@ -346,7 +355,14 @@ Window {
                     anchors.fill: parent
                     anchors.margins: 10
                     spacing: 2
-                    Text { text: "📊 평균 방전율 (Avg Discharge Rate)"; color: reportWin.textDim; font.pixelSize: 11; font.bold: true }
+                    Text {
+                        text: (backend.batteryReportSummary.dischargingSamples > 0)
+                            ? "📊 평균 방전율 (Avg Discharge Rate)"
+                            : "📊 평균 소비 전력 (Avg System Power)"
+                        color: reportWin.textDim
+                        font.pixelSize: 11
+                        font.bold: true
+                    }
                     Text {
                         text: (backend.batteryReportSummary.avgDischargeWatts ? backend.batteryReportSummary.avgDischargeWatts.toFixed(2) : "0.00") + " W"
                         color: (backend.batteryReportSummary.avgDischargeWatts > 18.0) ? reportWin.colRed : ((backend.batteryReportSummary.avgDischargeWatts > 12.0) ? reportWin.colOrange : reportWin.colGreen)
@@ -355,7 +371,7 @@ Window {
                         font.family: "Monospace"
                     }
                     Text {
-                        text: (backend.batteryReportSummary.avgDischargeWatts > 18.0) ? "주의: 배터리 소모율이 매우 높습니다" : "안정적인 방전 속도 유지 중"
+                        text: (backend.batteryReportSummary.avgDischargeWatts > 18.0) ? "주의: 배터리 소모율이 매우 높습니다" : "안정적인 전력 소모율 유지 중"
                         color: reportWin.textMuted
                         font.pixelSize: 10
                     }
@@ -374,7 +390,14 @@ Window {
                     anchors.fill: parent
                     anchors.margins: 10
                     spacing: 2
-                    Text { text: "📈 최대 피크 전력 (Peak Discharge)"; color: reportWin.textDim; font.pixelSize: 11; font.bold: true }
+                    Text {
+                        text: (backend.batteryReportSummary.dischargingSamples > 0)
+                            ? "📈 최대 피크 전력 (Peak Discharge)"
+                            : "📈 최대 피크 전력 (Peak System Power)"
+                        color: reportWin.textDim
+                        font.pixelSize: 11
+                        font.bold: true
+                    }
                     Text {
                         text: (backend.batteryReportSummary.peakDischargeWatts ? backend.batteryReportSummary.peakDischargeWatts.toFixed(2) : "0.00") + " W"
                         color: reportWin.colOrange

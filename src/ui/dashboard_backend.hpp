@@ -102,6 +102,7 @@ class DashboardBackend : public QObject {
     Q_PROPERTY(QVariantList batteryReportHardwareShares READ batteryReportHardwareShares NOTIFY batteryReportChanged)
     Q_PROPERTY(QVariantList batteryReportProcessCulprits READ batteryReportProcessCulprits NOTIFY batteryReportChanged)
     Q_PROPERTY(QVariantList batteryReportModeComparisons READ batteryReportModeComparisons NOTIFY batteryReportChanged)
+    Q_PROPERTY(QVariantList batteryReportAuditEvents READ batteryReportAuditEvents NOTIFY batteryReportChanged)
     Q_PROPERTY(int reportFilterMode READ reportFilterMode WRITE setReportFilterMode NOTIFY reportFilterModeChanged)
 
     // Status / Metadata
@@ -206,6 +207,7 @@ public:
     QVariantList batteryReportHardwareShares() const { return battery_report_hardware_shares_; }
     QVariantList batteryReportProcessCulprits() const { return battery_report_process_culprits_; }
     QVariantList batteryReportModeComparisons() const { return battery_report_mode_comparisons_; }
+    QVariantList batteryReportAuditEvents() const { return battery_report_audit_events_; }
     int reportFilterMode() const noexcept { return report_filter_mode_; }
 
     bool isRescanning() const noexcept { return is_rescanning_; }
@@ -345,6 +347,7 @@ private:
     QVariantList battery_report_hardware_shares_{};
     QVariantList battery_report_process_culprits_{};
     QVariantList battery_report_mode_comparisons_{};
+    QVariantList battery_report_audit_events_{};
     std::vector<ProcessAttributedPower> cached_top_procs_{};
 };
 

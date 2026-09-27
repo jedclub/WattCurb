@@ -82,11 +82,18 @@ struct ProfileComparisonEntry {
     double avg_temp_c{0.0};
 };
 
+struct AuditEventEntry {
+    std::string timestamp_str;
+    std::string tag;
+    std::string message;
+};
+
 struct BatteryDrainReportResult {
     BatteryDischargeSummary summary;
     std::vector<HardwareDomainDrain> hardware_shares;
     std::vector<ProcessDrainCulprit> process_culprits;
     std::vector<ProfileComparisonEntry> profile_comparisons;
+    std::vector<AuditEventEntry> recent_events;
     int filter_mode{-1}; // -1: All, 0: Perf, 1: Balanced, 2: Save, 3: Ultra
     
     std::string to_markdown() const;

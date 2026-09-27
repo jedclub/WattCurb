@@ -19,12 +19,10 @@ echo "==================================================================="
 
 # 1. Check root or prompt single escalation (AGENTS.md Sec 14.3)
 if [ "$(id -u)" -ne 0 ]; then
-    if [ ! -t 0 ] && command -v pkexec >/dev/null 2>&1; then
-        exec pkexec bash "$0" "$@"
+    if command -v pkexec >/dev/null 2>&1; then
+        exec pkexec --disable-internal-agent --keep-cwd bash "${SCRIPT_DIR}/install.sh" "$@"
     elif command -v sudo >/dev/null 2>&1; then
-        exec sudo -E bash "$0" "$@"
-    elif command -v pkexec >/dev/null 2>&1; then
-        exec pkexec bash "$0" "$@"
+        exec sudo -E bash "${SCRIPT_DIR}/install.sh" "$@"
     else
         echo "[!] Error: Root privileges are required to install systemd root service."
         exit 1

@@ -938,6 +938,17 @@ void DashboardBackend::generateBatteryReport() {
     }
     battery_report_mode_comparisons_ = comp_list;
 
+    // Implements REF-REQ-133: Populate audit events
+    QVariantList ev_list;
+    for (const auto& ev : cached_report_result_.recent_events) {
+        QVariantMap em;
+        em[QStringLiteral("timestamp")] = QString::fromStdString(ev.timestamp_str);
+        em[QStringLiteral("tag")] = QString::fromStdString(ev.tag);
+        em[QStringLiteral("message")] = QString::fromStdString(ev.message);
+        ev_list.append(em);
+    }
+    battery_report_audit_events_ = ev_list;
+
     emit batteryReportChanged();
 }
 

@@ -5919,6 +5919,79 @@ void test_power_profile_filtering_and_comparisons() {
     std::cout << " [PASS] test_power_profile_filtering_and_comparisons (REF-TEST-050: Filter & comparison matrix verified)\n";
 }
 
+// Implements REF-TEST-086, REF-REQ-133 & REF-ARCH-080: Battery History Report AC Telemetry Fallback & Retention Gate
+void test_battery_report_ac_telemetry_fallback() {
+    std::cout << " [ORACLE GATE] Verifying Battery Report AC Telemetry Fallback & Retention (REF-TEST-086)...\n";
+
+    // 1. Generate AC-only mock history points for PowerSaver (mode 2, 50 samples) and Balanced (mode 1, 50 samples)
+    // All with battery_state = 0 (AC Connected) or 2 (Passthrough) -> 0 discharging samples!
+    std::vector<wattcurb::ipc::HistoryPoint> pts(100);
+    uint64_t base_time = 1726950000ULL;
+
+    for (size_t i = 0; i < 100; ++i) {
+        pts[i].timestamp_sec = base_time + i * 10;
+        pts[i].battery_state = 0; // AC Connected (0 discharging samples)
+        pts[i].battery_percent = 80; // Inhibit charge hold
+        if (i < 50) {
+            pts[i].power_profile_mode = 2; // PowerSaver
+            pts[i].total_system_mw = 7500;
+            pts[i].cpu_package_mw = 2500;
+            pts[i].gpu_mw = 600;
+            pts[i].cstate_c3_percent = 82;
+            pts[i].cpu_temp_c = 44;
+        } else {
+            pts[i].power_profile_mode = 1; // Balanced
+            pts[i].total_system_mw = 14000;
+            pts[i].cpu_package_mw = 5500;
+            pts[i].gpu_mw = 1800;
+            pts[i].cstate_c3_percent = 50;
+            pts[i].cpu_temp_c = 52;
+        }
+    }
+
+    std::vector<wattcurb::ProcessAttributedPower> mock_procs;
+    {
+        wattcurb::ProcessAttributedPower p{};
+        p.pid = 1234;
+        p.comm = "test_ac_proc";
+        p.total_attributed_watts = 3.0;
+        mock_procs.push_back(p);
+    }
+
+    // 2. Filtered Analysis for PowerSaver (filter_mode = 2) when 0 discharging samples exist
+    // MUST NOT return empty or "0 samples"; MUST fallback to AC telemetry!
+    auto report_save = wattcurb::report::BatteryHistoryAnalyzer::analyze(pts.data(), pts.size(), mock_procs, 11.4, 2);
+    assert(report_save.filter_mode == 2);
+    assert(report_save.summary.discharging_samples == 0 && "Discharging samples count must be accurately 0");
+    assert(report_save.summary.total_samples_analyzed == 100);
+    assert(report_save.summary.total_discharge_duration_sec == 500 && "Duration must match 50 AC samples * 10s = 500s");
+    assert(std::abs(report_save.summary.avg_discharge_watts - 7.5) < 0.1 && "Average power must match AC power level");
+    assert(std::abs(report_save.summary.avg_cstate_c3_percent - 82.0) < 0.1 && "C3 percent must match AC samples");
+    assert(report_save.summary.duration_str.find("[⚡ PowerSaver (AC)]") != std::string::npos && "Must label AC mode in duration string");
+    assert(report_save.summary.diagnostic_summary.find("전원 연결(AC) 상태") != std::string::npos && "Diagnostic summary must explain AC telemetry fallback");
+
+    // 3. Multi-Mode Comparative Breakdown Matrix with AC entries
+    auto report_all = wattcurb::report::BatteryHistoryAnalyzer::analyze(pts.data(), pts.size(), mock_procs, 11.4, -1);
+    assert(report_all.profile_comparisons.size() == 4);
+
+    const auto& c_bal = report_all.profile_comparisons[1];
+    const auto& c_save = report_all.profile_comparisons[2];
+    assert(c_save.sample_count == 50 && "PowerSaver AC samples must be retained in comparison matrix");
+    assert(c_save.duration_str.find("[⚡AC]") != std::string::npos && "Comparison entry must display [⚡AC] badge");
+    assert(std::abs(c_save.avg_watts - 7.5) < 0.1);
+
+    assert(c_bal.sample_count == 50 && "Balanced AC samples must be retained");
+    assert(c_bal.duration_str.find("[⚡AC]") != std::string::npos);
+    assert(std::abs(c_bal.avg_watts - 14.0) < 0.1);
+
+    // 4. Markdown text rendering
+    std::string md = report_save.to_markdown();
+    assert(md.find("Total Energy Consumed (AC)") != std::string::npos);
+    assert(md.find("Average System Power") != std::string::npos);
+
+    std::cout << " [PASS] test_battery_report_ac_telemetry_fallback (REF-TEST-086: AC fallback, [⚡AC] badges, and adaptive labeling verified)\n";
+}
+
 // Implements REF-TEST-051 & REF-REQ-087: Kernel VM Writeback & Laptop Mode Coalescing Verification
 void test_kernel_vm_writeback_and_laptop_mode_coalescing() {
     std::cout << " [ORACLE GATE] Verifying Kernel VM Writeback & Laptop Mode Coalescing (REF-TEST-051)...\n";
@@ -6363,6 +6436,7 @@ int main() {
     test::test_process_full_name_and_interactive_tooltips();
     test::test_deep_battery_drain_report_oracle_gate();
     test::test_power_profile_filtering_and_comparisons();
+    test::test_battery_report_ac_telemetry_fallback();
     test::test_kernel_vm_writeback_and_laptop_mode_coalescing();
     test::test_ultimate_ultra_endurance_power_minimization();
     test::test_modeset_flapping_elimination_and_test_isolation();
