@@ -402,7 +402,13 @@ MemoryPressureTier MemoryPressureGuard::evaluate_and_actuate(const AnalysisRepor
     // REF-REQ-134 / REF-ARCH-081: Safe Memory Hygiene & Progressive Swap Recovery
     const bool on_ac = !report.hardware.is_battery_discharging;
     const uint64_t now_sec = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
-    m_hygiene.evaluate_and_actuate(report, on_ac, protected_pid <= 0, now_sec);
+    // Composite Hardware & Session Idle:
+    // Autonomous closed-loop trigger: evaluates true if no focused window exists,
+    // OR if hardware is physically quiescent (C0 active < 8.0% and CPU package power < 3.5W)
+    const bool is_idle = (protected_pid <= 0) ||
+                         (report.hardware.cstate_c0_active_percent < 8.0 &&
+                          report.hardware.cpu_package_watts < 3.5);
+    m_hygiene.evaluate_and_actuate(report, on_ac, is_idle, now_sec);
 
     return next;
 }
