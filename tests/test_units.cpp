@@ -14,6 +14,7 @@
 #include "policy/memory_pressure_guard.hpp"
 #include "policy/swap_expander.hpp"
 #include "policy/hardware_bus_controller.hpp"
+#include "policy/memory_hygiene_engine.hpp"
 #include "report/report_generator.hpp"
 #include "ipc/tray_shared_state.hpp"
 #include "ipc/history_ring_buffer.hpp"
@@ -5466,6 +5467,127 @@ void test_safe_three_tier_memory_reclamation() {
                  "Phase 2 RAM compression immunity, Phase 3 ZRAM priority hierarchy verified)\n";
 }
 
+// Implements REF-TEST-088, REF-REQ-134 & REF-ARCH-081:
+// Tri-Stage Safe Memory Hygiene & Progressive Swap Recovery Engine Verification
+void test_tri_stage_memory_hygiene_engine() {
+    using namespace wattcurb;
+    using namespace wattcurb::policy;
+
+    std::cout << "\n--- [REF-TEST-088] Tri-Stage Safe Memory Hygiene & Progressive Swap Recovery Gate ---\n";
+
+    // 1. Level 1 Fast Filter Verification
+    {
+        uint64_t total_kb = 0, used_kb = 0;
+        bool triggered = MemoryHygieneEngine::check_tmpfs_fast_filter("/tmp", total_kb, used_kb);
+        assert(total_kb > 0);
+        // /tmp is currently clean, so fast filter evaluates to false (< 2 µs latency)
+        assert(!triggered);
+    }
+
+    // 2. 5-Layer Tmpfs Immunity Gate Verification
+    {
+        // Whitelist checks
+        assert(MemoryHygieneEngine::is_system_whitelisted("/tmp/.X11-unix"));
+        assert(MemoryHygieneEngine::is_system_whitelisted("/tmp/.X11-unix/X0"));
+        assert(MemoryHygieneEngine::is_system_whitelisted("/tmp/.ICE-unix"));
+        assert(MemoryHygieneEngine::is_system_whitelisted("/tmp/wayland-0"));
+        assert(MemoryHygieneEngine::is_system_whitelisted("/tmp/pulse-PKdht4sw941b"));
+        assert(MemoryHygieneEngine::is_system_whitelisted("/tmp/pipewire-0"));
+        assert(MemoryHygieneEngine::is_system_whitelisted("/tmp/systemd-private-1234"));
+
+        // User transient files must NOT be whitelisted
+        assert(!MemoryHygieneEngine::is_system_whitelisted("/tmp/claude-1000"));
+        assert(!MemoryHygieneEngine::is_system_whitelisted("/tmp/CMakeCCompilerId.tmp"));
+
+        // File type immunity checks
+        assert(MemoryHygieneEngine::is_file_type_immune(S_IFSOCK | 0777, "wayland-0"));
+        assert(MemoryHygieneEngine::is_file_type_immune(S_IFIFO | 0666, "test_fifo"));
+        assert(MemoryHygieneEngine::is_file_type_immune(S_IFREG | 0644, "session.lock"));
+        assert(!MemoryHygieneEngine::is_file_type_immune(S_IFREG | 0644, "dump.ppm"));
+        assert(!MemoryHygieneEngine::is_file_type_immune(S_IFDIR | 0755, "claude-1000"));
+
+        // Tombstone check
+        assert(MemoryHygieneEngine::is_process_dead(9999999)); // Dead PID
+        assert(!MemoryHygieneEngine::is_process_dead(::getpid())); // Living test process
+    }
+
+    // 3. Strict Swap Margin Gate Invariant
+    {
+        // Case A: 8.5 GB swap with only 10 GB available RAM -> OOM DANGER -> MUST REJECT!
+        const uint64_t high_swap_kb = 8'500'000;
+        const uint64_t tight_ram_kb = 10'000'000;
+        assert(!MemoryHygieneEngine::assert_swap_margin(tight_ram_kb, high_swap_kb));
+
+        // Case B: 1.7 GB swap with 13 GB available RAM -> AMPLE HEADROOM -> PERMITTED
+        const uint64_t low_swap_kb = 1'700'000;
+        const uint64_t ample_ram_kb = 13'000'000;
+        assert(MemoryHygieneEngine::assert_swap_margin(ample_ram_kb, low_swap_kb));
+    }
+
+    // 4. Dynamic Strategy Selection Matrix
+    {
+        MemoryHygieneSample sample{};
+
+        // Case 1: Tmpfs has dead orphans > 1 GB -> Strategy Alpha (TmpfsOrphanEvict)
+        sample.stale_orphan_bytes = 2ULL * 1024 * 1024 * 1024;
+        assert(MemoryHygieneEngine::select_strategy(sample) == HygieneStrategy::TmpfsOrphanEvict);
+
+        // Case 2: Batch worker runaway under memory pressure -> Strategy Beta (BatchSoftClamp)
+        sample.stale_orphan_bytes = 0;
+        sample.runaway_batch_pid = 4321;
+        sample.mem_available_kb = 1'000'000; // < 2 GB
+        assert(MemoryHygieneEngine::select_strategy(sample) == HygieneStrategy::BatchSoftClamp);
+
+        // Case 3: AC power, User Idle, swap > 2GB, ample RAM margin -> Strategy Gamma (SafeIdleDeswap)
+        sample.runaway_batch_pid = 0;
+        sample.on_ac_power = true;
+        sample.user_is_idle = true;
+        sample.disk_swap_used_kb = 3'000'000; // 3 GB
+        sample.zram_used_kb = 500'000;
+        sample.mem_available_kb = 15'000'000; // required: 3.5GB * 2 + 3GB = 10GB <= 15GB
+        assert(MemoryHygieneEngine::select_strategy(sample) == HygieneStrategy::SafeIdleDeswap);
+
+        // Case 4: On Battery power with high swap -> MUST HOLD AND PROTECT (Zero Deswapping on Battery!)
+        sample.on_ac_power = false;
+        assert(MemoryHygieneEngine::select_strategy(sample) == HygieneStrategy::HoldAndProtect);
+
+        // Case 5: On AC, but memory margin insufficient -> MUST HOLD AND PROTECT (Zero OOM Kill!)
+        sample.on_ac_power = true;
+        sample.mem_available_kb = 8'000'000; // 8GB < required 10GB
+        assert(MemoryHygieneEngine::select_strategy(sample) == HygieneStrategy::HoldAndProtect);
+    }
+
+    // 5. Cooldown & Exponential Backoff Invariants
+    {
+        uint64_t cd = MemoryHygieneEngine::TMPFS_SCAN_COOLDOWN_BASE_SEC; // 900s
+        cd = MemoryHygieneEngine::compute_backoff(cd, false); // 1800s
+        assert(cd == 1800);
+        cd = MemoryHygieneEngine::compute_backoff(cd, false); // 3600s
+        assert(cd == 3600);
+        cd = MemoryHygieneEngine::compute_backoff(cd, false); // 7200s
+        assert(cd == 7200);
+        cd = MemoryHygieneEngine::compute_backoff(cd, false); // capped at 7200s
+        assert(cd == 7200);
+
+        // Actionable resets to baseline
+        cd = MemoryHygieneEngine::compute_backoff(cd, true);
+        assert(cd == MemoryHygieneEngine::TMPFS_SCAN_COOLDOWN_BASE_SEC);
+    }
+
+    // 6. Integrated Engine State & Lifecycle
+    {
+        MemoryHygieneEngine engine;
+        assert(engine.initialize());
+        assert(engine.tmpfs_cooldown() == MemoryHygieneEngine::TMPFS_SCAN_COOLDOWN_BASE_SEC);
+        assert(engine.swap_cooldown() == MemoryHygieneEngine::SWAP_EVAL_COOLDOWN_BASE_SEC);
+        assert(engine.last_strategy() == HygieneStrategy::HoldAndProtect);
+    }
+
+    std::cout << " [PASS] test_tri_stage_memory_hygiene_engine (REF-TEST-088: Level 1 fast filter, "
+                 "5-layer Tmpfs immunity, 2x+3GB margin gate, Battery/Idle policy matrix, "
+                 "exponential backoff verified)\n";
+}
+
 // Implements REF-TEST-085, REF-REQ-131 & REF-ARCH-078:
 // Hardware Bus & Display Deep Power Minimization Verification Gate
 void test_hardware_bus_and_display_power_minimization() {
@@ -6482,6 +6604,7 @@ int main() {
     test::test_memory_pressure_parsers();
     test::test_performance_swap_expansion_policy();
     test::test_safe_three_tier_memory_reclamation();
+    test::test_tri_stage_memory_hygiene_engine();
     test::test_hardware_bus_and_display_power_minimization();
     test::test_multilingual_l10n_and_auto_system_locale();
     test::test_anti_starvation_and_greedy_capping();

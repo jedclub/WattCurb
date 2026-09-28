@@ -6,6 +6,7 @@
 #include "policy/low_memory_notifier.hpp"
 #include "policy/process_pageout_actuator.hpp"
 #include "policy/swap_tier_manager.hpp"
+#include "policy/memory_hygiene_engine.hpp"
 
 #include <cstdint>
 
@@ -182,6 +183,8 @@ public:
     [[nodiscard]] ProcessPageoutActuator& actuator() noexcept { return m_actuator; }
     [[nodiscard]] const SwapTierManager& swap_tier() const noexcept { return m_swap_tier; }
     [[nodiscard]] SwapTierManager& swap_tier() noexcept { return m_swap_tier; }
+    [[nodiscard]] const MemoryHygieneEngine& hygiene_engine() const noexcept { return m_hygiene; }
+    [[nodiscard]] MemoryHygieneEngine& hygiene_engine() noexcept { return m_hygiene; }
 
     // True while the guard wants the power-side reclaim ladder to stop pushing
     // anonymous pages into swap. REF-REQ-112.3.
@@ -202,6 +205,7 @@ private:
     LowMemoryNotifier m_notifier{};
     ProcessPageoutActuator m_actuator{};
     SwapTierManager m_swap_tier{};
+    MemoryHygieneEngine m_hygiene{};
     bool m_logged_budget_exhausted{false};
 
     int m_meminfo_fd{-1};

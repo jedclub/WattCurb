@@ -398,6 +398,12 @@ MemoryPressureTier MemoryPressureGuard::evaluate_and_actuate(const AnalysisRepor
         actuate_throttle(report, protected_pid);
         break;
     }
+
+    // REF-REQ-134 / REF-ARCH-081: Safe Memory Hygiene & Progressive Swap Recovery
+    const bool on_ac = !report.hardware.is_battery_discharging;
+    const uint64_t now_sec = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+    m_hygiene.evaluate_and_actuate(report, on_ac, protected_pid <= 0, now_sec);
+
     return next;
 }
 
