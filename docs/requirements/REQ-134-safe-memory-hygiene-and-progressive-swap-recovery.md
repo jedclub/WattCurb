@@ -25,17 +25,25 @@ To solve these failure modes without introducing system instability, WattCurb sp
 ```
 
 ### 2.1 Stage 1: Detection (탐지)
-- **REF-REQ-134.1 (Tmpfs & Shmem Telemetry)**:
-  - The daemon must probe `/tmp` and `/dev/shm` capacity via `statvfs()` with zero-allocation buffers.
-  - An anomaly is flagged when `/tmp` utilization exceeds **70% capacity** or absolute footprint exceeds **2 GiB**.
-- **REF-REQ-134.2 (Orphan Directory Identification)**:
-  - Scans `/tmp` and `/dev/shm` for transient directory patterns (`claude-*`, `CMake*`, `node-compile-cache`, `*.tmp`, `lazen-*`).
-  - Verifies process tombstone: inspects `/proc/<pid>` if directory name encodes a PID, ensuring the originating process is completely dead.
-  - Verifies file modification age: targets files with `mtime` and `atime` older than **3600 seconds** (1 hour).
-- **REF-REQ-134.3 (Swap Saturation & Device Classification)**:
+- **REF-REQ-134.1 (Hierarchical Ultra-Low-Overhead Gating)**:
+  - To preserve the Zero-Wakeup invariant ([`REF-REQ-001`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-001-zero-wakeup-architecture.md)), detection MUST NOT poll or continuously crawl filesystems.
+  - **Level 0 (Zero-Wakeup Base)**: Detection evaluates exclusively during existing low-frequency daemon cycles (60s tick) or on kernel PSI memory pressure events (`EPOLLPRI` on `/proc/pressure/memory`).
+  - **Level 1 (Single-Syscall Fast Filter)**: Executes a single `statvfs("/tmp", &st)` (< 2 µs latency, zero heap allocation). If `/tmp` utilization is below **70% capacity** AND absolute footprint is below **2 GiB**, Stage 1 terminates immediately. Zero directory crawling is performed.
+  - **Level 2 (Conditional Deep Scan)**: Directory inspection executes ONLY when Level 1 triggers AND the strict Cooldown Timer has elapsed.
+- **REF-REQ-134.2 (Strict Cooldown & Exponential Backoff Invariants)**:
+  - **Tmpfs Deep Scan Cooldown**: Enforces a minimum interval of **900 seconds (15 minutes)** between filesystem directory scans.
+  - **Swap Reclaim Evaluation Cooldown**: Enforces a minimum interval of **1800 seconds (30 minutes)** between swap deswapping evaluations.
+  - **Post-Action Quench Window**: Following any successful reclamation action, a mandatory **3600-second (1 hour)** lockout is engaged to prevent oscillations.
+  - **Exponential Backoff on Inaction**: If a deep scan discovers no actionable orphans, or if safety gates abort reclamation, the cooldown doubles ($15\,\text{min} \to 30\,\text{min} \to 60\,\text{min}$, capped at $120\,\text{min}$) to guarantee detection never loops indefinitely.
+- **REF-REQ-134.3 (Bounded Scanning & Zero-Allocation Constraints)**:
+  - Directory traversal depth is strictly capped at **depth 2** (`/tmp/<tool>/<session>`). Unbounded recursion is forbidden.
+  - Maximum inspected entries per cycle is capped at **64 entries**. If a directory contains more entries, evaluation is truncated to prevent CPU spikes.
+  - Memory buffers must be stack-allocated and cache-line aligned (`alignas(64)`), strictly adhering to zero heap allocations in the monitoring path.
+  - Employs $O(1)$ tombstone pre-filtering: checks process survival via `kill(pid, 0)` or stat on `/proc/<pid>` before performing any global file descriptor table sweeps.
+- **REF-REQ-134.4 (Swap Saturation & Device Classification)**:
   - Monitors `/proc/swaps` and `/sys/block/zram0/` to distinguish high-speed in-memory ZRAM from secondary disk swap (`/swap/swapfile`).
   - Flags swap reclamation candidates when total swap utilization exceeds **2 GiB** while physical `MemAvailable` is substantial.
-- **REF-REQ-134.4 (Runaway Background Batch Identification)**:
+- **REF-REQ-134.5 (Runaway Background Batch Identification)**:
   - Tracks non-interactive background processes (sessions lacking a controlling TTY and without active GUI window focus per [`REF-REQ-085`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-085-window-focus-aware-process-governor.md)).
   - Identifies maintenance batch workloads when RSS exceeds **500 MiB** or continuous CPU time exceeds **1800 seconds** (e.g. `git pack-objects`, `ccache`, offline indexing).
 

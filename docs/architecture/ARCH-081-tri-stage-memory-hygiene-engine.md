@@ -51,22 +51,42 @@ This engine operationalizes [`REF-REQ-134`](file:///home/jedclub/Develop/WattCur
 
 ## 2. Component Design & System Interfaces
 
-### 2.1 Stage 1: Detection Subsystem
-1. **`TmpfsHygieneProbe`**:
-   - Executes `statvfs("/tmp", &st)` and `statvfs("/dev/shm", &shm_st)` at zero heap allocation cost.
-   - Computes:
-     $$\text{UsedRatio} = 1.0 - \frac{\text{f\_bavail}}{\text{f\_blocks}}$$
-   - Flags an anomaly if $\text{UsedRatio} > 0.70$ or $\text{UsedBytes} > 2\,\text{GiB}$.
-   - Scans directory entries in `/tmp` using zero-alloc POSIX `scandir` or `readdir` with a 4096-byte scratchpad buffer.
-2. **`SwapSaturationProbe`**:
-   - Parses `/proc/swaps` with zero dynamic allocation (`pread()`).
-   - Categorizes swap devices into:
-     - Tier 1: In-Memory Compressed `/dev/zram0` (priority $\ge 100$).
-     - Tier 2: Secondary Disk Swapfile `/swap/swapfile` (priority $< 0$).
-   - Reads `/sys/block/zram0/orig_data_size` and `compr_data_size` for real-time compression efficiency.
-3. **`BackgroundBatchProbe`**:
-   - Cross-references active processes against `/proc/<pid>/stat` (identifying sessions where `tty_nr == 0`).
-   - Flags maintenance candidates when `rss > 500 MiB` and the PID does not match the active focused GUI window ([`REF-REQ-085`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-085-window-focus-aware-process-governor.md)).
+### 2.1 Stage 1: Detection Subsystem & Cooldown Governor
+
+#### 1. Hierarchical Gated Detection (Zero-Wakeup & Zero-Poll)
+To prevent CPU wakeups and eliminate polling costs:
+- **Level 0 (Zero-Wakeup Base)**: Passive. Triggered strictly on existing daemon low-frequency 60s periodic ticks or kernel PSI memory stall events (`EPOLLPRI` on `/proc/pressure/memory`).
+- **Level 1 (Single-Syscall Fast Filter)**:
+  - Invokes `statvfs("/tmp", &st)` (< 2 µs latency, O(1), reads VFS superblock in kernel memory).
+  - Computes $\text{UsedRatio} = 1.0 - \frac{\text{f\_bavail}}{\text{f\_blocks}}$.
+  - If $\text{UsedRatio} < 0.70$ and $\text{UsedBytes} < 2\,\text{GiB}$, **halts immediately**. Total CPU overhead: < 0.0001% core capacity. Zero directory traversal.
+- **Level 2 (Conditional Deep Scan)**:
+  - Evaluated ONLY if Level 1 crosses thresholds AND `m_tmpfs_cooldown_timer.expired()`.
+
+#### 2. Strict Cooldown & Exponential Backoff State Machine
+To guarantee that detection never loops indefinitely or creates background storms:
+- **`m_tmpfs_scan_cooldown`**: Initialized to **900s (15 minutes)**.
+- **`m_swap_eval_cooldown`**: Initialized to **1800s (30 minutes)**.
+- **`m_post_reclaim_quench`**: When any reclamation executes, locks out further actions for **3600s (1 hour)**.
+- **Exponential Backoff**:
+  ```cpp
+  if (orphans_found == 0 || margin_check_failed) {
+      m_current_cooldown = std::min(m_current_cooldown * 2, 7200u); // 15m -> 30m -> 60m -> 120m
+  } else {
+      m_current_cooldown = 900u; // Reset to baseline on actionable recovery
+  }
+  ```
+
+#### 3. Bounded Traversal & Zero-Allocation Probing
+- **Recursion Ceiling**: Directory traversal is strictly clamped to `max_depth = 2` (`/tmp/<tool>/<session>`).
+- **Entry Ceiling**: Maximum 64 `dirent` items inspected per scan cycle.
+- **Zero Heap Overhead**: Fixed stack buffers (`alignas(64) char scratch[4096]`) and static fixed vectors.
+- **$O(1)$ Process Tombstone Pre-filter**: Verifies process death via `kill(pid, 0) == -1 && errno == ESRCH` before touching the global `/proc/*/fd/` file descriptor table.
+
+#### 4. Probes
+- **`TmpfsHygieneProbe`**: Executes Level 1 fast filter and Level 2 bounded orphan scan.
+- **`SwapSaturationProbe`**: Parses `/proc/swaps` with zero dynamic allocation (`pread()`), tracking Tier 1 (ZRAM) and Tier 2 (`/swap/swapfile`).
+- **`BackgroundBatchProbe`**: Cross-references active processes against `/proc/<pid>/stat` (`tty_nr == 0`, `rss > 500 MiB`, cumulative CPU time > 1800s) excluding focused GUI PIDs ([`REF-REQ-085`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-085-window-focus-aware-process-governor.md)).
 
 ---
 
