@@ -15,6 +15,7 @@
 #include "policy/swap_expander.hpp"
 #include "policy/hardware_bus_controller.hpp"
 #include "policy/memory_hygiene_engine.hpp"
+#include "policy/targeted_app_reclaim.hpp"
 #include "report/report_generator.hpp"
 #include "ipc/tray_shared_state.hpp"
 #include "ipc/history_ring_buffer.hpp"
@@ -5588,6 +5589,160 @@ void test_tri_stage_memory_hygiene_engine() {
                  "exponential backoff verified)\n";
 }
 
+// Implements REF-TEST-089, REF-REQ-135 & REF-ARCH-082:
+// Targeted Memory Pressure Smart GC & Application Cgroup Reclaim Verification Gate
+void test_targeted_app_reclaim_engine() {
+    using namespace wattcurb;
+    using namespace wattcurb::policy;
+
+    std::cout << "\n--- [REF-TEST-089] Targeted Memory Pressure Smart GC & Application Cgroup Reclaim Gate ---\n";
+
+    // 1. Candidate Eligibility Gate Verification
+    {
+        ProcessAttributedPower p_system{};
+        p_system.pid = 1;
+        p_system.pss_kib = 1024 * 1024;
+        p_system.safety_tier = static_cast<uint8_t>(ProcessSafetyTier::CriticalImmune);
+        assert(!TargetedAppReclaimEngine::is_eligible_candidate(p_system) && "PID 1 must be immune");
+
+        ProcessAttributedPower p_small{};
+        p_small.pid = 2001;
+        p_small.pss_kib = 128 * 1024; // 128 MiB (< 256 MiB threshold)
+        p_small.safety_tier = static_cast<uint8_t>(ProcessSafetyTier::UserInteractive);
+        assert(!TargetedAppReclaimEngine::is_eligible_candidate(p_small) && "Sub-256 MiB processes must not be targeted");
+
+        ProcessAttributedPower p_kwin{};
+        p_kwin.pid = 2002;
+        p_kwin.pss_kib = 512 * 1024;
+        p_kwin.safety_tier = static_cast<uint8_t>(ProcessSafetyTier::DesktopCore);
+        assert(!TargetedAppReclaimEngine::is_eligible_candidate(p_kwin) && "DesktopCore must be immune from cgroup reclaim");
+
+        ProcessAttributedPower p_plasma{};
+        p_plasma.pid = 2003;
+        p_plasma.pss_kib = 512 * 1024;
+        p_plasma.safety_tier = static_cast<uint8_t>(ProcessSafetyTier::DesktopShell);
+        assert(!TargetedAppReclaimEngine::is_eligible_candidate(p_plasma) && "DesktopShell must be immune from cgroup reclaim");
+
+        ProcessAttributedPower p_electron{};
+        p_electron.pid = 2004;
+        p_electron.pss_kib = 1024 * 1024; // 1 GiB PSS (ChatGPT / Codex / Chromium)
+        p_electron.safety_tier = static_cast<uint8_t>(ProcessSafetyTier::UserInteractive);
+        assert(TargetedAppReclaimEngine::is_eligible_candidate(p_electron) && "Large Electron app must be an eligible reclaim candidate");
+
+        ProcessAttributedPower p_worker{};
+        p_worker.pid = 2005;
+        p_worker.pss_kib = 512 * 1024;
+        p_worker.safety_tier = static_cast<uint8_t>(ProcessSafetyTier::BackgroundWorker);
+        assert(TargetedAppReclaimEngine::is_eligible_candidate(p_worker) && "Large BackgroundWorker must be an eligible candidate");
+    }
+
+    // 2. Pressure Gating Predicate Verification (Zero-Cost when Healthy)
+    {
+        MemoryPressureSample sample_healthy{};
+        sample_healthy.mem_total_kb = 16'000'000;
+        sample_healthy.mem_available_kb = 8'000'000; // 50% available
+        sample_healthy.swap_total_kb = 8'000'000;
+        sample_healthy.swap_free_kb = 6'000'000; // 75% free
+        sample_healthy.psi_full_avg10 = 0.0;
+        assert(!TargetedAppReclaimEngine::is_pressure_satisfied(sample_healthy, MemoryPressureTier::Normal) &&
+               "Healthy system must NOT trigger targeted reclaim (Zero-Wakeup)");
+
+        // Pressure Case A: Tier is Advisory
+        assert(TargetedAppReclaimEngine::is_pressure_satisfied(sample_healthy, MemoryPressureTier::Advisory));
+
+        // Pressure Case B: Tier is Throttle
+        assert(TargetedAppReclaimEngine::is_pressure_satisfied(sample_healthy, MemoryPressureTier::Throttle));
+
+        // Pressure Case C: PSI elevated (> 5.0)
+        MemoryPressureSample sample_psi = sample_healthy;
+        sample_psi.psi_full_avg10 = 6.2;
+        assert(TargetedAppReclaimEngine::is_pressure_satisfied(sample_psi, MemoryPressureTier::Normal));
+
+        // Pressure Case D: Low available RAM (< 20%)
+        MemoryPressureSample sample_ram = sample_healthy;
+        sample_ram.mem_available_kb = 2'000'000; // 12.5%
+        assert(TargetedAppReclaimEngine::is_pressure_satisfied(sample_ram, MemoryPressureTier::Normal));
+
+        // Pressure Case E: Low swap free (< 35%)
+        MemoryPressureSample sample_swap = sample_healthy;
+        sample_swap.swap_free_kb = 2'000'000; // 25%
+        assert(TargetedAppReclaimEngine::is_pressure_satisfied(sample_swap, MemoryPressureTier::Normal));
+    }
+
+    // 3. Strict 20-Minute Cooldown Guard Invariance
+    {
+        const uint64_t last = 10'000;
+        // 10 minutes elapsed (600s < 1200s) -> Blocked
+        assert(!TargetedAppReclaimEngine::is_cooldown_expired(10'600, last));
+
+        // 19m 59s elapsed (1199s < 1200s) -> Blocked
+        assert(!TargetedAppReclaimEngine::is_cooldown_expired(11'199, last));
+
+        // Exactly 20m elapsed (1200s == 1200s) -> Expired / Permitted
+        assert(TargetedAppReclaimEngine::is_cooldown_expired(11'200, last));
+
+        // 25m elapsed (1500s > 1200s) -> Expired / Permitted
+        assert(TargetedAppReclaimEngine::is_cooldown_expired(11'500, last));
+
+        // Initial bootstrap (last == 0) -> Immediate permit
+        assert(TargetedAppReclaimEngine::is_cooldown_expired(500, 0));
+
+        // Clock skew protection (now < last) -> Safe permit
+        assert(TargetedAppReclaimEngine::is_cooldown_expired(5'000, 10'000));
+    }
+
+    // 4. Closed-Loop Actuation Simulation & 20-min Anti-Churn Lock
+    {
+        TargetedAppReclaimEngine engine{};
+        LowMemoryNotifier notifier{};
+
+        AnalysisReportData report{};
+        ProcessAttributedPower heavy_chatgpt{};
+        heavy_chatgpt.pid = 98765;
+        heavy_chatgpt.comm = "ChatGPT";
+        heavy_chatgpt.pss_kib = 1024 * 1024; // 1 GiB
+        heavy_chatgpt.safety_tier = static_cast<uint8_t>(ProcessSafetyTier::UserInteractive);
+        report.top_processes.push_back(heavy_chatgpt);
+
+        MemoryPressureSample sample{};
+        sample.mem_total_kb = 16'000'000;
+        sample.mem_available_kb = 1'500'000; // ~9% free -> pressure active
+        sample.swap_total_kb = 8'000'000;
+        sample.swap_free_kb = 2'000'000;
+        sample.psi_full_avg10 = 12.5;
+
+        // Pass 1: At t = 20000, executes pass and locks cooldown to 20000
+        engine.evaluate_and_actuate(report, sample, MemoryPressureTier::Advisory, notifier, 20'000);
+        assert(engine.last_reclaim_sec() == 20'000);
+        assert(engine.total_reclaim_count() == 1);
+
+        // Pass 2: Immediate retry at t = 20030 (30 seconds later) -> MUST BE LOCKED (returns 0)
+        size_t count_locked = engine.evaluate_and_actuate(report, sample, MemoryPressureTier::Advisory, notifier, 20'030);
+        assert(count_locked == 0 && "Subsequent pressure during 20m cooldown must be completely suppressed");
+        assert(engine.last_reclaim_sec() == 20'000);
+        assert(engine.total_reclaim_count() == 1);
+
+        // Pass 3: Retry at t = 21199 (19 min 59 sec) -> Still locked
+        size_t count_still_locked = engine.evaluate_and_actuate(report, sample, MemoryPressureTier::Throttle, notifier, 21'199);
+        assert(count_still_locked == 0);
+        assert(engine.total_reclaim_count() == 1);
+
+        // Pass 4: Retry at t = 21200 (exactly 20 mins later) -> Cooldown expired, executes pass!
+        engine.evaluate_and_actuate(report, sample, MemoryPressureTier::Advisory, notifier, 21'200);
+        assert(engine.last_reclaim_sec() == 21'200);
+        assert(engine.total_reclaim_count() == 2);
+    }
+
+    // 5. MemoryPressureGuard Integration Verification
+    {
+        MemoryPressureGuard guard{};
+        assert(guard.targeted_reclaim().cooldown_sec() == 1200);
+    }
+
+    std::cout << " [PASS] test_targeted_app_reclaim_engine (REF-TEST-089: Candidate eligibility gate, "
+                 "pressure trigger predicate, 20-min cooldown invariance, anti-churn lock verified)\n";
+}
+
 // Implements REF-TEST-085, REF-REQ-131 & REF-ARCH-078:
 // Hardware Bus & Display Deep Power Minimization Verification Gate
 void test_hardware_bus_and_display_power_minimization() {
@@ -6605,6 +6760,7 @@ int main() {
     test::test_performance_swap_expansion_policy();
     test::test_safe_three_tier_memory_reclamation();
     test::test_tri_stage_memory_hygiene_engine();
+    test::test_targeted_app_reclaim_engine();
     test::test_hardware_bus_and_display_power_minimization();
     test::test_multilingual_l10n_and_auto_system_locale();
     test::test_anti_starvation_and_greedy_capping();

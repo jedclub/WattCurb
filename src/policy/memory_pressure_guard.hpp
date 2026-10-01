@@ -7,6 +7,7 @@
 #include "policy/process_pageout_actuator.hpp"
 #include "policy/swap_tier_manager.hpp"
 #include "policy/memory_hygiene_engine.hpp"
+#include "policy/targeted_app_reclaim.hpp"
 
 #include <cstdint>
 
@@ -185,6 +186,8 @@ public:
     [[nodiscard]] SwapTierManager& swap_tier() noexcept { return m_swap_tier; }
     [[nodiscard]] const MemoryHygieneEngine& hygiene_engine() const noexcept { return m_hygiene; }
     [[nodiscard]] MemoryHygieneEngine& hygiene_engine() noexcept { return m_hygiene; }
+    [[nodiscard]] const TargetedAppReclaimEngine& targeted_reclaim() const noexcept { return m_targeted_reclaim; }
+    [[nodiscard]] TargetedAppReclaimEngine& targeted_reclaim() noexcept { return m_targeted_reclaim; }
 
     // True while the guard wants the power-side reclaim ladder to stop pushing
     // anonymous pages into swap. REF-REQ-112.3.
@@ -206,6 +209,7 @@ private:
     ProcessPageoutActuator m_actuator{};
     SwapTierManager m_swap_tier{};
     MemoryHygieneEngine m_hygiene{};
+    TargetedAppReclaimEngine m_targeted_reclaim{};
     bool m_logged_budget_exhausted{false};
 
     int m_meminfo_fd{-1};

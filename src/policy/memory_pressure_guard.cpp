@@ -399,9 +399,13 @@ MemoryPressureTier MemoryPressureGuard::evaluate_and_actuate(const AnalysisRepor
         break;
     }
 
+    const uint64_t now_sec = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+
+    // REF-REQ-135 / REF-ARCH-082: Targeted Memory Pressure Smart GC & Application Cgroup Reclaim (20-min cooldown)
+    m_targeted_reclaim.evaluate_and_actuate(report, s, next, m_notifier, now_sec);
+
     // REF-REQ-134 / REF-ARCH-081: Safe Memory Hygiene & Progressive Swap Recovery
     const bool on_ac = !report.hardware.is_battery_discharging;
-    const uint64_t now_sec = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
     // Composite Hardware & Session Idle:
     // Autonomous closed-loop trigger: evaluates true if no focused window exists,
     // OR if hardware is physically quiescent (C0 active < 8.0% and CPU package power < 3.5W)
