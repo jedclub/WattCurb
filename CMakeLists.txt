@@ -112,6 +112,7 @@ set(WATTCURB_LIB_SOURCES
     src/policy/swap_tier_manager.cpp
     src/policy/memory_hygiene_engine.cpp
     src/policy/targeted_app_reclaim.cpp
+    src/policy/fan_curve_engine.cpp
     src/policy/hardware_bus_controller.cpp
     src/report/report_generator.cpp
     src/report/battery_history_analyzer.cpp
@@ -153,6 +154,7 @@ if(Qt6_FOUND)
         src/ui/dashboard_backend.hpp
         src/core/singleton_lock.cpp
         src/core/l10n.cpp
+        src/policy/fan_curve_engine.cpp
         src/report/battery_history_analyzer.cpp
         src/ui/qml.qrc
     )

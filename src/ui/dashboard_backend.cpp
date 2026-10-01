@@ -54,6 +54,9 @@ DashboardBackend::DashboardBackend(QObject* parent)
 
     // Initial battery drain history audit
     generateBatteryReport();
+
+    // REF-REQ-136, REF-ARCH-083: Initialize SIMD Profile Fan Curve Engine
+    fan_curve_engine_.initialize();
 }
 
 DashboardBackend::~DashboardBackend() {
@@ -974,6 +977,137 @@ QString DashboardBackend::getReportMarkdown() {
 void DashboardBackend::requestReportWindow() {
     generateBatteryReport();
     emit reportWindowRequested();
+}
+
+// Unified Dashboard Tab & Fan Studio Implementation (REF-REQ-136, REF-ARCH-083)
+void DashboardBackend::setCurrentDashboardTab(int tab) {
+    if (current_dashboard_tab_ != tab) {
+        current_dashboard_tab_ = tab;
+        emit currentDashboardTabChanged();
+    }
+}
+
+void DashboardBackend::setSelectedFanProfile(int profileIdx) {
+    if (profileIdx >= 0 && profileIdx < 4 && selected_fan_profile_ != profileIdx) {
+        selected_fan_profile_ = profileIdx;
+        emit fanProfileChanged();
+        emit fanCurveDataChanged();
+    }
+}
+
+void DashboardBackend::selectFanProfile(int profileIdx) {
+    setSelectedFanProfile(profileIdx);
+}
+
+bool DashboardBackend::isCustomFanCurve() const noexcept {
+    if (selected_fan_profile_ < 0 || selected_fan_profile_ >= 4) return false;
+    return fan_curve_engine_.is_profile_custom(selected_fan_profile_);
+}
+
+int DashboardBackend::fanPointCount() const noexcept {
+    if (selected_fan_profile_ < 0 || selected_fan_profile_ >= 4) return 0;
+    return fan_curve_engine_.get_profile_curve(selected_fan_profile_).point_count;
+}
+
+QVariantList DashboardBackend::fanControlPoints() const {
+    QVariantList list;
+    if (selected_fan_profile_ < 0 || selected_fan_profile_ >= 4) return list;
+    const auto& curve = fan_curve_engine_.get_profile_curve(selected_fan_profile_);
+    for (uint8_t i = 0; i < curve.point_count; ++i) {
+        QVariantMap map;
+        map["temp"] = static_cast<double>(curve.points[i].temp_c);
+        map["pct"] = static_cast<double>(curve.points[i].speed_pct);
+        list.append(map);
+    }
+    return list;
+}
+
+QVariantList DashboardBackend::fanLookupPcts() const {
+    QVariantList list;
+    if (selected_fan_profile_ < 0 || selected_fan_profile_ >= 4) return list;
+    const auto& curve = fan_curve_engine_.get_profile_curve(selected_fan_profile_);
+    for (size_t i = 0; i < policy::FanCurveEngine::LOOKUP_TABLE_SIZE; ++i) {
+        list.append(static_cast<double>(curve.lookup_pcts[i]));
+    }
+    return list;
+}
+
+QVariantList DashboardBackend::fanLookupLevels() const {
+    QVariantList list;
+    if (selected_fan_profile_ < 0 || selected_fan_profile_ >= 4) return list;
+    const auto& curve = fan_curve_engine_.get_profile_curve(selected_fan_profile_);
+    for (size_t i = 0; i < policy::FanCurveEngine::LOOKUP_TABLE_SIZE; ++i) {
+        list.append(static_cast<int>(curve.lookup_levels[i]));
+    }
+    return list;
+}
+
+bool DashboardBackend::setFanPoint(int pointIdx, double temp, double pct) {
+    if (selected_fan_profile_ < 0 || selected_fan_profile_ >= 4) return false;
+    auto curve = fan_curve_engine_.get_profile_curve(selected_fan_profile_);
+    if (pointIdx < 0 || pointIdx >= curve.point_count) return false;
+
+    curve.points[pointIdx].temp_c = std::clamp(static_cast<float>(temp), 30.0f, 70.0f);
+    curve.points[pointIdx].speed_pct = std::clamp(static_cast<float>(pct), 0.0f, 100.0f);
+
+    std::sort(curve.points, curve.points + curve.point_count, [](const auto& a, const auto& b) {
+        return a.temp_c < b.temp_c;
+    });
+
+    bool ok = fan_curve_engine_.set_profile_curve(selected_fan_profile_, curve.points, curve.point_count);
+    if (ok) {
+        emit fanCurveDataChanged();
+    }
+    return ok;
+}
+
+bool DashboardBackend::addFanPoint(double temp, double pct) {
+    if (selected_fan_profile_ < 0 || selected_fan_profile_ >= 4) return false;
+    auto curve = fan_curve_engine_.get_profile_curve(selected_fan_profile_);
+    if (curve.point_count >= policy::FanCurveEngine::MAX_POINTS) return false;
+
+    curve.points[curve.point_count].temp_c = std::clamp(static_cast<float>(temp), 30.0f, 70.0f);
+    curve.points[curve.point_count].speed_pct = std::clamp(static_cast<float>(pct), 0.0f, 100.0f);
+    curve.point_count++;
+
+    std::sort(curve.points, curve.points + curve.point_count, [](const auto& a, const auto& b) {
+        return a.temp_c < b.temp_c;
+    });
+
+    bool ok = fan_curve_engine_.set_profile_curve(selected_fan_profile_, curve.points, curve.point_count);
+    if (ok) {
+        emit fanCurveDataChanged();
+    }
+    return ok;
+}
+
+bool DashboardBackend::removeFanPoint(int pointIdx) {
+    if (selected_fan_profile_ < 0 || selected_fan_profile_ >= 4) return false;
+    auto curve = fan_curve_engine_.get_profile_curve(selected_fan_profile_);
+    if (curve.point_count <= policy::FanCurveEngine::MIN_POINTS) return false;
+    if (pointIdx < 0 || pointIdx >= curve.point_count) return false;
+
+    for (uint8_t i = pointIdx; i + 1 < curve.point_count; ++i) {
+        curve.points[i] = curve.points[i + 1];
+    }
+    curve.point_count--;
+
+    bool ok = fan_curve_engine_.set_profile_curve(selected_fan_profile_, curve.points, curve.point_count);
+    if (ok) {
+        emit fanCurveDataChanged();
+    }
+    return ok;
+}
+
+void DashboardBackend::resetFanCurveToDefault(int profileIdx) {
+    fan_curve_engine_.reset_to_defaults(profileIdx);
+    emit fanCurveDataChanged();
+}
+
+bool DashboardBackend::applyFanCurves() {
+    bool ok = fan_curve_engine_.save_to_file("/etc/wattcurb/fan_curves.conf");
+    sendDaemonCommand("RELOAD_FAN_CURVES\n");
+    return ok;
 }
 
 } // namespace wattcurb::ui

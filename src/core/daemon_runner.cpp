@@ -3,6 +3,7 @@
 #include "report/report_generator.hpp"
 #include "core/scoped_profiler.hpp"
 #include "policy/mitigation_engine.hpp"
+#include "policy/fan_curve_engine.hpp"
 
 #include <chrono>
 #include <csignal>
@@ -332,6 +333,9 @@ bool DaemonRunner::initialize() {
     // REF-REQ-055: Capture exact hardware baseline state before any actuation
     policy::MitigationEngine::capture_hardware_baseline();
     hardware_bus_.initialize(); // REF-REQ-131: Capture deep hardware bus & display baseline
+
+    // REF-REQ-136, REF-ARCH-083: Initialize SIMD Profile Fan Curve Engine
+    policy::MitigationEngine::fan_curve_engine().initialize();
 
     // Load persisted profile mode if available (REF-REQ-053)
     PowerProfileMode initial_mode = PowerProfileMode::Balanced;
@@ -1100,6 +1104,13 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
         }
         const char err[] = "ERR: Invalid Window State\n";
         ::sendto(fd, err, sizeof(err) - 1, 0,
+                 reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+        return;
+    } else if (req.rfind("RELOAD_FAN_CURVES", 0) == 0) {
+        // REF-REQ-136: Reload custom fan curve configuration
+        policy::MitigationEngine::fan_curve_engine().load_from_file("/etc/wattcurb/fan_curves.conf");
+        const char ack[] = "OK\n";
+        ::sendto(fd, ack, sizeof(ack) - 1, 0,
                  reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
         return;
     } else {

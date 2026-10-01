@@ -2,6 +2,7 @@
 #include "policy/memory_pressure_guard.hpp"
 #include "policy/process_classifier.hpp"
 #include "policy/battery_feature.hpp"
+#include "policy/fan_curve_engine.hpp"
 #include "core/posix_fs.hpp"
 #include "core/scoped_profiler.hpp"
 #include "core/event_logger.hpp"
@@ -2974,6 +2975,8 @@ int g_last_fan_level = -1;
 // REF-TEST-073: counts evaluations from the production entry point so a wiring
 // that only runs under test is falsifiable, exactly like ceiling_assertion_count.
 uint64_t g_fan_curve_application_count = 0;
+// REF-REQ-136, REF-ARCH-083: SIMD Profile Fan Curve Engine
+static FanCurveEngine s_fan_curve_engine;
 } // namespace
 
 int MitigationEngine::fan_level_for_temp(double cpu_temp_c, double full_temp_c) noexcept {
@@ -3027,6 +3030,12 @@ double MitigationEngine::fan_full_temp_for_profile(PowerProfileMode mode) noexce
 
 int MitigationEngine::fan_level_for_temp_in_profile(double cpu_temp_c,
                                                     PowerProfileMode mode) noexcept {
+    // REF-REQ-136, REF-ARCH-083: Check if custom fan curve is active for this profile
+    const int prof_idx = static_cast<int>(mode);
+    if (prof_idx >= 0 && prof_idx < 4 && s_fan_curve_engine.is_profile_custom(prof_idx)) {
+        return s_fan_curve_engine.get_fan_level_for_temp(prof_idx, cpu_temp_c);
+    }
+
     // REF-REQ-118.3: UltraEndurance is the only profile that stops the fan. It is
     // a cold-start exception, not a general weakening: above the threshold the
     // common curve applies unchanged, so the part can never be cooked to save a
@@ -3106,6 +3115,10 @@ int MitigationEngine::apply_fan_for_temp(double cpu_temp_c,
 
 uint64_t MitigationEngine::fan_curve_application_count() noexcept {
     return g_fan_curve_application_count;
+}
+
+FanCurveEngine& MitigationEngine::fan_curve_engine() noexcept {
+    return s_fan_curve_engine;
 }
 
 bool MitigationEngine::set_fan_level(const char* level) noexcept {

@@ -245,9 +245,9 @@ ApplicationWindow {
                     }
                 }
 
-                // Deep Battery Report Standalone Window Button (REF-REQ-078, REF-REQ-081)
+                // Battery Report Quick Switch Button
                 TactileButton {
-                    text: "🔋 배터리 정밀 분석 리포트"
+                    text: "🔋 배터리 리포트"
                     accentColor: root.colGreen
                     baseColor: "#0d2e24"
                     hoverColor: "#134234"
@@ -255,10 +255,7 @@ ApplicationWindow {
                     textColor: "#34d399"
                     onClicked: {
                         backend.generateBatteryReport();
-                        reportWindow.visible = true;
-                        reportWindow.show();
-                        reportWindow.raise();
-                        reportWindow.requestActivate();
+                        backend.setCurrentDashboardTab(1);
                     }
                 }
 
@@ -273,12 +270,79 @@ ApplicationWindow {
         }
 
         // =============================================================
-        // 2. MAIN WORKSPACE (LEFT: HARDWARE DOMAINS, RIGHT: TIMELINE & PROCESSES)
+        // 2. UNIFIED TAB NAVIGATION BAR (REF-REQ-136, REF-ARCH-083)
         // =============================================================
-        RowLayout {
+        Rectangle {
+            Layout.fillWidth: true
+            height: 42
+            color: root.bgPanel
+            border.color: root.borderPanel
+            radius: 6
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 8
+                anchors.rightMargin: 8
+                spacing: 8
+
+                // Tab 0: Matrix HUD
+                TactileButton {
+                    Layout.fillWidth: true
+                    implicitHeight: 32
+                    text: "📊 정밀 분석 매트릭 HUD (Power & Hardware Matrix)"
+                    highlighted: backend.currentDashboardTab === 0
+                    accentColor: root.colCyan
+                    baseColor: backend.currentDashboardTab === 0 ? "#122a3a" : "#141a24"
+                    textColor: backend.currentDashboardTab === 0 ? "#ffffff" : root.textDim
+                    onClicked: backend.setCurrentDashboardTab(0)
+                }
+
+                // Tab 1: Battery Drain Report
+                TactileButton {
+                    Layout.fillWidth: true
+                    implicitHeight: 32
+                    text: "📑 배터리 심층 방전 리포트 (Deep Drain Audit Report)"
+                    highlighted: backend.currentDashboardTab === 1
+                    accentColor: root.colGreen
+                    baseColor: backend.currentDashboardTab === 1 ? "#0f2e24" : "#141a24"
+                    textColor: backend.currentDashboardTab === 1 ? "#ffffff" : root.textDim
+                    onClicked: {
+                        backend.generateBatteryReport();
+                        backend.setCurrentDashboardTab(1);
+                    }
+                }
+
+                // Tab 2: Fan Curve Studio
+                TactileButton {
+                    Layout.fillWidth: true
+                    implicitHeight: 32
+                    text: "🌀 수동 커브 팬 제어 스튜디오 (SIMD Fan Curve Studio)"
+                    highlighted: backend.currentDashboardTab === 2
+                    accentColor: root.colPurple
+                    baseColor: backend.currentDashboardTab === 2 ? "#261538" : "#141a24"
+                    textColor: backend.currentDashboardTab === 2 ? "#ffffff" : root.textDim
+                    onClicked: backend.setCurrentDashboardTab(2)
+                }
+            }
+        }
+
+        // =============================================================
+        // 3. MAIN WORKSPACE CONTAINER (3 TABS)
+        // =============================================================
+        Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 8
+
+            // ---------------------------------------------------------
+            // TAB 0: ORIGINAL DENSE HARDWARE & PROCESS MATRIX HUD
+            // ---------------------------------------------------------
+            Item {
+                anchors.fill: parent
+                visible: backend.currentDashboardTab === 0
+
+                RowLayout {
+                    anchors.fill: parent
+                    spacing: 8
 
             // ---------------------------------------------------------
             // LEFT COLUMN: DENSE HARDWARE METRICS WITH SPARKLINE GRAPHS (460px)
@@ -1446,7 +1510,26 @@ ApplicationWindow {
                     }
                 }
             }
-        }
+        } // Right Column ColumnLayout
+    } // Main Workspace RowLayout
+} // Tab 0 Item (Original Dense Matrix HUD)
+
+            // ---------------------------------------------------------
+            // TAB 1: DEEP BATTERY DRAIN AUDIT REPORT
+            // ---------------------------------------------------------
+            BatteryReportView {
+                anchors.fill: parent
+                visible: backend.currentDashboardTab === 1
+            }
+
+            // ---------------------------------------------------------
+            // TAB 2: SIMD MONOTONE SPLINE FAN CURVE STUDIO
+            // ---------------------------------------------------------
+            FanCurveStudioView {
+                anchors.fill: parent
+                visible: backend.currentDashboardTab === 2
+            }
+        } // Item (3-Tab Container)
 
         // =============================================================
         // 4. BOTTOM CONTROL DOCK (44px)

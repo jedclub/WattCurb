@@ -16,6 +16,7 @@
 #include "policy/hardware_bus_controller.hpp"
 #include "policy/memory_hygiene_engine.hpp"
 #include "policy/targeted_app_reclaim.hpp"
+#include "policy/fan_curve_engine.hpp"
 #include "report/report_generator.hpp"
 #include "ipc/tray_shared_state.hpp"
 #include "ipc/history_ring_buffer.hpp"
@@ -5743,6 +5744,138 @@ void test_targeted_app_reclaim_engine() {
                  "pressure trigger predicate, 20-min cooldown invariance, anti-churn lock verified)\n";
 }
 
+// Implements REF-TEST-090, REF-REQ-136 & REF-ARCH-083:
+// SIMD-Vectorized Profile Fan Curve Engine & Failsafe Controller Verification Gate
+void test_fan_curve_simd_spline_engine() {
+    using namespace wattcurb;
+    using namespace wattcurb::policy;
+
+    std::cout << "\n--- [REF-TEST-090] SIMD-Vectorized Profile Fan Curve Engine & Failsafe Gate ---\n";
+
+    FanCurveEngine engine{};
+    assert(engine.initialize());
+
+    // 1. Factory Default Invariant Verification
+    // Balanced: 30°C -> 15%, 70°C -> 100% (5 points)
+    const auto& bal_curve = engine.get_profile_curve(1);
+    assert(bal_curve.point_count == 5);
+    assert(bal_curve.points[0].temp_c == 30.0f);
+    assert(bal_curve.points[0].speed_pct == 15.0f);
+    assert(bal_curve.points[4].temp_c == 70.0f);
+    assert(bal_curve.points[4].speed_pct == 100.0f);
+    assert(!engine.is_profile_custom(1));
+
+    // Performance: 30°C -> 20%, 70°C -> 100% (5 points)
+    const auto& perf_curve = engine.get_profile_curve(0);
+    assert(perf_curve.point_count == 5);
+    assert(perf_curve.points[4].temp_c == 70.0f);
+    assert(!engine.is_profile_custom(0));
+
+    // UltraEndurance: 30°C -> 0% (fan stop allowed)
+    const auto& ultra_curve = engine.get_profile_curve(3);
+    assert(ultra_curve.points[0].speed_pct == 0.0f);
+
+    // 2. Monotonicity & Boundary Guarantee Across 41 Temperature Points [30°C..70°C]
+    for (int p = 0; p < 4; ++p) {
+        const auto& c = engine.get_profile_curve(p);
+        for (size_t i = 1; i < FanCurveEngine::LOOKUP_TABLE_SIZE; ++i) {
+            assert(c.lookup_pcts[i] >= c.lookup_pcts[i - 1] - 0.001f);
+            assert(c.lookup_levels[i] >= c.lookup_levels[i - 1]);
+        }
+        assert(c.lookup_pcts[0] >= 0.0f && c.lookup_pcts[0] <= 100.0f);
+        assert(c.lookup_pcts[40] >= 99.9f); // 70°C must be 100%
+        assert(c.lookup_levels[40] == FanCurveEngine::FAN_LEVEL_FULL_SPEED); // 70°C full speed
+    }
+
+    // 3. Failsafe Hard Ceiling Invariant Verification (T >= 70°C must be 100% FULL SPEED)
+    assert(engine.get_fan_level_for_temp(0, 70.0) == FanCurveEngine::FAN_LEVEL_FULL_SPEED);
+    assert(engine.get_fan_level_for_temp(1, 75.0) == FanCurveEngine::FAN_LEVEL_FULL_SPEED);
+    assert(engine.get_fan_level_for_temp(2, 95.0) == FanCurveEngine::FAN_LEVEL_FULL_SPEED);
+    assert(engine.get_fan_pct_for_temp(1, 70.0) == 100.0f);
+    assert(engine.get_fan_pct_for_temp(1, 85.0) == 100.0f);
+
+    // Sub-30°C clamping
+    assert(engine.get_fan_pct_for_temp(1, 20.0) == bal_curve.lookup_pcts[0]);
+
+    // 4. Custom Fan Curve Configuration & 5-Point Constraint
+    FanControlPoint custom_pts[5] = {
+        {30.0f, 15.0f},
+        {40.0f, 25.0f},
+        {50.0f, 45.0f},
+        {60.0f, 75.0f},
+        {70.0f, 100.0f}
+    };
+    assert(engine.set_profile_curve(1, custom_pts, 5));
+    assert(engine.is_profile_custom(1));
+    const auto& updated_bal = engine.get_profile_curve(1);
+    assert(updated_bal.point_count == 5);
+    assert(updated_bal.is_custom);
+
+    for (size_t i = 1; i < FanCurveEngine::LOOKUP_TABLE_SIZE; ++i) {
+        assert(updated_bal.lookup_pcts[i] >= updated_bal.lookup_pcts[i - 1] - 0.001f);
+    }
+
+    FanControlPoint single_pt[1] = {{30.0f, 20.0f}};
+    assert(!engine.set_profile_curve(1, single_pt, 1));
+    FanControlPoint six_pts[6] = {
+        {30.0f, 10.0f}, {35.0f, 20.0f}, {45.0f, 30.0f},
+        {55.0f, 50.0f}, {65.0f, 70.0f}, {70.0f, 100.0f}
+    };
+    assert(!engine.set_profile_curve(1, six_pts, 6));
+
+    engine.reset_to_defaults(1);
+    assert(!engine.is_profile_custom(1));
+    assert(engine.get_profile_curve(1).point_count == 5);
+
+    // 5. MitigationEngine Production Integration Check
+    MitigationEngine::fan_curve_engine().reset_to_defaults();
+    int default_bal_lvl = MitigationEngine::fan_level_for_temp_in_profile(50.0, PowerProfileMode::Balanced);
+    assert(default_bal_lvl >= 1 && default_bal_lvl <= 6);
+
+    FanControlPoint aggressive_pts[2] = {{30.0f, 50.0f}, {70.0f, 100.0f}};
+    MitigationEngine::fan_curve_engine().set_profile_curve(1, aggressive_pts, 2);
+    int custom_bal_lvl = MitigationEngine::fan_level_for_temp_in_profile(50.0, PowerProfileMode::Balanced);
+    assert(custom_bal_lvl >= default_bal_lvl);
+    MitigationEngine::fan_curve_engine().reset_to_defaults(1);
+
+    // 6. SIMD Benchmark Oracle Gate (< 1.0 us for 41-element spline evaluation)
+    constexpr size_t BENCH_ITERS = 20000;
+    uint8_t bench_lvls[41]{};
+    float bench_pcts[41]{};
+    auto t0 = std::chrono::steady_clock::now();
+    uint64_t tsc0 = wattcurb::core::hw_isa::read_tsc();
+
+    for (size_t b = 0; b < BENCH_ITERS; ++b) {
+        FanCurveEngine::compute_spline_lookup(custom_pts, 5, bench_lvls, bench_pcts, false);
+    }
+
+    auto t1 = std::chrono::steady_clock::now();
+    uint64_t tsc1 = wattcurb::core::hw_isa::read_tsc();
+    auto total_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+    double avg_us_op = (static_cast<double>(total_ns) / static_cast<double>(BENCH_ITERS)) / 1000.0;
+    double cycles_op = static_cast<double>(tsc1 - tsc0) / static_cast<double>(BENCH_ITERS);
+
+    std::cout << " [ORACLE GATE] SIMD Spline Evaluation Benchmark (" << BENCH_ITERS << " iters):\n"
+              << "   * Average Latency : " << std::fixed << std::setprecision(4) << avg_us_op << " us/op\n"
+              << "   * Average Cycles  : " << std::setprecision(1) << cycles_op << " cycles/op\n";
+
+    assert(avg_us_op < 1.0 && "SIMD Spline evaluation must execute in < 1.0 us");
+
+    // 7. Persistence Round-Trip Verification (Mock path)
+    const char* mock_conf = "/tmp/wattcurb_test_fan_curves.conf";
+    engine.set_profile_curve(0, custom_pts, 5);
+    assert(engine.save_to_file(mock_conf));
+    FanCurveEngine loaded_engine{};
+    assert(loaded_engine.load_from_file(mock_conf));
+    assert(loaded_engine.is_profile_custom(0));
+    assert(loaded_engine.get_profile_curve(0).point_count == 5);
+    ::unlink(mock_conf);
+
+    std::cout << " [PASS] test_fan_curve_simd_spline_engine (REF-TEST-090: Monotone cubic Hermite spline, "
+                 "SIMD 41-element LUT, 70°C failsafe full-speed ceiling, 5-point constraint, "
+                 << avg_us_op << " us/op verified)\n";
+}
+
 // Implements REF-TEST-085, REF-REQ-131 & REF-ARCH-078:
 // Hardware Bus & Display Deep Power Minimization Verification Gate
 void test_hardware_bus_and_display_power_minimization() {
@@ -6493,7 +6626,8 @@ void test_process_full_name_and_interactive_tooltips() {
     assert(res.process_culprits[0].full_name.find("wattcurb_tests") != std::string::npos);
 
     // 3. Verify QML source contains 200px width, modelData.fullName, and interactive ToolTip
-    std::ifstream qml_in("src/ui/qml/BatteryReportWindow.qml");
+    std::ifstream qml_in("src/ui/qml/BatteryReportView.qml");
+    if (!qml_in.is_open()) qml_in.open("src/ui/qml/BatteryReportWindow.qml");
     std::string qml_content((std::istreambuf_iterator<char>(qml_in)), std::istreambuf_iterator<char>());
 
     assert(qml_content.find("Layout.preferredWidth: 200") != std::string::npos);
@@ -6761,6 +6895,7 @@ int main() {
     test::test_safe_three_tier_memory_reclamation();
     test::test_tri_stage_memory_hygiene_engine();
     test::test_targeted_app_reclaim_engine();
+    test::test_fan_curve_simd_spline_engine();
     test::test_hardware_bus_and_display_power_minimization();
     test::test_multilingual_l10n_and_auto_system_locale();
     test::test_anti_starvation_and_greedy_capping();

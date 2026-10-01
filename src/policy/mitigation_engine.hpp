@@ -8,6 +8,8 @@
 
 namespace wattcurb::policy {
 
+class FanCurveEngine;
+
 // Implements REF-REQ-019, REF-REQ-031, REF-ARCH-008 & REF-ARCH-021
 // Closed-Loop Adaptive Mitigation Engine with 3-Tier State Machine & Bidirectional Rollback
 class MitigationEngine {
@@ -321,6 +323,7 @@ public:
     // (FeatureManager::evaluate_and_actuate). Mirrors ceiling_assertion_count()
     // so REF-TEST-073 can falsify a wiring that exists only under test.
     [[nodiscard]] static uint64_t fan_curve_application_count() noexcept;
+    [[nodiscard]] static FanCurveEngine& fan_curve_engine() noexcept;
 
     // REF-REQ-115: SMU thermal/power limits via ryzenadj. Performance and
     // Balanced raise the core thermal limit to SMU_TCTL_PERF_C so throttling only

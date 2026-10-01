@@ -2,5 +2,7 @@
     <qresource prefix="/">
         <file>qml/DashboardWindow.qml</file>
         <file>qml/BatteryReportWindow.qml</file>
+        <file>qml/BatteryReportView.qml</file>
+        <file>qml/FanCurveStudioView.qml</file>
     </qresource>
 </RCC>
