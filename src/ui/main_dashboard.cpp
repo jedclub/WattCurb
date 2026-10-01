@@ -1,5 +1,6 @@
 #include <QGuiApplication>
 #include <QQuickWindow>
+#include <QSurfaceFormat>
 #include <memory>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -208,8 +209,22 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // Zero-Wakeup GUI setup: Set environment hints for KDE Wayland/X11
+    // GPU Hardware Acceleration & Low-Overhead RHI Configuration (REF-REQ-138)
     qputenv("QT_QUICK_CONTROLS_STYLE", "Basic");
+    if (!qEnvironmentVariableIsSet("QSG_RHI_BACKEND")) {
+        qputenv("QSG_RHI_BACKEND", "opengl");
+    }
+    if (!qEnvironmentVariableIsSet("QSG_RENDER_LOOP")) {
+        qputenv("QSG_RENDER_LOOP", "threaded");
+    }
+
+    QSurfaceFormat format;
+    format.setRenderableType(QSurfaceFormat::OpenGL);
+    format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
+    format.setSwapInterval(1); // Enable standard VSync
+    QSurfaceFormat::setDefaultFormat(format);
+
+    QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
 
     QGuiApplication app(argc, argv);
     app.setApplicationName(report_mode ? "wattcurb-report" : "wattcurb-dashboard");

@@ -151,7 +151,7 @@ Item {
         }
 
         // =====================================================================
-        // 2. MAIN SPLINE CANVAS & INTERACTIVE WORKSPACE
+        // 2. MAIN SPLINE CANVAS & INTERACTIVE WORKSPACE (GPU ACCELERATED)
         // =====================================================================
         Rectangle {
             id: canvasContainer
@@ -193,26 +193,23 @@ Item {
             }
 
             function requestPaint() {
-                if (curveCanvas && typeof curveCanvas.requestPaint === "function") {
-                    curveCanvas.requestPaint();
+                if (splineCanvas && typeof splineCanvas.requestPaint === "function") {
+                    splineCanvas.requestPaint();
                 }
             }
 
-            // Canvas for rendering Grid, Monotone Spline Curve, and Failsafe zone
+            // -----------------------------------------------------------------
+            // 2.1 STATIC BACKGROUND GRID CANVAS (Zero Repaint on Drag / Telemetry)
+            // -----------------------------------------------------------------
             Canvas {
-                id: curveCanvas
+                id: gridCanvas
                 anchors.fill: parent
+                renderStrategy: Canvas.Threaded
+                renderTarget: Canvas.FramebufferObject
                 antialiasing: true
 
-                Connections {
-                    target: backend
-                    function onFanCurveDataChanged() {
-                        curveCanvas.requestPaint();
-                    }
-                    function onTelemetryChanged() {
-                        curveCanvas.requestPaint();
-                    }
-                }
+                onWidthChanged: requestPaint()
+                onHeightChanged: requestPaint()
 
                 onPaint: {
                     var ctx = getContext("2d");
@@ -223,7 +220,6 @@ Item {
                     var pl = canvasContainer.padLeft;
                     var pr = canvasContainer.padRight;
                     var pt = canvasContainer.padTop;
-                    var pb = canvasContainer.padBottom;
 
                     if (w <= 0 || h <= 0) return;
 
@@ -286,7 +282,6 @@ Item {
                         ctx.lineTo(gx, pt + h);
                         ctx.stroke();
 
-                        // Label
                         ctx.fillStyle = (t === 70) ? "#ef4444" : ((t === 30) ? "#38bdf8" : "#94a3b8");
                         ctx.font = (t === 30 || t === 70) ? "bold 11px Monospace" : "11px Monospace";
                         ctx.fillText(t + "°C", gx, pt + h + 18);
@@ -304,106 +299,152 @@ Item {
                     ctx.textAlign = "center";
                     ctx.fillText("Fan Target Speed (%)", 0, 0);
                     ctx.restore();
+                }
+            }
 
-                    // 5. Draw Monotone Spline Curve from SIMD 41-element LUT
+            // -----------------------------------------------------------------
+            // 2.2 DYNAMIC SPLINE CURVE CANVAS (Hardware FBO Accelerated)
+            // -----------------------------------------------------------------
+            Canvas {
+                id: splineCanvas
+                anchors.fill: parent
+                renderStrategy: Canvas.Threaded
+                renderTarget: Canvas.FramebufferObject
+                antialiasing: true
+
+                Connections {
+                    target: backend
+                    function onFanCurveDataChanged() {
+                        splineCanvas.requestPaint();
+                    }
+                }
+
+                onWidthChanged: requestPaint()
+                onHeightChanged: requestPaint()
+
+                onPaint: {
+                    var ctx = getContext("2d");
+                    ctx.clearRect(0, 0, width, height);
+
+                    var w = canvasContainer.plotW;
+                    var h = canvasContainer.plotH;
+                    var pl = canvasContainer.padLeft;
+                    var pt = canvasContainer.padTop;
+
+                    if (w <= 0 || h <= 0) return;
+
                     var luts = backend.fanLookupPcts;
-                    if (luts && luts.length >= 41) {
-                        // A. Gradient Fill under curve
-                        var grad = ctx.createLinearGradient(0, pt, 0, pt + h);
-                        var profCol = studioRoot.profileColors[backend.selectedFanProfile] || studioRoot.colCyan;
-                        grad.addColorStop(0.0, Qt.rgba(profCol.r, profCol.g, profCol.b, 0.45));
-                        grad.addColorStop(0.7, Qt.rgba(profCol.r, profCol.g, profCol.b, 0.15));
-                        grad.addColorStop(1.0, Qt.rgba(profCol.r, profCol.g, profCol.b, 0.01));
+                    if (!luts || luts.length < 41) return;
 
-                        ctx.beginPath();
-                        var startX = pl;
-                        var startY = canvasContainer.pctToY(luts[0]);
-                        ctx.moveTo(startX, pt + h);
-                        ctx.lineTo(startX, startY);
+                    var profCol = studioRoot.profileColors[backend.selectedFanProfile] || studioRoot.colCyan;
 
-                        for (var ti = 1; ti < 41; ++ti) {
-                            var cx = pl + (ti / 40.0) * w;
-                            var cy = canvasContainer.pctToY(luts[ti]);
-                            ctx.lineTo(cx, cy);
-                        }
+                    // A. Smooth Area Gradient Fill under curve
+                    var grad = ctx.createLinearGradient(0, pt, 0, pt + h);
+                    grad.addColorStop(0.0, Qt.rgba(profCol.r, profCol.g, profCol.b, 0.40));
+                    grad.addColorStop(0.7, Qt.rgba(profCol.r, profCol.g, profCol.b, 0.12));
+                    grad.addColorStop(1.0, Qt.rgba(profCol.r, profCol.g, profCol.b, 0.01));
 
-                        // Close path for fill
-                        ctx.lineTo(pl + w, pt + h);
-                        ctx.closePath();
-                        ctx.fillStyle = grad;
-                        ctx.fill();
+                    ctx.beginPath();
+                    var startX = pl;
+                    var startY = canvasContainer.pctToY(luts[0]);
+                    ctx.moveTo(startX, pt + h);
+                    ctx.lineTo(startX, startY);
 
-                        // B. Glow stroke line
-                        ctx.save();
-                        ctx.shadowColor = profCol;
-                        ctx.shadowBlur = 10;
-                        ctx.strokeStyle = profCol;
-                        ctx.lineWidth = 3.0;
-
-                        ctx.beginPath();
-                        ctx.moveTo(startX, startY);
-                        for (var ti2 = 1; ti2 < 41; ++ti2) {
-                            var cx2 = pl + (ti2 / 40.0) * w;
-                            var cy2 = canvasContainer.pctToY(luts[ti2]);
-                            ctx.lineTo(cx2, cy2);
-                        }
-                        ctx.stroke();
-                        ctx.restore();
+                    for (var ti = 1; ti < 41; ++ti) {
+                        var cx = pl + (ti / 40.0) * w;
+                        var cy = canvasContainer.pctToY(luts[ti]);
+                        ctx.lineTo(cx, cy);
                     }
 
-                    // 6. Draw Live Crosshair (Current CPU Temperature & RPM)
-                    var curTemp = backend.cpuTempC;
-                    var curRpm = backend.fanRpm;
-                    if (curTemp >= 25 && curTemp <= 85) {
-                        var crossX = canvasContainer.tempToX(curTemp);
-                        var curPctY = pt + h; // default bottom
-                        if (curTemp >= 30 && curTemp <= 70 && luts && luts.length >= 41) {
-                            var idx = Math.min(40, Math.max(0, Math.round(curTemp - 30)));
-                            curPctY = canvasContainer.pctToY(luts[idx]);
-                        } else if (curTemp > 70) {
-                            curPctY = pt; // 100%
-                        }
+                    ctx.lineTo(pl + w, pt + h);
+                    ctx.closePath();
+                    ctx.fillStyle = grad;
+                    ctx.fill();
 
-                        // Vertical guideline
-                        ctx.save();
-                        ctx.strokeStyle = "#38bdf8";
-                        ctx.lineWidth = 1.5;
-                        ctx.setLineDash([4, 4]);
-                        ctx.beginPath();
-                        ctx.moveTo(crossX, pt);
-                        ctx.lineTo(crossX, pt + h);
-                        ctx.stroke();
-                        ctx.setLineDash([]);
+                    // B. Crisp GPU-Accelerated Monotone Curve Stroke (No software blur)
+                    ctx.beginPath();
+                    ctx.moveTo(startX, startY);
+                    for (var ti2 = 1; ti2 < 41; ++ti2) {
+                        var cx2 = pl + (ti2 / 40.0) * w;
+                        var cy2 = canvasContainer.pctToY(luts[ti2]);
+                        ctx.lineTo(cx2, cy2);
+                    }
+                    ctx.strokeStyle = profCol;
+                    ctx.lineWidth = 3.0;
+                    ctx.stroke();
+                }
+            }
 
-                        // Active intersection point
-                        ctx.fillStyle = "#38bdf8";
-                        ctx.shadowColor = "#38bdf8";
-                        ctx.shadowBlur = 8;
-                        ctx.beginPath();
-                        ctx.arc(crossX, curPctY, 6, 0, Math.PI * 2);
-                        ctx.fill();
+            // -----------------------------------------------------------------
+            // 2.3 REAL-TIME CROSSHAIR & READOUT (Pure GPU SceneGraph Elements)
+            // -----------------------------------------------------------------
+            Item {
+                id: crosshairItem
+                anchors.fill: parent
+                visible: backend.cpuTempC >= 25 && backend.cpuTempC <= 85
 
-                        // Live readout tooltip badge
-                        ctx.fillStyle = "#0c4a6e";
-                        ctx.strokeStyle = "#38bdf8";
-                        ctx.lineWidth = 1;
-                        var badgeW = 100;
-                        var badgeH = 22;
-                        var badgeX = Math.min(pl + w - badgeW, Math.max(pl, crossX - badgeW / 2));
-                        var badgeY = Math.max(pt + 6, curPctY - 30);
-                        ctx.fillRect(badgeX, badgeY, badgeW, badgeH);
-                        ctx.strokeRect(badgeX, badgeY, badgeW, badgeH);
+                readonly property real curTemp: backend.cpuTempC
+                readonly property real curRpm: backend.fanRpm
+                readonly property real crossX: canvasContainer.tempToX(curTemp)
+                readonly property real curPctY: {
+                    var luts = backend.fanLookupPcts;
+                    if (curTemp >= 30 && curTemp <= 70 && luts && luts.length >= 41) {
+                        var idx = Math.min(40, Math.max(0, Math.round(curTemp - 30)));
+                        return canvasContainer.pctToY(luts[idx]);
+                    } else if (curTemp > 70) {
+                        return canvasContainer.padTop;
+                    }
+                    return canvasContainer.padTop + canvasContainer.plotH;
+                }
 
-                        ctx.fillStyle = "#ffffff";
-                        ctx.font = "bold 11px Monospace";
-                        ctx.textAlign = "center";
-                        ctx.fillText(curTemp + "°C · " + curRpm + " RPM", badgeX + badgeW / 2, badgeY + 15);
-                        ctx.restore();
+                // Vertical dashed-effect guideline
+                Rectangle {
+                    x: crosshairItem.crossX - 0.75
+                    y: canvasContainer.padTop
+                    width: 1.5
+                    height: canvasContainer.plotH
+                    color: "#38bdf8"
+                    opacity: 0.75
+                }
+
+                // Intersection Dot
+                Rectangle {
+                    x: crosshairItem.crossX - 6
+                    y: crosshairItem.curPctY - 6
+                    width: 12
+                    height: 12
+                    radius: 6
+                    color: "#38bdf8"
+                    border.color: "#ffffff"
+                    border.width: 2
+                }
+
+                // Readout Badge
+                Rectangle {
+                    x: Math.min(canvasContainer.padLeft + canvasContainer.plotW - width, Math.max(canvasContainer.padLeft, crosshairItem.crossX - width / 2))
+                    y: Math.max(canvasContainer.padTop + 4, crosshairItem.curPctY - 26)
+                    width: readoutLabel.implicitWidth + 16
+                    height: 22
+                    radius: 4
+                    color: "#0c4a6e"
+                    border.color: "#38bdf8"
+                    border.width: 1
+
+                    Text {
+                        id: readoutLabel
+                        anchors.centerIn: parent
+                        text: crosshairItem.curTemp.toFixed(0) + "°C · " + crosshairItem.curRpm + " RPM"
+                        color: "#ffffff"
+                        font.bold: true
+                        font.pixelSize: 11
+                        font.family: "Monospace"
                     }
                 }
             }
 
-            // Interactive Drag Handles for Control Points
+            // -----------------------------------------------------------------
+            // 2.4 VISUAL CONTROL POINT HANDLES (Pure Visual Presentation)
+            // -----------------------------------------------------------------
             Repeater {
                 id: handleRepeater
                 model: backend.fanControlPoints
@@ -416,9 +457,9 @@ Item {
 
                     x: canvasContainer.tempToX(ptTemp) - width / 2
                     y: canvasContainer.pctToY(ptPct) - height / 2
-                    width: 24
-                    height: 24
-                    z: isSelected ? 20 : 10
+                    width: 32
+                    height: 32
+                    z: isSelected ? 30 : 15
 
                     Rectangle {
                         anchors.centerIn: parent
@@ -429,27 +470,27 @@ Item {
                         border.color: handleItem.isSelected ? studioRoot.colCyan : "#0f172a"
                         border.width: 2
 
-                        Behavior on width { NumberAnimation { duration: 100 } }
-                        Behavior on height { NumberAnimation { duration: 100 } }
+                        Behavior on width { NumberAnimation { duration: 80 } }
+                        Behavior on height { NumberAnimation { duration: 80 } }
 
-                        // Outer ring glow
+                        // Outer focus ring
                         Rectangle {
                             anchors.centerIn: parent
-                            width: parent.width + 8
-                            height: parent.height + 8
+                            width: parent.width + 10
+                            height: parent.height + 10
                             radius: width / 2
                             color: "transparent"
                             border.color: studioRoot.profileColors[backend.selectedFanProfile]
-                            border.width: 1.5
-                            opacity: handleItem.isSelected ? 0.8 : 0.0
+                            border.width: 2
+                            opacity: handleItem.isSelected ? 0.9 : 0.0
                         }
                     }
 
-                    // Hover/Drag readout label
+                    // Hover/Drag tooltip label
                     Rectangle {
-                        visible: handleItem.isSelected || dragMa.containsMouse
+                        visible: handleItem.isSelected || (curveInteractionArea.hoveredIndex === index && !studioRoot.isDragging)
                         anchors.bottom: parent.top
-                        anchors.bottomMargin: 6
+                        anchors.bottomMargin: 4
                         anchors.horizontalCenter: parent.horizontalCenter
                         width: handleLabel.implicitWidth + 12
                         height: 20
@@ -468,56 +509,82 @@ Item {
                             font.family: "Monospace"
                         }
                     }
-
-                    MouseArea {
-                        id: dragMa
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-
-                        drag.target: parent
-                        drag.axis: Drag.XAndYAxis
-                        drag.minimumX: canvasContainer.padLeft - parent.width / 2
-                        drag.maximumX: canvasContainer.padLeft + canvasContainer.plotW - parent.width / 2
-                        drag.minimumY: canvasContainer.padTop - parent.height / 2
-                        drag.maximumY: canvasContainer.padTop + canvasContainer.plotH - parent.height / 2
-
-                        onPressed: {
-                            studioRoot.activePointIndex = index;
-                            studioRoot.isDragging = true;
-                        }
-
-                        onPositionChanged: {
-                            if (studioRoot.isDragging && pressed) {
-                                var newX = parent.x + parent.width / 2;
-                                var newY = parent.y + parent.height / 2;
-                                var newTemp = canvasContainer.xToTemp(newX);
-                                var newPct = canvasContainer.yToPct(newY);
-
-                                backend.setFanPoint(index, newTemp, newPct);
-                                canvasContainer.requestPaint();
-                            }
-                        }
-
-                        onReleased: {
-                            studioRoot.isDragging = false;
-                            canvasContainer.requestPaint();
-                        }
-                    }
                 }
             }
 
-            // Click canvas to deselect or double-click to add point
+            // -----------------------------------------------------------------
+            // 2.5 UNIFIED INTERACTION OVERLAY (Zero-Jank Nearest-Point Drag Engine)
+            // -----------------------------------------------------------------
             MouseArea {
+                id: curveInteractionArea
                 anchors.fill: parent
-                z: 1
+                hoverEnabled: true
+                preventStealing: true
+                z: 50
                 acceptedButtons: Qt.LeftButton
-                onClicked: function(mouse) {
-                    if (mouse.x >= canvasContainer.padLeft && mouse.x <= canvasContainer.padLeft + canvasContainer.plotW &&
-                        mouse.y >= canvasContainer.padTop && mouse.y <= canvasContainer.padTop + canvasContainer.plotH) {
-                        studioRoot.activePointIndex = -1;
+
+                property int hoveredIndex: -1
+                readonly property real hitRadius: 28
+
+                function findNearestPointIndex(mx, my) {
+                    var pts = backend.fanControlPoints;
+                    if (!pts || pts.length === 0) return -1;
+                    var bestIdx = -1;
+                    var bestDistSq = hitRadius * hitRadius;
+
+                    for (var i = 0; i < pts.length; ++i) {
+                        var px = canvasContainer.tempToX(pts[i].temp);
+                        var py = canvasContainer.pctToY(pts[i].pct);
+                        var dx = mx - px;
+                        var dy = my - py;
+                        var distSq = dx * dx + dy * dy;
+                        if (distSq <= bestDistSq) {
+                            bestDistSq = distSq;
+                            bestIdx = i;
+                        }
+                    }
+                    return bestIdx;
+                }
+
+                onPositionChanged: function(mouse) {
+                    if (pressed && studioRoot.isDragging && studioRoot.activePointIndex >= 0) {
+                        // Directly map canvasContainer mouse coordinates to temperature and speed percentage
+                        var newTemp = canvasContainer.xToTemp(mouse.x);
+                        var newPct = canvasContainer.yToPct(mouse.y);
+                        backend.setFanPoint(studioRoot.activePointIndex, newTemp, newPct);
+                    } else {
+                        // Hover detection for smooth cursor feedback
+                        var hit = findNearestPointIndex(mouse.x, mouse.y);
+                        hoveredIndex = hit;
+                        cursorShape = (hit >= 0) ? Qt.PointingHandCursor : Qt.ArrowCursor;
                     }
                 }
+
+                onPressed: function(mouse) {
+                    var hit = findNearestPointIndex(mouse.x, mouse.y);
+                    if (hit >= 0) {
+                        studioRoot.activePointIndex = hit;
+                        studioRoot.isDragging = true;
+                        cursorShape = Qt.ClosedHandCursor;
+                    } else {
+                        // Clicked empty area: deselect
+                        studioRoot.activePointIndex = -1;
+                        studioRoot.isDragging = false;
+                    }
+                }
+
+                onReleased: function(mouse) {
+                    studioRoot.isDragging = false;
+                    var hit = findNearestPointIndex(mouse.x, mouse.y);
+                    hoveredIndex = hit;
+                    cursorShape = (hit >= 0) ? Qt.PointingHandCursor : Qt.ArrowCursor;
+                }
+
+                onCanceled: {
+                    studioRoot.isDragging = false;
+                    cursorShape = Qt.ArrowCursor;
+                }
+
                 onDoubleClicked: function(mouse) {
                     if (mouse.x >= canvasContainer.padLeft && mouse.x <= canvasContainer.padLeft + canvasContainer.plotW &&
                         mouse.y >= canvasContainer.padTop && mouse.y <= canvasContainer.padTop + canvasContainer.plotH) {
@@ -527,7 +594,6 @@ Item {
                             backend.addFanPoint(addT, addP);
                             studioRoot.statusToast = "포인트 추가됨: " + addT.toFixed(0) + "°C, " + addP.toFixed(0) + "%";
                             statusToastTimer.restart();
-                            canvasContainer.requestPaint();
                         } else {
                             studioRoot.statusToast = "최대 10개의 포인트까지만 지원됩니다.";
                             statusToastTimer.restart();

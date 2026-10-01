@@ -1053,12 +1053,21 @@ bool DashboardBackend::setFanPoint(int pointIdx, double temp, double pct) {
     auto curve = fan_curve_engine_.get_profile_curve(selected_fan_profile_);
     if (pointIdx < 0 || pointIdx >= curve.point_count) return false;
 
-    curve.points[pointIdx].temp_c = std::clamp(static_cast<float>(temp), 30.0f, 70.0f);
-    curve.points[pointIdx].speed_pct = std::clamp(static_cast<float>(pct), 0.0f, 100.0f);
+    // REF-REQ-136: Bound temperature strictly between neighboring points
+    // This preserves monotonic ordering and prevents point index flipping during interactive drag
+    const float min_t = (pointIdx > 0) ? (curve.points[pointIdx - 1].temp_c + 0.5f) : 30.0f;
+    const float max_t = (pointIdx + 1 < curve.point_count) ? (curve.points[pointIdx + 1].temp_c - 0.5f) : 70.0f;
 
-    std::sort(curve.points, curve.points + curve.point_count, [](const auto& a, const auto& b) {
-        return a.temp_c < b.temp_c;
-    });
+    const float clamped_t = std::clamp(static_cast<float>(temp), min_t, max_t);
+    const float clamped_p = std::clamp(static_cast<float>(pct), 0.0f, 100.0f);
+
+    if (std::abs(curve.points[pointIdx].temp_c - clamped_t) < 0.05f &&
+        std::abs(curve.points[pointIdx].speed_pct - clamped_p) < 0.05f) {
+        return true; // No perceptible change, avoid redundant signaling
+    }
+
+    curve.points[pointIdx].temp_c = clamped_t;
+    curve.points[pointIdx].speed_pct = clamped_p;
 
     // Pure in-memory update with zero disk I/O churn during interactive drag
     bool ok = fan_curve_engine_.set_profile_curve(selected_fan_profile_, curve.points, curve.point_count, /*auto_save=*/false);
