@@ -29,7 +29,7 @@ Managing two separate top-level windows increases window manager clutter, double
   * Minimum start temperature: **$30^\circ\text{C}$** ($T_{\min} = 30$)
   * Maximum anchor temperature: **$70^\circ\text{C}$** ($T_{\max} = 70$)
 * **Control Point Constraints**:
-  * Minimum 2 control points, **maximum 5 control points** ($2 \le N \le 5$).
+  * Minimum 2 control points, **maximum 10 control points** ($2 \le N \le 10$).
   * Each control point $P_i = (T_i, S_i)$ where $T_i \in [30^\circ\text{C}, 70^\circ\text{C}]$ and fan speed $S_i \in [0\%, 100\%]$.
   * Points must be strictly ordered by temperature: $T_0 < T_1 < \dots < T_{N-1}$.
 
@@ -38,12 +38,16 @@ Managing two separate top-level windows increases window manager clutter, double
   * Regardless of user-configured curves, whenever CPU package temperature reaches or exceeds **$70^\circ\text{C}$**, the fan must be commanded to **$100\%$ full speed (`FAN_LEVEL_FULL_SPEED`)** without exception.
   * For $T < 30^\circ\text{C}$, the fan speed is clamped to the first control point $S_0$ (or 0 RPM for `UltraEndurance`).
 
-### REF-REQ-136.4: Monotone Cubic Hermite Spline with SIMD Vectorization
+### REF-REQ-136.4: Monotone Cubic Hermite Spline with SIMD Vectorization & L1 Cache Optimization
 * To prevent unnatural oscillations or speed dips (where higher temperatures produce lower fan speeds), curve interpolation must employ a **Monotone Cubic Hermite Spline (Fritsch-Carlson)** algorithm.
 * **SIMD Vectorization Mandate**:
-  * The evaluation of the 41-element integer lookup table ($T \in [30^\circ\text{C}, 70^\circ\text{C}]$) must be vectorized using 8-wide AVX2 / FMA (or 4-wide SSE) SIMD intrinsics.
+  * The evaluation of the 41-element integer lookup table ($T \in [30^\circ\text{C}, 70^\circ\text{C}]$) must be vectorized using 8-wide AVX2 / FMA SIMD intrinsics.
   * Table generation must complete in $< 100\,\text{ns}$ with zero heap allocation.
   * During monitoring cycles, daemon fan speed lookup must be strictly **$O(1)$** via fixed stack/cache array indexing.
+* **L1 Data Cache Locality & Zero Disk I/O during Interaction**:
+  * Hot lookup tables must be aligned to 64 bytes (`alignas(64)`) to fit completely inside 3 cache lines (192 bytes total for all 4 profiles).
+  * In-memory editing must eliminate synchronous disk I/O on drag events; persistence occurs strictly on explicit user confirmation or daemon reload.
+  * Fine-grained scoped profiling (`WATTCURB_PROFILE_SCOPE`) must instrument hot paths (`FanCurve::GetLevel`, `FanCurve::ComputeSpline`, `FanCurve::EvalPolynomialSIMD`).
 
 ---
 
@@ -51,4 +55,4 @@ Managing two separate top-level windows increases window manager clutter, double
 
 * Requirement: `REF-REQ-136`
 * Architecture: `REF-ARCH-083`
-* Test Specification: `REF-TEST-090` (Monotone spline correctness, SIMD lookup equivalence, boundary clamping, 5-point constraint, 70°C failsafe).
+* Test Specification: `REF-TEST-090` (Monotone spline correctness, SIMD lookup equivalence, boundary clamping, 10-point constraint, 70°C failsafe).

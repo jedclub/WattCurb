@@ -5816,12 +5816,30 @@ void test_fan_curve_simd_spline_engine() {
     }
 
     FanControlPoint single_pt[1] = {{30.0f, 20.0f}};
-    assert(!engine.set_profile_curve(1, single_pt, 1));
+    assert(!engine.set_profile_curve(1, single_pt, 1)); // Minimum 2 points invariant
+
+    // 6 points must now succeed under 10-point ceiling
     FanControlPoint six_pts[6] = {
         {30.0f, 10.0f}, {35.0f, 20.0f}, {45.0f, 30.0f},
         {55.0f, 50.0f}, {65.0f, 70.0f}, {70.0f, 100.0f}
     };
-    assert(!engine.set_profile_curve(1, six_pts, 6));
+    assert(engine.set_profile_curve(1, six_pts, 6));
+    assert(engine.get_profile_curve(1).point_count == 6);
+
+    // 10 points must succeed
+    FanControlPoint ten_pts[10] = {
+        {30.0f, 5.0f},  {34.0f, 10.0f}, {38.0f, 15.0f}, {42.0f, 22.0f}, {46.0f, 30.0f},
+        {50.0f, 40.0f}, {55.0f, 55.0f}, {60.0f, 70.0f}, {65.0f, 85.0f}, {70.0f, 100.0f}
+    };
+    assert(engine.set_profile_curve(1, ten_pts, 10));
+    assert(engine.get_profile_curve(1).point_count == 10);
+
+    // 11 points must fail (> MAX_POINTS = 10)
+    FanControlPoint eleven_pts[11] = {
+        {30.0f, 5.0f},  {34.0f, 10.0f}, {38.0f, 15.0f}, {42.0f, 20.0f}, {46.0f, 25.0f},
+        {50.0f, 35.0f}, {54.0f, 45.0f}, {58.0f, 55.0f}, {62.0f, 65.0f}, {66.0f, 80.0f}, {70.0f, 100.0f}
+    };
+    assert(!engine.set_profile_curve(1, eleven_pts, 11));
 
     engine.reset_to_defaults(1);
     assert(!engine.is_profile_custom(1));
@@ -5861,6 +5879,24 @@ void test_fan_curve_simd_spline_engine() {
 
     assert(avg_us_op < 1.0 && "SIMD Spline evaluation must execute in < 1.0 us");
 
+    // 6-1. Hot-Path L1 Cache Lookup Benchmark (100,000 queries)
+    constexpr size_t HOT_ITERS = 100000;
+    auto ht0 = std::chrono::steady_clock::now();
+    uint64_t htsc0 = wattcurb::core::hw_isa::read_tsc();
+    uint64_t sink = 0;
+    for (size_t h = 0; h < HOT_ITERS; ++h) {
+        sink += engine.get_fan_level_for_temp(1, 30.0 + (h % 41));
+    }
+    auto ht1 = std::chrono::steady_clock::now();
+    uint64_t htsc1 = wattcurb::core::hw_isa::read_tsc();
+    double hot_ns_op = static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(ht1 - ht0).count()) / static_cast<double>(HOT_ITERS);
+    double hot_cycles = static_cast<double>(htsc1 - htsc0) / static_cast<double>(HOT_ITERS);
+    std::cout << " [ORACLE GATE] Hot-Path L1 Cache Fan Level Lookup (" << HOT_ITERS << " iters):\n"
+              << "   * Average Latency : " << std::fixed << std::setprecision(2) << hot_ns_op << " ns/op\n"
+              << "   * Average Cycles  : " << std::setprecision(1) << hot_cycles << " cycles/op\n";
+    assert(sink > 0);
+    assert(hot_ns_op < 50.0 && "Hot path fan level lookup must be < 50 ns (L1 cache hit)");
+
     // 7. Persistence Round-Trip Verification (Mock path)
     const char* mock_conf = "/tmp/wattcurb_test_fan_curves.conf";
     engine.set_profile_curve(0, custom_pts, 5);
@@ -5872,7 +5908,7 @@ void test_fan_curve_simd_spline_engine() {
     ::unlink(mock_conf);
 
     std::cout << " [PASS] test_fan_curve_simd_spline_engine (REF-TEST-090: Monotone cubic Hermite spline, "
-                 "SIMD 41-element LUT, 70°C failsafe full-speed ceiling, 5-point constraint, "
+                 "SIMD 41-element LUT, 70°C failsafe full-speed ceiling, 10-point constraint, "
                  << avg_us_op << " us/op verified)\n";
 }
 

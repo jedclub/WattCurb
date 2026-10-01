@@ -73,7 +73,7 @@ Item {
                             font.family: "Monospace"
                         }
                         Text {
-                            text: "ThinkPad EC Monotone Hermite Spline · 30°C~70°C (최대 5포인트 · 70°C 풀스피드 안전 잠금)"
+                            text: "ThinkPad EC Monotone Hermite Spline · 30°C~70°C (최대 10포인트 · 70°C 풀스피드 안전 잠금)"
                             color: studioRoot.textDim
                             font.pixelSize: 11
                         }
@@ -523,13 +523,13 @@ Item {
                         mouse.y >= canvasContainer.padTop && mouse.y <= canvasContainer.padTop + canvasContainer.plotH) {
                         var addT = canvasContainer.xToTemp(mouse.x);
                         var addP = canvasContainer.yToPct(mouse.y);
-                        if (backend.fanPointCount < 5) {
+                        if (backend.fanPointCount < 10) {
                             backend.addFanPoint(addT, addP);
                             studioRoot.statusToast = "포인트 추가됨: " + addT.toFixed(0) + "°C, " + addP.toFixed(0) + "%";
                             statusToastTimer.restart();
                             canvasContainer.requestPaint();
                         } else {
-                            studioRoot.statusToast = "최대 5개의 포인트까지만 지원됩니다.";
+                            studioRoot.statusToast = "최대 10개의 포인트까지만 지원됩니다.";
                             statusToastTimer.restart();
                         }
                     }
@@ -578,7 +578,7 @@ Item {
 
                 // Add Point button when no point selected
                 Button {
-                    visible: studioRoot.activePointIndex < 0 && backend.fanPointCount < 5
+                    visible: studioRoot.activePointIndex < 0 && backend.fanPointCount < 10
                     text: "➕ 포인트 추가 (더블클릭 또는 클릭)"
                     onClicked: {
                         // Add mid point

@@ -3030,6 +3030,7 @@ double MitigationEngine::fan_full_temp_for_profile(PowerProfileMode mode) noexce
 
 int MitigationEngine::fan_level_for_temp_in_profile(double cpu_temp_c,
                                                     PowerProfileMode mode) noexcept {
+    WATTCURB_PROFILE_SCOPE("Mitigation::FanLevelQuery");
     // REF-REQ-136, REF-ARCH-083: Check if custom fan curve is active for this profile
     const int prof_idx = static_cast<int>(mode);
     if (prof_idx >= 0 && prof_idx < 4 && s_fan_curve_engine.is_profile_custom(prof_idx)) {
@@ -3077,6 +3078,7 @@ int MitigationEngine::fan_level_for_temp_in_profile(double cpu_temp_c,
 
 int MitigationEngine::apply_fan_for_temp(double cpu_temp_c,
                                          PowerProfileMode mode) noexcept {
+    WATTCURB_PROFILE_SCOPE("Mitigation::ApplyFanActuation");
     ++g_fan_curve_application_count;
     const int lvl = fan_level_for_temp_in_profile(cpu_temp_c, mode);
     if (lvl < 0) return -1;

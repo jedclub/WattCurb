@@ -1013,6 +1013,7 @@ QVariantList DashboardBackend::fanControlPoints() const {
     QVariantList list;
     if (selected_fan_profile_ < 0 || selected_fan_profile_ >= 4) return list;
     const auto& curve = fan_curve_engine_.get_profile_curve(selected_fan_profile_);
+    list.reserve(curve.point_count);
     for (uint8_t i = 0; i < curve.point_count; ++i) {
         QVariantMap map;
         map["temp"] = static_cast<double>(curve.points[i].temp_c);
@@ -1023,9 +1024,11 @@ QVariantList DashboardBackend::fanControlPoints() const {
 }
 
 QVariantList DashboardBackend::fanLookupPcts() const {
+    WATTCURB_PROFILE_SCOPE("Dashboard::FanLookupPcts");
     QVariantList list;
     if (selected_fan_profile_ < 0 || selected_fan_profile_ >= 4) return list;
     const auto& curve = fan_curve_engine_.get_profile_curve(selected_fan_profile_);
+    list.reserve(policy::FanCurveEngine::LOOKUP_TABLE_SIZE);
     for (size_t i = 0; i < policy::FanCurveEngine::LOOKUP_TABLE_SIZE; ++i) {
         list.append(static_cast<double>(curve.lookup_pcts[i]));
     }
@@ -1033,9 +1036,11 @@ QVariantList DashboardBackend::fanLookupPcts() const {
 }
 
 QVariantList DashboardBackend::fanLookupLevels() const {
+    WATTCURB_PROFILE_SCOPE("Dashboard::FanLookupLevels");
     QVariantList list;
     if (selected_fan_profile_ < 0 || selected_fan_profile_ >= 4) return list;
     const auto& curve = fan_curve_engine_.get_profile_curve(selected_fan_profile_);
+    list.reserve(policy::FanCurveEngine::LOOKUP_TABLE_SIZE);
     for (size_t i = 0; i < policy::FanCurveEngine::LOOKUP_TABLE_SIZE; ++i) {
         list.append(static_cast<int>(curve.lookup_levels[i]));
     }
@@ -1043,6 +1048,7 @@ QVariantList DashboardBackend::fanLookupLevels() const {
 }
 
 bool DashboardBackend::setFanPoint(int pointIdx, double temp, double pct) {
+    WATTCURB_PROFILE_SCOPE("Dashboard::SetFanPoint");
     if (selected_fan_profile_ < 0 || selected_fan_profile_ >= 4) return false;
     auto curve = fan_curve_engine_.get_profile_curve(selected_fan_profile_);
     if (pointIdx < 0 || pointIdx >= curve.point_count) return false;
@@ -1054,7 +1060,8 @@ bool DashboardBackend::setFanPoint(int pointIdx, double temp, double pct) {
         return a.temp_c < b.temp_c;
     });
 
-    bool ok = fan_curve_engine_.set_profile_curve(selected_fan_profile_, curve.points, curve.point_count);
+    // Pure in-memory update with zero disk I/O churn during interactive drag
+    bool ok = fan_curve_engine_.set_profile_curve(selected_fan_profile_, curve.points, curve.point_count, /*auto_save=*/false);
     if (ok) {
         emit fanCurveDataChanged();
     }
@@ -1062,6 +1069,7 @@ bool DashboardBackend::setFanPoint(int pointIdx, double temp, double pct) {
 }
 
 bool DashboardBackend::addFanPoint(double temp, double pct) {
+    WATTCURB_PROFILE_SCOPE("Dashboard::AddFanPoint");
     if (selected_fan_profile_ < 0 || selected_fan_profile_ >= 4) return false;
     auto curve = fan_curve_engine_.get_profile_curve(selected_fan_profile_);
     if (curve.point_count >= policy::FanCurveEngine::MAX_POINTS) return false;
@@ -1074,7 +1082,7 @@ bool DashboardBackend::addFanPoint(double temp, double pct) {
         return a.temp_c < b.temp_c;
     });
 
-    bool ok = fan_curve_engine_.set_profile_curve(selected_fan_profile_, curve.points, curve.point_count);
+    bool ok = fan_curve_engine_.set_profile_curve(selected_fan_profile_, curve.points, curve.point_count, /*auto_save=*/false);
     if (ok) {
         emit fanCurveDataChanged();
     }
@@ -1082,6 +1090,7 @@ bool DashboardBackend::addFanPoint(double temp, double pct) {
 }
 
 bool DashboardBackend::removeFanPoint(int pointIdx) {
+    WATTCURB_PROFILE_SCOPE("Dashboard::RemoveFanPoint");
     if (selected_fan_profile_ < 0 || selected_fan_profile_ >= 4) return false;
     auto curve = fan_curve_engine_.get_profile_curve(selected_fan_profile_);
     if (curve.point_count <= policy::FanCurveEngine::MIN_POINTS) return false;
@@ -1092,7 +1101,7 @@ bool DashboardBackend::removeFanPoint(int pointIdx) {
     }
     curve.point_count--;
 
-    bool ok = fan_curve_engine_.set_profile_curve(selected_fan_profile_, curve.points, curve.point_count);
+    bool ok = fan_curve_engine_.set_profile_curve(selected_fan_profile_, curve.points, curve.point_count, /*auto_save=*/false);
     if (ok) {
         emit fanCurveDataChanged();
     }

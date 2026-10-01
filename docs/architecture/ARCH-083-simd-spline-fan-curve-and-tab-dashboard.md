@@ -12,7 +12,7 @@ The **Custom Fan Curve & Unified Dashboard** subsystem links a high-DPI Qt6/QML 
 |  +-------------------+  +--------------------+  +---------+----------+  |
 |                                                           |             |
 |                                                           v             |
-|                   Interactive Spline Canvas (5 Control Points)          |
+|                   Interactive Spline Canvas (2-10 Control Points)       |
 +-----------------------------------------------------------+-------------+
                                                             | IPC Socket
                                                             v
@@ -21,8 +21,10 @@ The **Custom Fan Curve & Unified Dashboard** subsystem links a high-DPI Qt6/QML 
 |  +-------------------------------------------------------------------+  |
 |  |           FanCurveEngine (REF-ARCH-083)                           |  |
 |  |   - AVX2/FMA Monotone Cubic Spline (Horner's Rule)                |  |
+|  |   - Hot/Cold Splitting: alignas(64) 4-profile LUT in 3 cache lines|  |
 |  |   - 41-element alignas(64) uint8_t lookup table [30°C .. 70°C]    |  |
 |  |   - Failsafe Safety Ceiling (>= 70°C -> FAN_LEVEL_FULL_SPEED)     |  |
+|  |   - Scoped Profiling: WATTCURB_PROFILE_SCOPE on all hot paths     |  |
 |  +---------------------------------+---------------------------------+  |
 |                                    | O(1) Level Lookup                  |
 |                                    v                                    |
