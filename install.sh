@@ -119,7 +119,8 @@ fi
 ${SUDO} install -m 644 -p "${UNIT_SRC}" /etc/systemd/system/wattcurb.service
 
 ${SUDO} systemctl daemon-reload
-${SUDO} systemctl enable --now wattcurb.service
+${SUDO} systemctl enable wattcurb.service
+${SUDO} systemctl restart wattcurb.service
 
 # 4. Install Desktop Autostart & Application Entries
 echo "[3/4] Configuring desktop autostart and application entries..."
