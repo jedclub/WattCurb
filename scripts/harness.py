@@ -257,6 +257,18 @@ def main():
     p_check = subparsers.add_parser("check", help="Run fast static sanity checks")
     p_check.set_defaults(func=cmd_check)
 
+    # clean
+    p_clean = subparsers.add_parser("clean", help="Clean up build artifacts and temporary files")
+    p_clean.add_argument("-n", "--dry-run", action="store_true", help="Preview items to be deleted")
+    p_clean.add_argument("-a", "--all", action="store_true", help="Clean cache directories as well")
+    p_clean.add_argument("--keep-tmp", action="store_true", help="Keep tmp logs")
+    p_clean.set_defaults(func=lambda args: subprocess.call([
+        str(REPO_ROOT / "clean.sh"),
+        *(["--dry-run"] if args.dry_run else []),
+        *(["--all"] if args.all else []),
+        *(["--keep-tmp"] if args.keep_tmp else [])
+    ]))
+
     # eval
     p_eval = subparsers.add_parser("eval", help="Full automated build + test + check evaluation pipeline")
     p_eval.set_defaults(func=cmd_eval)

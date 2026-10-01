@@ -315,6 +315,10 @@ bash scripts/build_pgo.sh
 
 # Install the hardened unit and binaries
 sudo ./install.sh
+
+# Clean up build artifacts and temporary logs
+./clean.sh          # Or 'python3 scripts/harness.py clean'
+./clean.sh --dry-run # Preview targets and disk space without deleting
 ```
 
 > `install.sh` installs `scripts/wattcurb.service` **verbatim** and stages the PGO binaries from `output/`. Do not install `build/` artifacts — they are un-optimized and unstripped.
