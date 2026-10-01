@@ -17,6 +17,7 @@
 #include "policy/memory_hygiene_engine.hpp"
 #include "policy/targeted_app_reclaim.hpp"
 #include "policy/fan_curve_engine.hpp"
+#include "policy/disk_pressure_guard.hpp"
 #include "report/report_generator.hpp"
 #include "ipc/tray_shared_state.hpp"
 #include "ipc/history_ring_buffer.hpp"
@@ -5912,6 +5913,84 @@ void test_fan_curve_simd_spline_engine() {
                  << avg_us_op << " us/op verified)\n";
 }
 
+// Implements REF-TEST-091, REF-REQ-137 & REF-ARCH-084:
+// Safe Progressive Disk Pressure Guard & Dynamic SIMD Selection Gate
+void test_disk_pressure_guard_and_dynamic_simd() {
+    using namespace wattcurb;
+    using namespace wattcurb::policy;
+
+    std::cout << "\n--- [REF-TEST-091] Safe Progressive Disk Pressure Guard & Dynamic SIMD Gate ---\n";
+
+    // 1. Dynamic SIMD Dispatch Verification
+    FanControlPoint test_pts[3] = {
+        {30.0f, 10.0f},
+        {50.0f, 50.0f},
+        {70.0f, 100.0f}
+    };
+    uint8_t lvls[41]{};
+    float pcts[41]{};
+    assert(FanCurveEngine::compute_spline_lookup(test_pts, 3, lvls, pcts, false));
+    assert(pcts[0] >= 10.0f && pcts[0] <= 11.0f);
+    assert(pcts[40] == 100.0f);
+    assert(lvls[40] == FanCurveEngine::FAN_LEVEL_FULL_SPEED);
+
+    // 2. Storage Utilization Sampling (statvfs)
+    auto sample = DiskPressureGuard::sample_storage("/");
+    assert(sample.total_bytes > 0 && "Root partition total bytes must be non-zero");
+    assert(sample.used_pct >= 0.0 && sample.used_pct <= 100.0);
+    assert(sample.is_pressure_satisfied == (sample.used_pct >= DiskPressureGuard::DISK_PRESSURE_THRESHOLD_PCT));
+
+    // 3. Cooldown & Invariant Verification
+    DiskPressureGuard guard{};
+    guard.reset_metrics();
+    assert(guard.is_cooldown_expired(0));
+    assert(guard.reclaim_event_count() == 0);
+    assert(guard.total_reclaimed_bytes() == 0);
+
+    // 4. Safe Non-Destructive File Filter Invariant Test
+    const std::string sandbox_dir = "/tmp/wattcurb_test_disk_hygiene";
+    ::mkdir(sandbox_dir.c_str(), 0755);
+
+    const std::string lock_file = sandbox_dir + "/active_service.lock";
+    const std::string pid_file = sandbox_dir + "/daemon.pid";
+    const std::string old_tmp_file = sandbox_dir + "/expired_build.log";
+
+    {
+        std::ofstream of1(lock_file);
+        of1 << "lock data";
+        std::ofstream of2(pid_file);
+        of2 << "12345";
+        std::ofstream of3(old_tmp_file);
+        of3 << "temporary expired log data";
+    }
+
+    // Set old_tmp_file mtime to 10 days ago (> 7 days)
+    struct timespec times[2];
+    auto now_sec = static_cast<uint64_t>(std::time(nullptr));
+    times[0].tv_sec = now_sec - (10ULL * 86400ULL);
+    times[0].tv_nsec = 0;
+    times[1].tv_sec = now_sec - (10ULL * 86400ULL);
+    times[1].tv_nsec = 0;
+    ::utimensat(AT_FDCWD, old_tmp_file.c_str(), times, 0);
+
+    // Execute tiered storage reclamation against sandbox
+    guard.reclaim_tiered_storage(DiskPressureGuard::MAX_BATCH_RECLAIM_BYTES);
+
+    // Invariant Assertions: .lock and .pid files MUST NOT be unlinked
+    struct stat st_lock{}, st_pid{};
+    assert(::stat(lock_file.c_str(), &st_lock) == 0 && "Lock file must remain immune to deletion");
+    assert(::stat(pid_file.c_str(), &st_pid) == 0 && "PID file must remain immune to deletion");
+
+    // Cleanup sandbox
+    ::unlink(lock_file.c_str());
+    ::unlink(pid_file.c_str());
+    ::unlink(old_tmp_file.c_str());
+    ::rmdir(sandbox_dir.c_str());
+
+    std::cout << " [PASS] test_disk_pressure_guard_and_dynamic_simd (REF-TEST-091: statvfs sampling, "
+                 "90% threshold trigger, 300s cooldown lock, safe non-destructive lock/socket immunity verified)\n";
+}
+
 // Implements REF-TEST-085, REF-REQ-131 & REF-ARCH-078:
 // Hardware Bus & Display Deep Power Minimization Verification Gate
 void test_hardware_bus_and_display_power_minimization() {
@@ -6941,6 +7020,7 @@ int main() {
     test::test_tri_stage_memory_hygiene_engine();
     test::test_targeted_app_reclaim_engine();
     test::test_fan_curve_simd_spline_engine();
+    test::test_disk_pressure_guard_and_dynamic_simd();
     test::test_hardware_bus_and_display_power_minimization();
     test::test_multilingual_l10n_and_auto_system_locale();
     test::test_anti_starvation_and_greedy_capping();

@@ -685,6 +685,9 @@ void DaemonRunner::process_observation_cycle() {
     // REF-REQ-131: Deep Hardware Bus, Display ABM, and Peripheral Power Minimization
     hardware_bus_.evaluate_and_actuate(hw_prev_.is_discharging,
                                        policy::MitigationEngine::effective_profile());
+
+    // REF-REQ-137: Progressive Disk Full Prevention & Storage Hygiene
+    disk_guard_.evaluate_and_actuate();
 }
 
 int DaemonRunner::run() {

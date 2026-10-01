@@ -113,6 +113,7 @@ set(WATTCURB_LIB_SOURCES
     src/policy/memory_hygiene_engine.cpp
     src/policy/targeted_app_reclaim.cpp
     src/policy/fan_curve_engine.cpp
+    src/policy/disk_pressure_guard.cpp
     src/policy/hardware_bus_controller.cpp
     src/report/report_generator.cpp
     src/report/battery_history_analyzer.cpp

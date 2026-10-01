@@ -15,6 +15,103 @@
 
 namespace wattcurb::policy {
 
+namespace {
+
+using SplineEvalFn = void (*)(const FanControlPoint* points, size_t n_intervals,
+                              const float* h, const float* c0, const float* c1,
+                              const float* c2, const float* c3, float* raw_pcts) noexcept;
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((target("avx2,fma")))
+#endif
+void eval_spline_avx2_fma(const FanControlPoint* points, size_t n_intervals,
+                          const float* h, const float* c0, const float* c1,
+                          const float* c2, const float* c3, float* raw_pcts) noexcept {
+    for (size_t block = 0; block < 5; ++block) {
+        float base_t = FanCurveEngine::MIN_TEMP_C + static_cast<float>(block * 8);
+
+        alignas(32) float temps[8];
+        for (int k = 0; k < 8; ++k) temps[k] = base_t + static_cast<float>(k);
+
+        alignas(32) float v_u_arr[8];
+        alignas(32) float v_c0_arr[8];
+        alignas(32) float v_c1_arr[8];
+        alignas(32) float v_c2_arr[8];
+        alignas(32) float v_c3_arr[8];
+
+        for (int k = 0; k < 8; ++k) {
+            float t_val = temps[k];
+            size_t seg = 0;
+            for (size_t i = 0; i < n_intervals; ++i) {
+                if (t_val >= points[i].temp_c) {
+                    seg = i;
+                }
+            }
+            if (seg >= n_intervals) seg = n_intervals - 1;
+
+            float u_val = (t_val - points[seg].temp_c) / h[seg];
+            v_u_arr[k] = std::clamp(u_val, 0.0f, 1.0f);
+            v_c0_arr[k] = c0[seg];
+            v_c1_arr[k] = c1[seg];
+            v_c2_arr[k] = c2[seg];
+            v_c3_arr[k] = c3[seg];
+        }
+
+        __m256 v_u  = _mm256_load_ps(v_u_arr);
+        __m256 v_c0 = _mm256_load_ps(v_c0_arr);
+        __m256 v_c1 = _mm256_load_ps(v_c1_arr);
+        __m256 v_c2 = _mm256_load_ps(v_c2_arr);
+        __m256 v_c3 = _mm256_load_ps(v_c3_arr);
+
+#if defined(__FMA__) || defined(__AVX2__)
+        __m256 v_res = _mm256_fmadd_ps(v_u, v_c3, v_c2);
+        v_res = _mm256_fmadd_ps(v_u, v_res, v_c1);
+        v_res = _mm256_fmadd_ps(v_u, v_res, v_c0);
+#else
+        __m256 v_res = _mm256_add_ps(v_c2, _mm256_mul_ps(v_u, v_c3));
+        v_res = _mm256_add_ps(v_c1, _mm256_mul_ps(v_u, v_res));
+        v_res = _mm256_add_ps(v_c0, _mm256_mul_ps(v_u, v_res));
+#endif
+        v_res = _mm256_max_ps(v_res, _mm256_setzero_ps());
+        v_res = _mm256_min_ps(v_res, _mm256_set1_ps(100.0f));
+
+        _mm256_storeu_ps(&raw_pcts[block * 8], v_res);
+    }
+}
+
+void eval_spline_scalar(const FanControlPoint* points, size_t n_intervals,
+                        const float* h, const float* c0, const float* c1,
+                        const float* c2, const float* c3, float* raw_pcts) noexcept {
+    for (size_t t = 0; t < 40; ++t) {
+        float temp = FanCurveEngine::MIN_TEMP_C + static_cast<float>(t);
+        size_t seg = 0;
+        for (size_t i = 0; i < n_intervals; ++i) {
+            if (temp >= points[i].temp_c) {
+                seg = i;
+            }
+        }
+        if (seg >= n_intervals) seg = n_intervals - 1;
+
+        float u = (temp - points[seg].temp_c) / h[seg];
+        u = std::clamp(u, 0.0f, 1.0f);
+        float pct = c0[seg] + u * (c1[seg] + u * (c2[seg] + u * c3[seg]));
+        raw_pcts[t] = std::clamp(pct, 0.0f, 100.0f);
+    }
+}
+
+inline SplineEvalFn resolve_spline_eval() noexcept {
+    if constexpr (core::has_compile_time<core::CpuFeature::AVX2>() && core::has_compile_time<core::CpuFeature::FMA>()) {
+        return &eval_spline_avx2_fma;
+    } else {
+        if (core::has_runtime(core::CpuFeature::AVX2) && core::has_runtime(core::CpuFeature::FMA)) {
+            return &eval_spline_avx2_fma;
+        }
+        return &eval_spline_scalar;
+    }
+}
+
+} // anonymous namespace
+
 FanCurveEngine::FanCurveEngine() noexcept {
     reset_to_defaults();
 }
@@ -214,77 +311,9 @@ bool FanCurveEngine::compute_spline_lookup(const FanControlPoint* points, size_t
 
     {
         WATTCURB_PROFILE_SCOPE("FanCurve::EvalPolynomialSIMD");
+        static const SplineEvalFn s_eval_fn = resolve_spline_eval();
+        s_eval_fn(points, n_intervals, h, c0, c1, c2, c3, raw_pcts);
 
-#if defined(__AVX2__)
-        // Process first 40 points in 5 batches of 8-wide AVX2 FMA
-        for (size_t block = 0; block < 5; ++block) {
-            float base_t = MIN_TEMP_C + static_cast<float>(block * 8);
-
-            alignas(32) float temps[8];
-            for (int k = 0; k < 8; ++k) temps[k] = base_t + static_cast<float>(k);
-
-            alignas(32) float v_u_arr[8];
-            alignas(32) float v_c0_arr[8];
-            alignas(32) float v_c1_arr[8];
-            alignas(32) float v_c2_arr[8];
-            alignas(32) float v_c3_arr[8];
-
-            for (int k = 0; k < 8; ++k) {
-                float t_val = temps[k];
-                size_t seg = 0;
-                for (size_t i = 0; i < n_intervals; ++i) {
-                    if (t_val >= points[i].temp_c) {
-                        seg = i;
-                    }
-                }
-                if (seg >= n_intervals) seg = n_intervals - 1;
-
-                float u_val = (t_val - points[seg].temp_c) / h[seg];
-                v_u_arr[k] = std::clamp(u_val, 0.0f, 1.0f);
-                v_c0_arr[k] = c0[seg];
-                v_c1_arr[k] = c1[seg];
-                v_c2_arr[k] = c2[seg];
-                v_c3_arr[k] = c3[seg];
-            }
-
-            __m256 v_u  = _mm256_load_ps(v_u_arr);
-            __m256 v_c0 = _mm256_load_ps(v_c0_arr);
-            __m256 v_c1 = _mm256_load_ps(v_c1_arr);
-            __m256 v_c2 = _mm256_load_ps(v_c2_arr);
-            __m256 v_c3 = _mm256_load_ps(v_c3_arr);
-
-#if defined(__FMA__)
-            // Horner's rule via FMA: c0 + u * (c1 + u * (c2 + u * c3))
-            __m256 v_res = _mm256_fmadd_ps(v_u, v_c3, v_c2);
-            v_res = _mm256_fmadd_ps(v_u, v_res, v_c1);
-            v_res = _mm256_fmadd_ps(v_u, v_res, v_c0);
-#else
-            __m256 v_res = _mm256_add_ps(v_c2, _mm256_mul_ps(v_u, v_c3));
-            v_res = _mm256_add_ps(v_c1, _mm256_mul_ps(v_u, v_res));
-            v_res = _mm256_add_ps(v_c0, _mm256_mul_ps(v_u, v_res));
-#endif
-            v_res = _mm256_max_ps(v_res, _mm256_setzero_ps());
-            v_res = _mm256_min_ps(v_res, _mm256_set1_ps(100.0f));
-
-            _mm256_storeu_ps(&raw_pcts[block * 8], v_res);
-        }
-#else
-        for (size_t t = 0; t < 40; ++t) {
-            float temp = MIN_TEMP_C + static_cast<float>(t);
-            size_t seg = 0;
-            for (size_t i = 0; i < n_intervals; ++i) {
-                if (temp >= points[i].temp_c) {
-                    seg = i;
-                }
-            }
-            if (seg >= n_intervals) seg = n_intervals - 1;
-
-            float u = (temp - points[seg].temp_c) / h[seg];
-            u = std::clamp(u, 0.0f, 1.0f);
-            float pct = c0[seg] + u * (c1[seg] + u * (c2[seg] + u * c3[seg]));
-            raw_pcts[t] = std::clamp(pct, 0.0f, 100.0f);
-        }
-#endif
         // Final element index 40 (70°C) is unconditionally 100% full speed ceiling
         raw_pcts[LOOKUP_TABLE_SIZE - 1] = 100.0f;
     }
