@@ -121,7 +121,7 @@ Item {
                                 onClicked: {
                                     backend.selectFanProfile(index);
                                     studioRoot.activePointIndex = -1;
-                                    curveCanvas.requestPaint();
+                                    canvasContainer.requestPaint();
                                 }
                             }
                         }
@@ -190,6 +190,12 @@ Item {
                 var ratio = (y - padTop) / plotH;
                 var clampedRatio = Math.max(0.0, Math.min(1.0, ratio));
                 return (1.0 - clampedRatio) * 100.0;
+            }
+
+            function requestPaint() {
+                if (curveCanvas && typeof curveCanvas.requestPaint === "function") {
+                    curveCanvas.requestPaint();
+                }
             }
 
             // Canvas for rendering Grid, Monotone Spline Curve, and Failsafe zone
@@ -489,13 +495,13 @@ Item {
                                 var newPct = canvasContainer.yToPct(newY);
 
                                 backend.setFanPoint(index, newTemp, newPct);
-                                curveCanvas.requestPaint();
+                                canvasContainer.requestPaint();
                             }
                         }
 
                         onReleased: {
                             studioRoot.isDragging = false;
-                            curveCanvas.requestPaint();
+                            canvasContainer.requestPaint();
                         }
                     }
                 }
@@ -521,7 +527,7 @@ Item {
                             backend.addFanPoint(addT, addP);
                             studioRoot.statusToast = "포인트 추가됨: " + addT.toFixed(0) + "°C, " + addP.toFixed(0) + "%";
                             statusToastTimer.restart();
-                            curveCanvas.requestPaint();
+                            canvasContainer.requestPaint();
                         } else {
                             studioRoot.statusToast = "최대 5개의 포인트까지만 지원됩니다.";
                             statusToastTimer.restart();
@@ -565,7 +571,7 @@ Item {
                         onClicked: {
                             backend.removeFanPoint(studioRoot.activePointIndex);
                             studioRoot.activePointIndex = -1;
-                            curveCanvas.requestPaint();
+                            canvasContainer.requestPaint();
                         }
                     }
                 }
@@ -584,7 +590,7 @@ Item {
                             p = (curPts[0].pct + curPts[curPts.length - 1].pct) / 2.0;
                         }
                         backend.addFanPoint(t, p);
-                        curveCanvas.requestPaint();
+                        canvasContainer.requestPaint();
                     }
                 }
 
@@ -605,7 +611,7 @@ Item {
                         backend.resetFanCurveToDefault(backend.selectedFanProfile);
                         studioRoot.statusToast = "프로파일이 팩토리 기본값으로 복원되었습니다.";
                         statusToastTimer.restart();
-                        curveCanvas.requestPaint();
+                        canvasContainer.requestPaint();
                     }
                 }
 
@@ -622,7 +628,7 @@ Item {
                             studioRoot.statusToast = "⚠️ 저장 완료 (데몬 상태 확인 필요)";
                         }
                         statusToastTimer.restart();
-                        curveCanvas.requestPaint();
+                        canvasContainer.requestPaint();
                     }
                 }
             }
