@@ -77,39 +77,41 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "[2/5] Stage 2: Extended Multi-Faceted Representative Workload Phase"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-echo "  [Workload 1/7] Running full Oracle Gate test suite..."
-"${BUILD_PGO_GEN}/wattcurb_tests" > /dev/null 2>&1 || true
+echo "  [Workload 1/7] Running full Oracle Gate test suite (3 iterations for deep SIMD/L1/DiskGuard saturation)..."
+for i in {1..3}; do
+    "${BUILD_PGO_GEN}/wattcurb_tests" > /dev/null 2>&1 || true
+done
 
-echo "  [Workload 2/7] Running 10s real-hardware Executive Briefing (--briefing -w 10 -i 1)..."
-"${BUILD_PGO_GEN}/wattcurb" --briefing -w 10 -i 1 > /dev/null 2>&1 || true
+echo "  [Workload 2/7] Running 15s real-hardware Executive Briefing (--briefing -w 15 -i 1)..."
+"${BUILD_PGO_GEN}/wattcurb" --briefing -w 15 -i 1 > /dev/null 2>&1 || true
 
-echo "  [Workload 3/7] Running 10s terminal Detailed Table Dashboard (--detail -w 10 -i 1)..."
-"${BUILD_PGO_GEN}/wattcurb" --detail -w 10 -i 1 > /dev/null 2>&1 || true
+echo "  [Workload 3/7] Running 15s terminal Detailed Table Dashboard (--detail -w 15 -i 1)..."
+"${BUILD_PGO_GEN}/wattcurb" --detail -w 15 -i 1 > /dev/null 2>&1 || true
 
-echo "  [Workload 4/7] Running 10s Extreme Battery Profile & Mitigation Synthesis (-X -w 10 -i 1)..."
-"${BUILD_PGO_GEN}/wattcurb" -X -w 10 -i 1 > /dev/null 2>&1 || true
+echo "  [Workload 4/7] Running 15s Extreme Battery Profile & Mitigation Synthesis (-X -w 15 -i 1)..."
+"${BUILD_PGO_GEN}/wattcurb" -X -w 15 -i 1 > /dev/null 2>&1 || true
 
-echo "  [Workload 5/7] Running 8s High-Frequency Rapid Sampling (--duration 8 -i 0.5 -n 40)..."
-"${BUILD_PGO_GEN}/wattcurb" --duration 8 -i 0.5 -n 40 > /dev/null 2>&1 || true
+echo "  [Workload 5/7] Running 12s High-Frequency Rapid Sampling (--duration 12 -i 0.2 -n 60)..."
+"${BUILD_PGO_GEN}/wattcurb" --duration 12 -i 0.2 -n 60 > /dev/null 2>&1 || true
 
-echo "  [Workload 6/7] Running CLI & SHM IPC Burst Queries (--status, --history, --features)..."
+echo "  [Workload 6/7] Running CLI & SHM IPC Burst Queries 100x (--status, --history, --features)..."
 "${BUILD_PGO_GEN}/wattcurb" --features > /dev/null 2>&1 || true
-for _ in {1..30}; do
+for _ in {1..100}; do
     "${BUILD_PGO_GEN}/wattcurb" --status > /dev/null 2>&1 || true
     "${BUILD_PGO_GEN}/wattcurb" --history > /dev/null 2>&1 || true
 done
 
 echo "  [Workload 7/7] Running Desktop Tray & Dashboard Multi-Faceted UI Simulators..."
-echo "    → Desktop Tray (50,000 multi-scenario interactive cycles)..."
+echo "    → Desktop Tray (100,000 multi-scenario interactive cycles)..."
 "${BUILD_PGO_GEN}/wattcurb-tray" --benchmark
 
 if [ "${HAS_DASHBOARD}" -eq 1 ]; then
-    echo "    → Matrix Dashboard (5,000 multi-scale JSON & property cycles)..."
+    echo "    → Matrix Dashboard (10,000 multi-scale JSON & property cycles)..."
     QT_QPA_PLATFORM=offscreen "${BUILD_PGO_GEN}/wattcurb-dashboard" --benchmark
 fi
 
 echo ""
-echo "  ✓ Multi-faceted profile data (.gcda) collected across ALL 3 targets:"
+echo "  ✓ Multi-faceted profile data (.gcda) collected across ALL targets:"
 find "${BUILD_PGO_GEN}" -name '*.gcda' | sort | sed "s|${BUILD_PGO_GEN}/|    * |"
 
 # REF-REQ-075: a -fprofile-use build that silently finds no profiles is not
