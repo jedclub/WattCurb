@@ -6572,11 +6572,20 @@ void test_tray_report_action_and_tactile_button_integrity() {
         assert(str != nullptr && std::strlen(str) > 0 && "ACTION_OPEN_BATTERY_REPORT translation must be non-empty");
     }
 
-    // 3. Verify tray client source contains ACTION_OPEN_BATTERY_REPORT and --report handler
+    // 3. Verify tray client source contains ACTION_OPEN_BATTERY_REPORT, ACTION_OPEN_FAN_STUDIO and handlers
     std::ifstream tray_src("src/tray/tray_client.cpp");
     std::string tray_str((std::istreambuf_iterator<char>(tray_src)), std::istreambuf_iterator<char>());
     assert(tray_str.find("ACTION_OPEN_BATTERY_REPORT") != std::string::npos);
+    assert(tray_str.find("ACTION_OPEN_FAN_STUDIO") != std::string::npos);
     assert(tray_str.find("\"--report\"") != std::string::npos);
+
+    auto opt_fan_id = wattcurb::core::l10n::parse_string_key("ACTION_OPEN_FAN_STUDIO");
+    assert(opt_fan_id.has_value() && *opt_fan_id == wattcurb::core::l10n::StringId::ACTION_OPEN_FAN_STUDIO);
+    for (size_t i = 0; i < static_cast<size_t>(wattcurb::core::l10n::Language::COUNT); ++i) {
+        auto lang = static_cast<wattcurb::core::l10n::Language>(i);
+        const char* str = wattcurb::core::l10n::tr(wattcurb::core::l10n::StringId::ACTION_OPEN_FAN_STUDIO, lang);
+        assert(str != nullptr && std::strlen(str) > 0);
+    }
 
     // 4. Verify QML sources contain TactileButton component and scale depression
     std::ifstream dash_qml("src/ui/qml/DashboardWindow.qml");

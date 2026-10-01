@@ -17,12 +17,18 @@ int main(int argc, char* argv[]) {
     bool report_cli_mode = false;
     int cli_filter_mode = -1;
     bool cli_compare_only = false;
+    int initial_tab = 0;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--benchmark") == 0 || std::strcmp(argv[i], "-B") == 0) {
             benchmark_mode = true;
         } else if (std::strcmp(argv[i], "--report") == 0 || std::strcmp(argv[i], "-r") == 0) {
             report_mode = true;
+            initial_tab = 1;
+        } else if (std::strcmp(argv[i], "--fan") == 0 || std::strcmp(argv[i], "--fan-studio") == 0 || std::strcmp(argv[i], "-f") == 0) {
+            initial_tab = 2;
+        } else if (std::strcmp(argv[i], "--tab") == 0 && i + 1 < argc) {
+            initial_tab = std::clamp(std::atoi(argv[++i]), 0, 2);
         } else if (std::strcmp(argv[i], "--report-cli") == 0 || std::strcmp(argv[i], "-rc") == 0) {
             report_cli_mode = true;
         } else if (std::strcmp(argv[i], "--compare") == 0 || std::strcmp(argv[i], "-c") == 0) {
@@ -212,15 +218,20 @@ int main(int argc, char* argv[]) {
     app.setWindowIcon(QIcon::fromTheme(report_mode ? "battery" : "utilities-system-monitor"));
 
     wattcurb::ui::DashboardBackend backend;
-    if (report_mode) {
+    if (initial_tab == 1 || report_mode) {
         backend.generateBatteryReport();
+        backend.setCurrentDashboardTab(1);
+    } else if (initial_tab == 2) {
+        backend.setCurrentDashboardTab(2);
+    } else {
+        backend.setCurrentDashboardTab(0);
     }
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("backend", &backend);
 
-    // Try QRC first, fallback to filesystem
-    QString qmlFile = report_mode ? "qml/BatteryReportWindow.qml" : "qml/DashboardWindow.qml";
+    // Unified 3-Tab Dashboard (REF-REQ-136, REF-ARCH-083)
+    QString qmlFile = "qml/DashboardWindow.qml";
     QUrl qmlUrl("qrc:/" + qmlFile);
     
 #ifndef NDEBUG

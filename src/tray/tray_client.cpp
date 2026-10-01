@@ -1242,7 +1242,8 @@ int TrayClient::dbusmenu_method_get_layout(sd_bus_message* msg, void* userdata, 
     add_item(9, nullptr, true, "separator");
     add_item(10, core::l10n::tr(core::l10n::StringId::ACTION_OPEN_DASHBOARD));
     add_item(11, core::l10n::tr(core::l10n::StringId::ACTION_OPEN_BATTERY_REPORT));
-    add_item(12, core::l10n::tr(core::l10n::StringId::ACTION_OPEN_SYSMONITOR));
+    add_item(12, core::l10n::tr(core::l10n::StringId::ACTION_OPEN_FAN_STUDIO));
+    add_item(13, core::l10n::tr(core::l10n::StringId::ACTION_OPEN_SYSMONITOR));
 
     sd_bus_message_close_container(reply); // children av
     sd_bus_message_close_container(reply); // root r
@@ -1282,16 +1283,16 @@ int TrayClient::dbusmenu_method_event(sd_bus_message* msg, void* userdata, sd_bu
             // Non-blocking asynchronous daemon rescan trigger
             send_daemon_command("RESCAN\n");
 
-            // Instant zero-delay popup of native KDE Plasma 6 Dashboard (REF-REQ-036)
+            // Instant zero-delay popup of native KDE Plasma 6 Dashboard (REF-REQ-036) - Tab 0
             pid_t pid = ::fork();
             if (pid == 0) {
                 ::setsid();
                 close_existing_gui();
                 char dash_bin[256];
                 if (resolve_dashboard_bin(dash_bin, sizeof(dash_bin))) {
-                    ::execl(dash_bin, "wattcurb-dashboard", nullptr);
+                    ::execl(dash_bin, "wattcurb-dashboard", "--tab", "0", nullptr);
                 }
-                ::execlp("wattcurb-dashboard", "wattcurb-dashboard", nullptr);
+                ::execlp("wattcurb-dashboard", "wattcurb-dashboard", "--tab", "0", nullptr);
                 ::_exit(0);
             }
 
@@ -1300,19 +1301,32 @@ int TrayClient::dbusmenu_method_event(sd_bus_message* msg, void* userdata, sd_bu
             sd_bus_emit_signal(self->bus_, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewToolTip", nullptr);
             sd_bus_emit_signal(self->bus_, "/MenuBar", "com.canonical.dbusmenu", "LayoutUpdated", "ui", ++self->menu_revision_, 0);
         } else if (id == 11) {
-            // Instant launch of Deep Battery Drain Audit Report Window (REF-REQ-081)
+            // Instant launch of Deep Battery Drain Audit Report Tab (REF-REQ-081, REF-REQ-136) - Tab 1
             pid_t pid = ::fork();
             if (pid == 0) {
                 ::setsid();
                 close_existing_gui();
                 char dash_bin[256];
                 if (resolve_dashboard_bin(dash_bin, sizeof(dash_bin))) {
-                    ::execl(dash_bin, "wattcurb-dashboard", "--report", nullptr);
+                    ::execl(dash_bin, "wattcurb-dashboard", "--tab", "1", "--report", nullptr);
                 }
-                ::execlp("wattcurb-dashboard", "wattcurb-dashboard", "--report", nullptr);
+                ::execlp("wattcurb-dashboard", "wattcurb-dashboard", "--tab", "1", "--report", nullptr);
                 ::_exit(0);
             }
         } else if (id == 12) {
+            // Instant launch of Fan Curve Studio Tab (REF-REQ-136) - Tab 2
+            pid_t pid = ::fork();
+            if (pid == 0) {
+                ::setsid();
+                close_existing_gui();
+                char dash_bin[256];
+                if (resolve_dashboard_bin(dash_bin, sizeof(dash_bin))) {
+                    ::execl(dash_bin, "wattcurb-dashboard", "--tab", "2", nullptr);
+                }
+                ::execlp("wattcurb-dashboard", "wattcurb-dashboard", "--tab", "2", nullptr);
+                ::_exit(0);
+            }
+        } else if (id == 13) {
             if (::fork() == 0) {
                 ::execlp("plasma-systemmonitor", "plasma-systemmonitor", nullptr);
                 ::_exit(0);

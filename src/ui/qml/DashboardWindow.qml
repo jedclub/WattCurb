@@ -1510,9 +1510,8 @@ ApplicationWindow {
                     }
                 }
             }
-        } // Right Column ColumnLayout
-    } // Main Workspace RowLayout
-} // Tab 0 Item (Original Dense Matrix HUD)
+        } // Right Column ColumnLayout & Main Workspace RowLayout
+    } // Tab 0 Item (Original Dense Matrix HUD)
 
             // ---------------------------------------------------------
             // TAB 1: DEEP BATTERY DRAIN AUDIT REPORT

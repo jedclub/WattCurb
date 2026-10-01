@@ -37,6 +37,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "Idle Stable (No Leaks)",                       // HUD_IDLE_STABLE
         "📈 Open Matrix Dashboard",                     // ACTION_OPEN_DASHBOARD
         "🔋 Open Battery Drain Audit Report",            // ACTION_OPEN_BATTERY_REPORT
+        "🌀 Open Fan Curve Studio (Manual Curve Control)", // ACTION_OPEN_FAN_STUDIO
         "📊 Open KDE System Monitor",                   // ACTION_OPEN_SYSMONITOR
         "CPU Package",                                  // DEV_CPU_PKG
         "GPU Silicon",                                  // DEV_GPU_SILICON
@@ -87,6 +88,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "空闲稳定 (无泄漏)",                             // HUD_IDLE_STABLE
         "📈 打开精确分析矩阵窗口",                       // ACTION_OPEN_DASHBOARD
         "🔋 打开电池深度分析报告",                       // ACTION_OPEN_BATTERY_REPORT
+        "🌀 打开风扇曲线控制工作室 (Fan Curve Studio)",    // ACTION_OPEN_FAN_STUDIO
         "📊 打开 KDE 系统监视器",                        // ACTION_OPEN_SYSMONITOR
         "CPU 封装",                                      // DEV_CPU_PKG
         "GPU 核心",                                      // DEV_GPU_SILICON
@@ -137,6 +139,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "निष्क्रिय स्थिर (कोई रिसाव नहीं)",               // HUD_IDLE_STABLE
         "📈 मैट्रिक्स डैशबोर्ड खोलें",                  // ACTION_OPEN_DASHBOARD
         "🔋 बैटरी ड्रेन ऑडिट रिपोर्ट खोलें",              // ACTION_OPEN_BATTERY_REPORT
+        "🌀 फैन कर्व स्टूडियो खोलें (Fan Curve Studio)",  // ACTION_OPEN_FAN_STUDIO
         "📊 KDE सिस्टम मॉनिटर खोलें",                    // ACTION_OPEN_SYSMONITOR
         "CPU पैकेज",                                     // DEV_CPU_PKG
         "GPU सिलिकॉन",                                   // DEV_GPU_SILICON
@@ -187,6 +190,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "Inactivo estable (Sin fugas)",                 // HUD_IDLE_STABLE
         "📈 Abrir panel de control Matrix",             // ACTION_OPEN_DASHBOARD
         "🔋 Abrir informe de auditoría de batería",       // ACTION_OPEN_BATTERY_REPORT
+        "🌀 Abrir Fan Curve Studio (Control Manual)",     // ACTION_OPEN_FAN_STUDIO
         "📊 Abrir Monitor del Sistema KDE",             // ACTION_OPEN_SYSMONITOR
         "Paquete CPU",                                  // DEV_CPU_PKG
         "Silicio GPU",                                  // DEV_GPU_SILICON
@@ -237,6 +241,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "Veille stable (Aucune fuite)",                 // HUD_IDLE_STABLE
         "📈 Ouvrir le tableau de bord Matrix",          // ACTION_OPEN_DASHBOARD
         "🔋 Ouvrir le rapport d'audit de batterie",       // ACTION_OPEN_BATTERY_REPORT
+        "🌀 Ouvrir le Fan Curve Studio (Contrôle Manuel)", // ACTION_OPEN_FAN_STUDIO
         "📊 Ouvrir le moniteur système KDE",            // ACTION_OPEN_SYSMONITOR
         "Package CPU",                                  // DEV_CPU_PKG
         "Silicium GPU",                                 // DEV_GPU_SILICON
@@ -287,6 +292,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "خمول مستقر (لا استنزاف)",                      // HUD_IDLE_STABLE
         "📈 فتح لوحة معلومات Matrix",                  // ACTION_OPEN_DASHBOARD
         "🔋 فتح تقرير فحص استنزاف البطارية",              // ACTION_OPEN_BATTERY_REPORT
+        "🌀 فتح استوديو منحنى المروحة (Fan Curve Studio)",// ACTION_OPEN_FAN_STUDIO
         "📊 فتح مراقب نظام KDE",                        // ACTION_OPEN_SYSMONITOR
         "حزمة المعالج",                                 // DEV_CPU_PKG
         "معالج الرسوميات",                              // DEV_GPU_SILICON
@@ -337,6 +343,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "স্থিতিশীল নিষ্ক্রিয় (কোনো অপচয় নেই)",        // HUD_IDLE_STABLE
         "📈 ম্যাট্রিক্স ড্যাশবোর্ড খুলুন",             // ACTION_OPEN_DASHBOARD
         "🔋 ব্যাটারি ড্রেন অডিট রিপোর্ট খুলুন",           // ACTION_OPEN_BATTERY_REPORT
+        "🌀 ফ্যান কার্ভ স্টুডিও খুলুন (Fan Curve Studio)", // ACTION_OPEN_FAN_STUDIO
         "📊 KDE সিস্টেম মনিটর খুলুন",                    // ACTION_OPEN_SYSMONITOR
         "সিপিইউ প্যাকেজ",                               // DEV_CPU_PKG
         "জিপিইউ সিলিকন",                                // DEV_GPU_SILICON
@@ -387,6 +394,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "Ocioso estável (Sem vazamentos)",              // HUD_IDLE_STABLE
         "📈 Abrir Painel Matrix",                       // ACTION_OPEN_DASHBOARD
         "🔋 Abrir Relatório de Auditoria de Bateria",     // ACTION_OPEN_BATTERY_REPORT
+        "🌀 Abrir Fan Curve Studio (Controle Manual)",    // ACTION_OPEN_FAN_STUDIO
         "📊 Abrir Monitor do Sistema KDE",              // ACTION_OPEN_SYSMONITOR
         "Pacote CPU",                                   // DEV_CPU_PKG
         "Silício GPU",                                  // DEV_GPU_SILICON
@@ -437,6 +445,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "Стабильный простой (Без утечек)",              // HUD_IDLE_STABLE
         "📈 Открыть матричную панель управления",       // ACTION_OPEN_DASHBOARD
         "🔋 Открыть отчет об аудите расхода батареи",     // ACTION_OPEN_BATTERY_REPORT
+        "🌀 Открыть студию кривых вентилятора (Fan Studio)", // ACTION_OPEN_FAN_STUDIO
         "📊 Открыть системный монитор KDE",             // ACTION_OPEN_SYSMONITOR
         "Корпус CPU",                                   // DEV_CPU_PKG
         "Кристалл GPU",                                 // DEV_GPU_SILICON
@@ -487,6 +496,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "مستحکم بیکار (کوئی رساو نہیں)",                // HUD_IDLE_STABLE
         "📈 میٹرکس ڈیش بورڈ کھولیں",                   // ACTION_OPEN_DASHBOARD
         "🔋 بیٹری ڈرین آڈٹ رپورٹ کھولیں",               // ACTION_OPEN_BATTERY_REPORT
+        "🌀 فین کرو اسٹوڈیو کھولیں (Fan Curve Studio)",   // ACTION_OPEN_FAN_STUDIO
         "📊 KDE سسٹم مانیٹر کھولیں",                    // ACTION_OPEN_SYSMONITOR
         "سی پی یو پیکیج",                               // DEV_CPU_PKG
         "جی پی یو سلیکون",                              // DEV_GPU_SILICON
@@ -537,6 +547,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "Idle Stabil (Tanpa Kebocoran)",                // HUD_IDLE_STABLE
         "📈 Buka Dasbor Matriks",                       // ACTION_OPEN_DASHBOARD
         "🔋 Buka Laporan Audit Pengurasan Baterai",      // ACTION_OPEN_BATTERY_REPORT
+        "🌀 Buka Fan Curve Studio (Kontrol Manual)",      // ACTION_OPEN_FAN_STUDIO
         "📊 Buka Monitor Sistem KDE",                   // ACTION_OPEN_SYSMONITOR
         "Paket CPU",                                    // DEV_CPU_PKG
         "Silikon GPU",                                  // DEV_GPU_SILICON
@@ -587,6 +598,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "Leerlauf stabil (Keine Lecks)",                // HUD_IDLE_STABLE
         "📈 Matrix-Dashboard öffnen",                   // ACTION_OPEN_DASHBOARD
         "🔋 Batterie-Audit-Bericht öffnen",               // ACTION_OPEN_BATTERY_REPORT
+        "🌀 Lüfterkurven-Studio öffnen (Manuell)",        // ACTION_OPEN_FAN_STUDIO
         "📊 KDE-Systemmonitor öffnen",                  // ACTION_OPEN_SYSMONITOR
         "CPU-Paket",                                    // DEV_CPU_PKG
         "GPU-Silizium",                                 // DEV_GPU_SILICON
@@ -637,6 +649,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "유휴 안정 (누수 없음)",                         // HUD_IDLE_STABLE
         "📈 정밀 분석 매트릭 창 열기 (Matrix Dashboard)",// ACTION_OPEN_DASHBOARD
         "🔋 배터리 정밀 분석 리포트 열기 (Battery Audit Report)", // ACTION_OPEN_BATTERY_REPORT
+        "🌀 수동 커브 팬 제어 스튜디오 열기 (Fan Curve Studio)", // ACTION_OPEN_FAN_STUDIO
         "📊 KDE 시스템 모니터 열기 (System Monitor)",    // ACTION_OPEN_SYSMONITOR
         "CPU 패키지",                                    // DEV_CPU_PKG
         "GPU 실리콘",                                    // DEV_GPU_SILICON
@@ -687,6 +700,7 @@ alignas(64) static constexpr const char* const STRING_TABLE[static_cast<size_t>(
         "アイドル安定 (リークなし)",                     // HUD_IDLE_STABLE
         "📈 マトリックスダッシュボードを開く",           // ACTION_OPEN_DASHBOARD
         "🔋 バッテリー詳細診断レポートを開く",           // ACTION_OPEN_BATTERY_REPORT
+        "🌀 ファン曲線スタジオを開く (Fan Curve Studio)",  // ACTION_OPEN_FAN_STUDIO
         "📊 KDE システムモニターを開く",                // ACTION_OPEN_SYSMONITOR
         "CPU パッケージ",                                // DEV_CPU_PKG
         "GPU シリコン",                                  // DEV_GPU_SILICON
@@ -878,6 +892,7 @@ std::optional<StringId> parse_string_key(std::string_view key) noexcept {
     if (key == "HUD_IDLE_STABLE") return StringId::HUD_IDLE_STABLE;
     if (key == "ACTION_OPEN_DASHBOARD") return StringId::ACTION_OPEN_DASHBOARD;
     if (key == "ACTION_OPEN_BATTERY_REPORT") return StringId::ACTION_OPEN_BATTERY_REPORT;
+    if (key == "ACTION_OPEN_FAN_STUDIO") return StringId::ACTION_OPEN_FAN_STUDIO;
     if (key == "ACTION_OPEN_SYSMONITOR") return StringId::ACTION_OPEN_SYSMONITOR;
     if (key == "DEV_CPU_PKG") return StringId::DEV_CPU_PKG;
     if (key == "DEV_GPU_SILICON") return StringId::DEV_GPU_SILICON;
