@@ -19,8 +19,8 @@ The SMU Anti-Clawback Engine operates at the intersection between the profile st
                    │
                    ▼
      Adaptive Anti-Clawback Gate
-   - Perf: Cadence = 1 tick (~3 s), Load >= 0.5
-   - Bal : Cadence = 3 ticks (~30 s), Load >= 1.0
+   - Verification Cadence = 60s cooldown (1 min rate-limit)
+   - Perf: Load >= 0.5 | Bal: Load >= 1.0
                    │
                    ▼
        MitigationEngine::verify_and_reassert_smu_limits()
@@ -60,8 +60,9 @@ The SMU Anti-Clawback Engine operates at the intersection between the profile st
 To ensure determinism without requiring root privilege or live `/dev/mem` access during unit tests:
 
 ```cpp
-[[nodiscard]] static constexpr uint32_t smu_verify_interval_cycles(PowerProfileMode mode) noexcept {
-    return (mode == PowerProfileMode::Performance) ? 1 : 3;
+[[nodiscard]] static constexpr uint32_t smu_verify_interval_sec(PowerProfileMode mode) noexcept {
+    (void)mode;
+    return 60; // 1분에 1번 꼴 (~60s cooldown)
 }
 
 [[nodiscard]] static constexpr double smu_verify_min_load(PowerProfileMode mode) noexcept {

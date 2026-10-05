@@ -340,20 +340,25 @@ public:
 
     // REF-REQ-126, REF-REQ-139: the EC owns STAPM and takes it back.
     //
-    // In Performance mode, enforcement runs with 1-cycle cadence (~3s) and lower load
-    // floor (0.5) so that any EC 12W clawback is extinguished within seconds.
-    // In Balanced mode, the 3-cycle cadence (~30s) and 1.0 load floor are preserved.
-    static constexpr uint32_t SMU_VERIFY_INTERVAL_CYCLES = 3; // default for Balanced
-    static constexpr uint32_t SMU_VERIFY_INTERVAL_BALANCED_CYCLES = 3;
-    static constexpr uint32_t SMU_VERIFY_INTERVAL_PERF_CYCLES = 1; // 1-cycle fast loop!
+    // To prevent overhead and CPU consumption from overly frequent ryzenadj -i
+    // execution, verification cadence is strictly throttled to once per minute (~60s),
+    // matching the EC's typical 75~90s clawback cycle.
+    static constexpr uint32_t SMU_VERIFY_INTERVAL_SEC = 60; // 1분에 1번 꼴 (~60초 주기)
+    static constexpr uint32_t SMU_VERIFY_INTERVAL_CYCLES = 6;
+    static constexpr uint32_t SMU_VERIFY_INTERVAL_BALANCED_CYCLES = 6;
+    static constexpr uint32_t SMU_VERIFY_INTERVAL_PERF_CYCLES = 6;
     static constexpr double SMU_VERIFY_MIN_LOAD1 = 1.0;
     static constexpr double SMU_VERIFY_MIN_LOAD_BAL = 1.0;
     static constexpr double SMU_VERIFY_MIN_LOAD_PERF = 0.5;
 
+    [[nodiscard]] static constexpr uint32_t smu_verify_interval_sec(PowerProfileMode mode) noexcept {
+        (void)mode;
+        return SMU_VERIFY_INTERVAL_SEC;
+    }
+
     [[nodiscard]] static constexpr uint32_t smu_verify_interval_cycles(PowerProfileMode mode) noexcept {
-        return (mode == PowerProfileMode::Performance)
-                   ? SMU_VERIFY_INTERVAL_PERF_CYCLES
-                   : SMU_VERIFY_INTERVAL_BALANCED_CYCLES;
+        (void)mode;
+        return SMU_VERIFY_INTERVAL_CYCLES;
     }
 
     [[nodiscard]] static constexpr double smu_verify_min_load(PowerProfileMode mode) noexcept {

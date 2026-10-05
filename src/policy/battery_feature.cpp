@@ -584,17 +584,17 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
     // the binding constraint; the power budget was.
     // REF-REQ-126, REF-REQ-139: The EC owns STAPM and can take it back.
     //
-    // In Performance mode, enforcement runs every cycle (~3s) with a low load floor (0.5)
-    // so any EC 12W power clawback is extinguished immediately, guaranteeing uninterrupted
-    // high-frequency all-core execution. In Balanced mode, the 3-cycle cadence (~30s) and
-    // 1.0 load floor are preserved.
+    // Throttled to once per minute (~60s cooldown, REF-REQ-139.3) to completely
+    // eliminate process spawning and CPU tracking overhead, matching the EC's
+    // hardware 75~90s clawback retention window.
     {
-        static uint32_t s_smu_verify_tick = 0;
-        const uint32_t target_cycles = MitigationEngine::smu_verify_interval_cycles(eff_profile);
+        static uint64_t s_last_smu_verify_sec = 0;
+        const uint64_t now_sec = static_cast<uint64_t>(::time(nullptr));
+        const uint64_t interval_sec = MitigationEngine::smu_verify_interval_sec(eff_profile);
         const double target_load = MitigationEngine::smu_verify_min_load(eff_profile);
 
-        if (++s_smu_verify_tick >= target_cycles) {
-            s_smu_verify_tick = 0;
+        if (now_sec >= s_last_smu_verify_sec + interval_sec) {
+            s_last_smu_verify_sec = now_sec;
             double verify_load1 = 0.0;
             char lbuf[32];
             size_t ln = 0;

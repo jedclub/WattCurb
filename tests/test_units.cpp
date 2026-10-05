@@ -4978,13 +4978,13 @@ void test_performance_smu_anti_clawback_policy() {
     static_assert(MitigationEngine::SMU_STAPM_CLAWED_BACK_MW < MitigationEngine::SMU_STAPM_PERF_MW,
                   "Clawback trip floor must be strictly below performance target");
 
-    // 2. Profile-Adaptive Cadence Verification
-    assert(MitigationEngine::smu_verify_interval_cycles(PowerProfileMode::Performance) == 1 &&
-           "Performance mode must verify SMU limits every cycle (~3s) to eliminate throttling lag");
-    assert(MitigationEngine::smu_verify_interval_cycles(PowerProfileMode::Balanced) == 3 &&
-           "Balanced mode must verify SMU limits every 3 cycles (~30s)");
-    assert(MitigationEngine::smu_verify_interval_cycles(PowerProfileMode::PowerSaver) == 3);
-    assert(MitigationEngine::smu_verify_interval_cycles(PowerProfileMode::UltraEndurance) == 3);
+    // 2. Rate-Limited Verification Cadence (1분에 1번 꼴, ~60초 주기)
+    assert(MitigationEngine::smu_verify_interval_sec(PowerProfileMode::Performance) == 60 &&
+           "Performance mode must verify SMU limits once per minute (~60s) to minimize daemon overhead");
+    assert(MitigationEngine::smu_verify_interval_sec(PowerProfileMode::Balanced) == 60);
+    assert(MitigationEngine::smu_verify_interval_sec(PowerProfileMode::PowerSaver) == 60);
+    assert(MitigationEngine::smu_verify_interval_sec(PowerProfileMode::UltraEndurance) == 60);
+    assert(MitigationEngine::smu_verify_interval_cycles(PowerProfileMode::Performance) >= 1);
 
     // 3. Profile-Adaptive Minimum Load Verification
     assert(MitigationEngine::smu_verify_min_load(PowerProfileMode::Performance) == 0.5 &&
