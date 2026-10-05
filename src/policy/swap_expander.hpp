@@ -83,6 +83,47 @@ public:
     // Filesystem free bytes at SWAP_DIR, or 0 when it cannot be determined.
     [[nodiscard]] static uint64_t swap_dir_free_bytes() noexcept;
 
+    // ---- REF-REQ-138, REF-ARCH-085: Base Swap Right-Sizing Constants ----
+    static constexpr const char* BASE_SWAP_PATH = "/swap/swapfile";
+    static constexpr const char* BASE_SWAP_NEW_PATH = "/swap/swapfile.new";
+    static constexpr uint64_t TARGET_BASE_SIZE_BYTES = 8ull << 30;              // 8 GiB
+    static constexpr uint64_t MIN_ELIGIBLE_BASE_SIZE_BYTES = 16ull << 30;       // >= 16 GiB candidate
+    static constexpr uint64_t MAX_WINDOW_PEAK_USED_KB = (TARGET_BASE_SIZE_BYTES / 1024ull * 70ull) / 100ull; // 70% of 8 GiB (~5.6 GiB)
+    static constexpr uint64_t OBSERVATION_WINDOW_SEC = 7200ull;                 // 2 hours
+    static constexpr uint64_t MIN_FS_FREE_BYTES_FOR_BASE_MIGRATE = 16ull << 30; // 16 GiB
+    static constexpr uint64_t BASE_MIGRATION_COOLDOWN_SEC = 86400ull;           // 24 hours
+
+    enum class BaseMigrationState : uint8_t {
+        Idle = 0,
+        CreatingNew,
+        SwappingOffOld,
+        Completed
+    };
+
+    // REF-REQ-138: Track swap usage and evaluate base swap right-sizing.
+    void evaluate_base_right_sizing(uint64_t now_sec, uint64_t swap_total_kb, uint64_t swap_free_kb) noexcept;
+
+    // REF-REQ-138: Reaps child processes for base swap migration steps.
+    void poll_base_migration() noexcept;
+
+    [[nodiscard]] BaseMigrationState base_migration_state() const noexcept { return m_base_migration_state; }
+
+    // Pure decision functions for Oracle Gate (REF-REQ-138)
+    [[nodiscard]] static bool is_eligible_for_right_sizing(
+        uint64_t window_duration_sec,
+        uint64_t peak_used_kb,
+        uint64_t current_base_size_bytes,
+        uint64_t fs_free_bytes
+    ) noexcept;
+
+    [[nodiscard]] static bool is_safe_to_migrate(
+        uint64_t current_used_kb,
+        uint64_t target_size_bytes,
+        uint64_t fs_free_bytes
+    ) noexcept;
+
+    [[nodiscard]] static uint64_t get_file_size_bytes(const char* path) noexcept;
+
 private:
     static constexpr size_t PATH_CAP = 96;
     struct DynamicSwapFile {
@@ -94,12 +135,21 @@ private:
     [[nodiscard]] static bool is_swap_active(const char* path) noexcept;
     [[nodiscard]] static bool dir_is_btrfs() noexcept;
     [[nodiscard]] pid_t spawn_create(const char* path) const noexcept;
+    [[nodiscard]] pid_t spawn_create_size(const char* path, uint64_t size_bytes) const noexcept;
+    [[nodiscard]] pid_t spawn_swapoff(const char* path) const noexcept;
 
     DynamicSwapFile m_files[MAX_FILES]{};
     size_t m_count{0};
 
     pid_t m_pending_pid{-1};
     char m_pending_path[PATH_CAP]{};
+
+    // REF-REQ-138 Base Swap Right-Sizing State
+    BaseMigrationState m_base_migration_state{BaseMigrationState::Idle};
+    pid_t m_base_child_pid{-1};
+    uint64_t m_window_start_sec{0};
+    uint64_t m_peak_swap_used_kb{0};
+    uint64_t m_last_migration_sec{0};
 };
 
 } // namespace wattcurb::policy

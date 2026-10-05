@@ -277,41 +277,9 @@ int main(int argc, char* argv[]) {
                 win->raise();
                 win->requestActivate();
 
-                // REF-REQ-120: only the tray and the daemon persist. A dashboard or
-                // report window is a one-shot tool, and once its top-level window is
-                // gone the process must release every cycle, GPU resource and byte of
-                // RSS. Qt's quitOnLastWindowClosed covers the close case, but it is
-                // wired explicitly here so the guarantee does not depend on a hidden
-                // sibling window or a platform plugin's interpretation.
+                // REF-REQ-120: Close window quits the application cleanly
                 QObject::connect(win, &QQuickWindow::closing, &app,
                                  [](QQuickCloseEvent*) { QCoreApplication::quit(); });
-
-                // REF-REQ-120.3: a minimised window is not a running tool either.
-                //
-                // Measured on this host: when KWin minimises a Wayland window the
-                // client receives NOTHING - `visibilityChanged` never fires,
-                // `windowStateChanged` never fires, `isExposed()` stays 1 and
-                // `visibility()` stays Windowed. Core Wayland has no
-                // "you were minimised" event, so a client cannot detect it. The
-                // reachable guarantees are therefore:
-                //   * closing the window quits (the `closing` connection above);
-                //   * hiding it from the application side quits (this handler).
-                // The minimise button hint is dropped so the window does not offer
-                // a state this process cannot react to. A compositor-side minimise
-                // (keyboard shortcut, taskbar menu) still cannot be observed - that
-                // limitation is documented in REF-REQ-120 rather than papered over.
-                auto ever_shown = std::make_shared<bool>(false);
-                QObject::connect(win, &QWindow::visibilityChanged, &app,
-                                 [ever_shown](QWindow::Visibility v) {
-                    if (v == QWindow::Windowed || v == QWindow::Maximized ||
-                        v == QWindow::FullScreen || v == QWindow::AutomaticVisibility) {
-                        *ever_shown = true;
-                        return;
-                    }
-                    if (*ever_shown && (v == QWindow::Minimized || v == QWindow::Hidden)) {
-                        QCoreApplication::quit();
-                    }
-                });
                 win->setFlags(win->flags() & ~Qt::WindowMinimizeButtonHint);
             }
             obj->setProperty("visible", true);

@@ -321,6 +321,16 @@ MemoryPressureTier MemoryPressureGuard::evaluate_and_actuate(const AnalysisRepor
     // REF-REQ-113: a creation child started on an earlier tick may have finished.
     m_expander.poll_pending();
 
+    // REF-REQ-138: poll background base swap right-sizing migration progress
+    m_expander.poll_base_migration();
+
+    // REF-REQ-138: evaluate base swap right-sizing during Normal tier
+    if (next == MemoryPressureTier::Normal) {
+        m_expander.evaluate_base_right_sizing(
+            static_cast<uint64_t>(::time(nullptr)),
+            s.swap_total_kb, s.swap_free_kb);
+    }
+
     if (profile == PowerProfileMode::Performance) {
         // Performance does not brake the workload. It buys room instead: the
         // backing store grows while there is disk to grow it into, and the
