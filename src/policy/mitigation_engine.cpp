@@ -3320,11 +3320,11 @@ bool MitigationEngine::apply_smu_performance_limits() noexcept {
         return false;
     }
 
-    char cmd[320];
+    char cmd[384];
     std::snprintf(cmd, sizeof(cmd),
-                  "%s --tctl-temp=%u --stapm-limit=%u --fast-limit=%u --slow-limit=%u "
+                  "%s --tctl-temp=%u --apu-skin-temp=%u --stapm-limit=%u --fast-limit=%u --slow-limit=%u "
                   "--apu-slow-limit=%u >/dev/null 2>&1",
-                  tool, SMU_TCTL_PERF_C, SMU_STAPM_PERF_MW, SMU_FAST_PERF_MW,
+                  tool, SMU_TCTL_PERF_C, SMU_APU_SKIN_PERF_C, SMU_STAPM_PERF_MW, SMU_FAST_PERF_MW,
                   SMU_SLOW_PERF_MW, SMU_SLOW_PERF_MW);
     if (hw_system(cmd) != 0) return false;
     s_hardware_baseline.smu_limits_modified = true;

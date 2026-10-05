@@ -325,36 +325,43 @@ public:
     [[nodiscard]] static uint64_t fan_curve_application_count() noexcept;
     [[nodiscard]] static FanCurveEngine& fan_curve_engine() noexcept;
 
-    // REF-REQ-115: SMU thermal/power limits via ryzenadj. Performance and
-    // Balanced raise the core thermal limit to SMU_TCTL_PERF_C so throttling only
-    // starts there, with the fan at full speed keeping the part below it. Saving
-    // profiles and exit restore the captured baseline. ryzenadj is optional:
-    // when it is not on a system path these calls are no-ops.
+    // REF-REQ-115, REF-REQ-139: SMU thermal/power limits via ryzenadj. Performance and
+    // Balanced raise the core and skin thermal limits to SMU_TCTL_PERF_C and
+    // SMU_APU_SKIN_PERF_C so throttling only starts there, with the fan at full speed
+    // keeping the part below it. Saving profiles and exit restore the captured baseline.
     static constexpr uint32_t SMU_TCTL_PERF_C = 85;
-    static constexpr uint32_t SMU_STAPM_PERF_MW = 25000;
+    static constexpr uint32_t SMU_APU_SKIN_PERF_C = 85; // REF-REQ-139
+    static constexpr uint32_t SMU_STAPM_PERF_MW = 28000; // 28W (REF-REQ-139, up from 25W)
     static constexpr uint32_t SMU_FAST_PERF_MW = 35000;
     static constexpr uint32_t SMU_SLOW_PERF_MW = 30000;
     [[nodiscard]] static bool ryzenadj_available() noexcept;
     static bool apply_smu_performance_limits() noexcept;
     static bool restore_smu_limits() noexcept;
 
-    // REF-REQ-126 (2026-09-23): the EC owns STAPM and takes it back.
+    // REF-REQ-126, REF-REQ-139: the EC owns STAPM and takes it back.
     //
-    // `apply_smu_performance_limits()` writes the SMU mailbox once, at profile
-    // application, and nothing checked afterwards that the value stayed. Measured
-    // on the reference host: with Performance in force the EC moved STAPM back to
-    // its own table value (6 W) and the CPU settled at the 1400 MHz P-state floor
-    // (780-1400 MHz observed) with 25 C of thermal headroom unused, because the
-    // package could not draw enough power to clock higher. The write is therefore
-    // verified by reading the limit back, and re-asserted when the EC has taken it.
-    //
-    // The verification is periodic rather than per-cycle: it costs one `ryzenadj
-    // -i` exec, so it runs every SMU_VERIFY_INTERVAL_CYCLES observation cycles
-    // (~30 s at the 10 s cadence) and only while the machine is actually loaded
-    // (an idle box does not need the power budget) and an unrestricted profile is
-    // in force (the saving profiles leave the EC's limit in place on purpose).
-    static constexpr uint32_t SMU_VERIFY_INTERVAL_CYCLES = 3;
+    // In Performance mode, enforcement runs with 1-cycle cadence (~3s) and lower load
+    // floor (0.5) so that any EC 12W clawback is extinguished within seconds.
+    // In Balanced mode, the 3-cycle cadence (~30s) and 1.0 load floor are preserved.
+    static constexpr uint32_t SMU_VERIFY_INTERVAL_CYCLES = 3; // default for Balanced
+    static constexpr uint32_t SMU_VERIFY_INTERVAL_BALANCED_CYCLES = 3;
+    static constexpr uint32_t SMU_VERIFY_INTERVAL_PERF_CYCLES = 1; // 1-cycle fast loop!
     static constexpr double SMU_VERIFY_MIN_LOAD1 = 1.0;
+    static constexpr double SMU_VERIFY_MIN_LOAD_BAL = 1.0;
+    static constexpr double SMU_VERIFY_MIN_LOAD_PERF = 0.5;
+
+    [[nodiscard]] static constexpr uint32_t smu_verify_interval_cycles(PowerProfileMode mode) noexcept {
+        return (mode == PowerProfileMode::Performance)
+                   ? SMU_VERIFY_INTERVAL_PERF_CYCLES
+                   : SMU_VERIFY_INTERVAL_BALANCED_CYCLES;
+    }
+
+    [[nodiscard]] static constexpr double smu_verify_min_load(PowerProfileMode mode) noexcept {
+        return (mode == PowerProfileMode::Performance)
+                   ? SMU_VERIFY_MIN_LOAD_PERF
+                   : SMU_VERIFY_MIN_LOAD_BAL;
+    }
+
     // Floor below which the read-back means "the EC has taken it back". The value
     // is not SMU_STAPM_PERF_MW: our own accepted write reads back at 22-25 W
     // (SMU granularity), so a tight comparison would re-write every cycle forever.

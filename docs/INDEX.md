@@ -140,6 +140,7 @@ All documents follow the Ref-ID naming standard:
 | [`REF-REQ-136`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-136-custom-fan-curve-and-unified-dashboard-tabs.md) | Custom Fan Curve & Unified Matrix Dashboard Tabs | Implemented | [`REF-ARCH-083`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-083-simd-spline-fan-curve-and-tab-dashboard.md), [`REF-TEST-090`](file:///home/jedclub/Develop/WattCurb/tests/test_units.cpp) |
 | [`REF-REQ-137`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-137-progressive-disk-full-prevention-and-safe-storage-hygiene.md) | Progressive Disk Full Prevention & Safe Storage Hygiene | Implemented | [`REF-ARCH-084`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-084-dynamic-simd-and-progressive-disk-hygiene.md), [`REF-TEST-091`](file:///home/jedclub/Develop/WattCurb/tests/test_units.cpp) |
 | [`REF-REQ-138`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-138-autonomous-base-swap-right-sizing-and-migration.md) | Autonomous Base Swap Right-Sizing & Zero-Downtime Migration Engine | Implemented | [`REF-ARCH-085`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-085-base-swap-lifecycle-and-zero-downtime-migration.md), [`REF-REQ-113`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-113-performance-mode-dynamic-swap-expansion.md), [`REF-TEST-092`](file:///home/jedclub/Develop/WattCurb/tests/test_units.cpp) |
+| [`REF-REQ-139`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-139-performance-mode-anti-clawback-power-enforcer.md) | Performance Mode Anti-Clawback Power Enforcer & Skin Temperature Ceiling Lift | Implemented | [`REF-ARCH-086`](file:///home/jedclub/Develop/WattCurb/docs/architecture/ARCH-086-high-frequency-smu-enforcement.md), [`REF-REQ-115`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-115-smu-thermal-power-limit-raise.md), [`REF-REQ-126`](file:///home/jedclub/Develop/WattCurb/docs/requirements/REQ-126-ec-smu-power-limit-clawback-and-reassertion.md), [`REF-TEST-093`](file:///home/jedclub/Develop/WattCurb/tests/test_units.cpp) |
 
 
 
@@ -342,6 +343,7 @@ All documents follow the Ref-ID naming standard:
 | [`REF-TEST-090`](file:///home/jedclub/Develop/WattCurb/tests/test_units.cpp) | Custom Fan Curve Spline & Dashboard Tabs Gate | Monotonic spline evaluation, temperature bounds, tab switching state isolation | Approved |
 | [`REF-TEST-091`](file:///home/jedclub/Develop/WattCurb/tests/test_units.cpp) | Progressive Disk Full Prevention & Safe Storage Hygiene Gate | Disk pressure trigger (>= 90%), 300s cooldown invariance, safe non-destructive file filter | Approved |
 | [`REF-TEST-092`](file:///home/jedclub/Develop/WattCurb/tests/test_units.cpp) | Autonomous Base Swap Right-Sizing & Migration Gate | 2h observation window, peak <= 5.6 GiB gate, 16 GiB fs free floor, zero-downtime state sequence | Approved |
+| [`REF-TEST-093`](file:///home/jedclub/Develop/WattCurb/tests/test_units.cpp) | Performance Mode Anti-Clawback & Skin Temp Lift Gate | APU skin temp 85 C lift, 28 W STAPM floor, 1-cycle Perf vs 3-cycle Bal cadence, load >= 0.5 gate | Approved |
 
 
 

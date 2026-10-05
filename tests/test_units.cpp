@@ -4959,6 +4959,55 @@ void test_smu_raise_is_guarded() {
                  "refuses, restore is a no-op, limits internally consistent)\n";
 }
 
+// Implements REF-TEST-093 & REF-REQ-139: Performance Mode Anti-Clawback & Skin Temperature Ceiling Lift
+void test_performance_smu_anti_clawback_policy() {
+    using namespace wattcurb::policy;
+    using wattcurb::PowerProfileMode;
+
+    std::cout << "--- [REF-TEST-093] Performance SMU Anti-Clawback & Skin Temp Ceiling Lift (REF-REQ-139) ---\n";
+
+    // 1. Hardware Power and Thermal Ordering Invariants
+    static_assert(MitigationEngine::SMU_STAPM_PERF_MW <= MitigationEngine::SMU_SLOW_PERF_MW,
+                  "STAPM (28W) must not exceed Slow PPT (30W)");
+    static_assert(MitigationEngine::SMU_SLOW_PERF_MW <= MitigationEngine::SMU_FAST_PERF_MW,
+                  "Slow PPT (30W) must not exceed Fast PPT (35W)");
+    static_assert(MitigationEngine::SMU_TCTL_PERF_C == 85,
+                  "Tctl core ceiling must be 85 C");
+    static_assert(MitigationEngine::SMU_APU_SKIN_PERF_C == 85,
+                  "APU skin temp ceiling must be 85 C to prevent STT premature throttling");
+    static_assert(MitigationEngine::SMU_STAPM_CLAWED_BACK_MW < MitigationEngine::SMU_STAPM_PERF_MW,
+                  "Clawback trip floor must be strictly below performance target");
+
+    // 2. Profile-Adaptive Cadence Verification
+    assert(MitigationEngine::smu_verify_interval_cycles(PowerProfileMode::Performance) == 1 &&
+           "Performance mode must verify SMU limits every cycle (~3s) to eliminate throttling lag");
+    assert(MitigationEngine::smu_verify_interval_cycles(PowerProfileMode::Balanced) == 3 &&
+           "Balanced mode must verify SMU limits every 3 cycles (~30s)");
+    assert(MitigationEngine::smu_verify_interval_cycles(PowerProfileMode::PowerSaver) == 3);
+    assert(MitigationEngine::smu_verify_interval_cycles(PowerProfileMode::UltraEndurance) == 3);
+
+    // 3. Profile-Adaptive Minimum Load Verification
+    assert(MitigationEngine::smu_verify_min_load(PowerProfileMode::Performance) == 0.5 &&
+           "Performance mode load threshold must be 0.5 for immediate activation");
+    assert(MitigationEngine::smu_verify_min_load(PowerProfileMode::Balanced) == 1.0 &&
+           "Balanced mode load threshold must be 1.0");
+
+    // 4. Clawback Boundary Verification
+    // Values below 18000 mW trip the reassertion logic
+    assert(MitigationEngine::smu_limit_needs_reassert(6000));
+    assert(MitigationEngine::smu_limit_needs_reassert(12000));
+    assert(MitigationEngine::smu_limit_needs_reassert(17999));
+    // Values at or above 18000 mW (e.g. 18000, 25000, 28000) are healthy and do not trip
+    assert(!MitigationEngine::smu_limit_needs_reassert(18000));
+    assert(!MitigationEngine::smu_limit_needs_reassert(25000));
+    assert(!MitigationEngine::smu_limit_needs_reassert(28000));
+    assert(!MitigationEngine::smu_limit_needs_reassert(0)); // 0 indicates read failure, should not trip
+
+    std::cout << " [PASS] test_performance_smu_anti_clawback_policy (REF-TEST-093: 28W/30W/35W hierarchy, "
+                 "85C skin limit, 1-cycle (~3s) cadence, 0.5 load gate verified)\n";
+}
+
+
 // Implements REF-TEST-073 & REF-REQ-114/REF-REQ-115: the ThinkPad thermal-assist
 // fan curve and the SMU thermal/power limit raise.
 //
@@ -7076,6 +7125,7 @@ int main() {
     test::test_frequency_starvation_watchdog();
     test::test_smu_limit_clawback_verification();
     test::test_smu_raise_is_guarded();
+    test::test_performance_smu_anti_clawback_policy();
     test::test_thinkpad_fan_thermal_assist_and_smu_limits();
     test::test_memory_pressure_ladder();
     test::test_memory_pressure_parsers();

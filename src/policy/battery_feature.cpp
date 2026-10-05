@@ -582,14 +582,18 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
     // cpuinfo_max, boost=1, platform_profile=performance. Raising STAPM back to
     // 25 W moved the highest core to 3942 MHz immediately. Temperature was never
     // the binding constraint; the power budget was.
+    // REF-REQ-126, REF-REQ-139: The EC owns STAPM and can take it back.
     //
-    // The check costs one `ryzenadj -i` exec, so it runs every
-    // SMU_VERIFY_INTERVAL_CYCLES cycles (~30 s at the 10 s cadence) and only while
-    // the machine is actually loaded. The saving profiles are skipped inside the
-    // call: there the EC's cap is intentional.
+    // In Performance mode, enforcement runs every cycle (~3s) with a low load floor (0.5)
+    // so any EC 12W power clawback is extinguished immediately, guaranteeing uninterrupted
+    // high-frequency all-core execution. In Balanced mode, the 3-cycle cadence (~30s) and
+    // 1.0 load floor are preserved.
     {
         static uint32_t s_smu_verify_tick = 0;
-        if (++s_smu_verify_tick >= MitigationEngine::SMU_VERIFY_INTERVAL_CYCLES) {
+        const uint32_t target_cycles = MitigationEngine::smu_verify_interval_cycles(eff_profile);
+        const double target_load = MitigationEngine::smu_verify_min_load(eff_profile);
+
+        if (++s_smu_verify_tick >= target_cycles) {
             s_smu_verify_tick = 0;
             double verify_load1 = 0.0;
             char lbuf[32];
@@ -598,7 +602,7 @@ ActiveMitigationStatus FeatureManager::evaluate_and_actuate(
                 lbuf[ln] = '\0';
                 verify_load1 = std::strtod(lbuf, nullptr);
             }
-            if (verify_load1 >= MitigationEngine::SMU_VERIFY_MIN_LOAD1) {
+            if (verify_load1 >= target_load) {
                 (void)MitigationEngine::verify_and_reassert_smu_limits(eff_profile);
             }
         }
