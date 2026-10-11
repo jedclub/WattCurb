@@ -456,7 +456,6 @@ bool DaemonRunner::process_light_probe_cycle() {
     // (MitigationEngine::resolve_profile, reached via FeatureManager). The daemon
     // no longer runs a second, differently-calibrated ladder here.
     bool on_battery = cached_report_.hardware.is_battery_discharging;
-    double batt_pct = static_cast<double>(cached_report_.hardware.battery_capacity_percent);
 
     // Seqlock State Export
     if (shm_state_ == nullptr) setup_shm();
@@ -1134,12 +1133,34 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
         bool ok = engine.deserialize_curves(payload);
         if (ok) {
             engine.save_to_file("/etc/wattcurb/fan_curves.conf");
-            // Immediately actuate fan hardware for current CPU temperature
-            (void)policy::MitigationEngine::apply_fan_for_temp(
+            // Immediately actuate fan hardware for current CPU temperature (REF-REQ-141)
+            int applied_level = policy::MitigationEngine::apply_fan_for_temp(
                 cached_report_.hardware.cpu_temp_c,
                 policy::MitigationEngine::effective_profile());
-            const char ack[] = "OK\n";
-            ::sendto(fd, ack, sizeof(ack) - 1, 0,
+
+            uint32_t live_rpm = cached_report_.hardware.fan_rpm;
+            int fan_fd = ::open("/proc/acpi/ibm/fan", O_RDONLY | O_CLOEXEC);
+            if (fan_fd >= 0) {
+                char fan_buf[256];
+                ssize_t fn = ::read(fan_fd, fan_buf, sizeof(fan_buf) - 1);
+                ::close(fan_fd);
+                if (fn > 0) {
+                    fan_buf[fn] = '\0';
+                    const char* sp = std::strstr(fan_buf, "speed:");
+                    if (sp) {
+                        unsigned r = 0;
+                        if (std::sscanf(sp + 6, "%u", &r) == 1) live_rpm = r;
+                    }
+                }
+            }
+
+            char ack[160];
+            int ack_len = std::snprintf(ack, sizeof(ack),
+                                        "OK LEVEL=%d RPM=%u TEMP=%.1f PROFILE=%d\n",
+                                        applied_level, live_rpm,
+                                        cached_report_.hardware.cpu_temp_c,
+                                        static_cast<int>(policy::MitigationEngine::effective_profile()));
+            ::sendto(fd, ack, static_cast<size_t>(ack_len), 0,
                      reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
         } else {
             const char err[] = "ERROR: failed to parse fan curves\n";

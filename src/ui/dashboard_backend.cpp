@@ -1124,8 +1124,8 @@ void DashboardBackend::resetFanCurveToDefault(int profileIdx) {
 
 bool DashboardBackend::applyFanCurves() {
     WATTCURB_PROFILE_SCOPE("Dashboard::ApplyFanCurves");
-    // Implements REF-REQ-140, REF-ARCH-087:
-    // Atomic Privilege-Separated Fan Curve Persistence & Daemon Enforcement
+    // Implements REF-REQ-140, REF-ARCH-087, REF-REQ-141:
+    // Atomic Privilege-Separated Fan Curve Persistence & Hardware-Verified Feedback Protocol
     std::string cmd = "SET_FAN_CURVES\n" + fan_curve_engine_.serialize_curves();
     std::string reply;
     bool daemon_ok = sendDaemonCommandQuery(cmd.c_str(), reply);
@@ -1134,6 +1134,32 @@ bool DashboardBackend::applyFanCurves() {
     // Also attempt local write if directory permissions allow
     (void)fan_curve_engine_.save_to_file("/etc/wattcurb/fan_curves.conf");
 
+    is_fan_apply_success_ = ok;
+    if (ok) {
+        int lvl = -1, rpm = 0, prof = selected_fan_profile_;
+        float temp = 0.0f;
+        if (std::sscanf(reply.c_str(), "OK LEVEL=%d RPM=%d TEMP=%f PROFILE=%d", &lvl, &rpm, &temp, &prof) >= 1) {
+            daemon_fan_level_ = lvl;
+            QString lvl_str = (lvl == 8) ? "Full-Speed (최대속도)" : QString("Level %1").arg(lvl);
+            int display_rpm = (rpm > 0) ? rpm : fanRpm();
+            double display_temp = (temp > 0.0f) ? static_cast<double>(temp) : static_cast<double>(cpuTempC());
+            fan_apply_feedback_ = QString("✅ [데몬 동기화 성공] ThinkPad EC %1 즉시 구동 (현재 %2 RPM · %3°C)")
+                                      .arg(lvl_str)
+                                      .arg(display_rpm)
+                                      .arg(QString::number(display_temp, 'f', 1));
+            daemon_fan_status_ = QString("EC %1 (%2 RPM)").arg((lvl == 8) ? "FULL" : QString("L%1").arg(lvl)).arg(display_rpm);
+        } else {
+            fan_apply_feedback_ = QString("✅ [데몬 동기화 성공] 커스텀 팬 커브가 데몬 및 ThinkPad EC에 즉시 적용되었습니다.");
+            daemon_fan_status_ = "동기화 완료";
+        }
+    } else {
+        fan_apply_feedback_ = reply.empty() ? QString("❌ [적용 실패] 데몬 응답 없음 (wattcurb 서비스 상태를 확인하세요)")
+                                            : QString("❌ [적용 실패] %1").arg(QString::fromStdString(reply).trimmed());
+        daemon_fan_status_ = "동기화 실패";
+    }
+
+    emit fanApplyFeedbackChanged();
+    emit fanCurveDataChanged();
     return ok;
 }
 

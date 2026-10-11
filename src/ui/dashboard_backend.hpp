@@ -117,13 +117,17 @@ class DashboardBackend : public QObject {
     // Unified Dashboard Tab Management (REF-REQ-136, REF-ARCH-083)
     Q_PROPERTY(int currentDashboardTab READ currentDashboardTab WRITE setCurrentDashboardTab NOTIFY currentDashboardTabChanged)
 
-    // Fan Curve Studio Properties (REF-REQ-136, REF-ARCH-083)
+    // Fan Curve Studio Properties (REF-REQ-136, REF-ARCH-083, REF-REQ-141)
     Q_PROPERTY(int selectedFanProfile READ selectedFanProfile WRITE setSelectedFanProfile NOTIFY fanProfileChanged)
     Q_PROPERTY(bool isCustomFanCurve READ isCustomFanCurve NOTIFY fanCurveDataChanged)
     Q_PROPERTY(int fanPointCount READ fanPointCount NOTIFY fanCurveDataChanged)
     Q_PROPERTY(QVariantList fanControlPoints READ fanControlPoints NOTIFY fanCurveDataChanged)
     Q_PROPERTY(QVariantList fanLookupPcts READ fanLookupPcts NOTIFY fanCurveDataChanged)
     Q_PROPERTY(QVariantList fanLookupLevels READ fanLookupLevels NOTIFY fanCurveDataChanged)
+    Q_PROPERTY(QString fanApplyFeedback READ fanApplyFeedback NOTIFY fanApplyFeedbackChanged)
+    Q_PROPERTY(bool isFanApplySuccess READ isFanApplySuccess NOTIFY fanApplyFeedbackChanged)
+    Q_PROPERTY(int daemonFanLevel READ daemonFanLevel NOTIFY fanApplyFeedbackChanged)
+    Q_PROPERTY(QString daemonFanStatus READ daemonFanStatus NOTIFY fanApplyFeedbackChanged)
 
 public:
     explicit DashboardBackend(QObject* parent = nullptr);
@@ -256,6 +260,10 @@ public:
     Q_INVOKABLE bool removeFanPoint(int pointIdx);
     Q_INVOKABLE void resetFanCurveToDefault(int profileIdx);
     Q_INVOKABLE bool applyFanCurves();
+    QString fanApplyFeedback() const { return fan_apply_feedback_; }
+    bool isFanApplySuccess() const noexcept { return is_fan_apply_success_; }
+    int daemonFanLevel() const noexcept { return daemon_fan_level_; }
+    QString daemonFanStatus() const { return daemon_fan_status_; }
 
     // Test & Benchmark helpers (REF-REQ-074, REF-TEST-039)
     void runPollIteration() noexcept;
@@ -275,6 +283,7 @@ signals:
     void currentDashboardTabChanged();
     void fanProfileChanged();
     void fanCurveDataChanged();
+    void fanApplyFeedbackChanged();
 
 private slots:
     void onPollTimer();
@@ -384,10 +393,14 @@ private:
     QVariantList battery_report_audit_events_{};
     std::vector<ProcessAttributedPower> cached_top_procs_{};
 
-    // Unified Dashboard Tab & Fan Studio (REF-REQ-136, REF-ARCH-083)
+    // Unified Dashboard Tab & Fan Studio (REF-REQ-136, REF-ARCH-083, REF-REQ-141)
     int current_dashboard_tab_{0};
     int selected_fan_profile_{1}; // 0=Perf, 1=Balanced, 2=Save, 3=Ultra
     policy::FanCurveEngine fan_curve_engine_{};
+    QString fan_apply_feedback_{};
+    bool is_fan_apply_success_{false};
+    int daemon_fan_level_{-1};
+    QString daemon_fan_status_{};
 };
 
 } // namespace wattcurb::ui

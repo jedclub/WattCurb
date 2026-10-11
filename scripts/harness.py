@@ -16,6 +16,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TMP_DIR = REPO_ROOT / "tmp"
 TMP_DIR.mkdir(exist_ok=True)
+os.environ["TMPDIR"] = str(TMP_DIR)
 
 def format_size(path):
     if not path.exists():

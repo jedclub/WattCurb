@@ -147,6 +147,33 @@ Item {
                         font.pixelSize: 11
                     }
                 }
+
+                // Hardware Actuation Sync Indicator (REF-REQ-141, REF-ARCH-088)
+                Rectangle {
+                    visible: backend.daemonFanLevel >= 0
+                    height: 28
+                    implicitWidth: hwSyncText.implicitWidth + 20
+                    radius: 4
+                    color: backend.isFanApplySuccess ? "#052e16" : "#2d1515"
+                    border.color: backend.isFanApplySuccess ? "#22c55e" : "#ef4444"
+                    border.width: 1
+                    RowLayout {
+                        anchors.centerIn: parent
+                        spacing: 6
+                        Text {
+                            text: backend.isFanApplySuccess ? "🟢" : "🔴"
+                            font.pixelSize: 10
+                        }
+                        Text {
+                            id: hwSyncText
+                            text: backend.daemonFanStatus.length > 0 ? ("하드웨어: " + backend.daemonFanStatus) : "EC 연동됨"
+                            color: backend.isFanApplySuccess ? "#4ade80" : "#fca5a5"
+                            font.bold: true
+                            font.pixelSize: 11
+                            font.family: "Monospace"
+                        }
+                    }
+                }
             }
         }
 
@@ -601,6 +628,28 @@ Item {
                     }
                 }
             }
+
+            // Hardware Actuation Pulse Effect (REF-REQ-141)
+            Rectangle {
+                id: applyPulseOverlay
+                anchors.fill: parent
+                radius: 8
+                color: backend.isFanApplySuccess ? Qt.rgba(0.06, 0.72, 0.51, 0.18) : Qt.rgba(0.94, 0.27, 0.27, 0.18)
+                border.color: backend.isFanApplySuccess ? studioRoot.colGreen : studioRoot.colRed
+                border.width: 2
+                opacity: 0.0
+                visible: opacity > 0.001
+
+                NumberAnimation {
+                    id: applyPulseAnim
+                    target: applyPulseOverlay
+                    property: "opacity"
+                    from: 1.0
+                    to: 0.0
+                    duration: 800
+                    easing.type: Easing.OutQuad
+                }
+            }
         }
 
         // =====================================================================
@@ -662,12 +711,35 @@ Item {
 
                 Item { Layout.fillWidth: true }
 
-                // Toast notification
-                Text {
-                    text: studioRoot.statusToast
-                    color: studioRoot.colOrange
-                    font.bold: true
-                    font.pixelSize: 12
+                // Actuation Feedback Banner (REF-REQ-141, REF-ARCH-088)
+                Rectangle {
+                    visible: (studioRoot.statusToast.length > 0) || (backend.fanApplyFeedback.length > 0)
+                    Layout.maximumWidth: 440
+                    height: 36
+                    radius: 6
+                    color: backend.isFanApplySuccess ? "#052e16" : "#2d1515"
+                    border.color: backend.isFanApplySuccess ? "#10b981" : "#ef4444"
+                    border.width: 1
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        spacing: 8
+                        Text {
+                            text: backend.isFanApplySuccess ? "✅" : "⚠️"
+                            font.pixelSize: 13
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            elide: Text.ElideRight
+                            text: studioRoot.statusToast.length > 0 ? studioRoot.statusToast : backend.fanApplyFeedback
+                            color: backend.isFanApplySuccess ? "#86efac" : "#fca5a5"
+                            font.bold: true
+                            font.pixelSize: 11
+                            font.family: "Monospace"
+                        }
+                    }
                 }
 
                 // Reset to Default button
@@ -689,14 +761,29 @@ Item {
                     onClicked: {
                         var ok = backend.applyFanCurves();
                         if (ok) {
-                            studioRoot.statusToast = "✅ 팬 커브가 성공적으로 저장 및 데몬에 적용되었습니다.";
+                            studioRoot.statusToast = backend.fanApplyFeedback.length > 0 ? 
+                                backend.fanApplyFeedback : "✅ 팬 커브가 데몬 및 ThinkPad EC에 성공적으로 적용되었습니다.";
+                            applyPulseAnim.restart();
                         } else {
-                            studioRoot.statusToast = "❌ 팬 커브 적용 실패 (데몬 응답 확인 필요)";
+                            studioRoot.statusToast = backend.fanApplyFeedback.length > 0 ? 
+                                backend.fanApplyFeedback : "❌ 팬 커브 적용 실패 (데몬 응답 확인 필요)";
+                            applyPulseAnim.restart();
                         }
                         statusToastTimer.restart();
                         canvasContainer.requestPaint();
                     }
                 }
+            }
+        }
+    }
+
+    Connections {
+        target: backend
+        function onFanApplyFeedbackChanged() {
+            if (backend.fanApplyFeedback.length > 0) {
+                studioRoot.statusToast = backend.fanApplyFeedback;
+                statusToastTimer.restart();
+                applyPulseAnim.restart();
             }
         }
     }

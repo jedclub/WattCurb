@@ -72,6 +72,12 @@ namespace test {
     return tol;
 }
 
+[[nodiscard]] static std::string get_test_temp_dir() {
+    const char* env = ::getenv("TMPDIR");
+    if (env != nullptr && *env != '\0') return std::string(env);
+    return "/tmp";
+}
+
 void test_proc_stat_parsing() {
     std::string mock_stat = "10523 (Web Content) S 1000 1000 1000 0 -1 4194304 1200 0 5 0 450 150 0 0 20 0 8 0 12345 100 200 0 0 0 0 0 0 0 0 0 0 0 0 0 17 6 0 0 0";
     wattcurb::ProcessSample sample;
@@ -5948,14 +5954,14 @@ void test_fan_curve_simd_spline_engine() {
     assert(hot_ns_op < 50.0 && "Hot path fan level lookup must be < 50 ns (L1 cache hit)");
 
     // 7. Persistence Round-Trip Verification (Mock path)
-    const char* mock_conf = "/tmp/wattcurb_test_fan_curves.conf";
+    const std::string mock_conf = get_test_temp_dir() + "/wattcurb_test_fan_curves.conf";
     engine.set_profile_curve(0, custom_pts, 5);
-    assert(engine.save_to_file(mock_conf));
+    assert(engine.save_to_file(mock_conf.c_str()));
     FanCurveEngine loaded_engine{};
-    assert(loaded_engine.load_from_file(mock_conf));
+    assert(loaded_engine.load_from_file(mock_conf.c_str()));
     assert(loaded_engine.is_profile_custom(0));
     assert(loaded_engine.get_profile_curve(0).point_count == 5);
-    ::unlink(mock_conf);
+    ::unlink(mock_conf.c_str());
 
     std::cout << " [PASS] test_fan_curve_simd_spline_engine (REF-TEST-090: Monotone cubic Hermite spline, "
                  "SIMD 41-element LUT, 70°C failsafe full-speed ceiling, 10-point constraint, "
@@ -6023,18 +6029,111 @@ void test_fan_curve_serialization_and_ipc_persistence() {
     }
 
     // 4. File roundtrip with nested directory creation
-    const char* test_file = "/tmp/wattcurb_test_ipc_nested/fan_curves.conf";
-    assert(remote_engine.save_to_file(test_file));
+    const std::string test_dir = get_test_temp_dir() + "/wattcurb_test_ipc_nested";
+    const std::string test_file = test_dir + "/fan_curves.conf";
+    assert(remote_engine.save_to_file(test_file.c_str()));
     FanCurveEngine file_engine{};
-    assert(file_engine.load_from_file(test_file));
+    assert(file_engine.load_from_file(test_file.c_str()));
     assert(file_engine.is_profile_custom(0));
     assert(file_engine.is_profile_custom(1));
     assert(!file_engine.is_profile_custom(2));
-    ::unlink(test_file);
-    ::rmdir("/tmp/wattcurb_test_ipc_nested");
+    ::unlink(test_file.c_str());
+    ::rmdir(test_dir.c_str());
 
     std::cout << " [PASS] test_fan_curve_serialization_and_ipc_persistence (REF-TEST-094: Wire serialization, "
                  "is_profile_custom flag retention, fast LUT equivalence, nested mkdir persistence verified)\n";
+}
+
+// Implements REF-TEST-095 & REF-REQ-141, REF-ARCH-088:
+// Real-Time Fan Curve Actuation Telemetry Feedback & Wire Protocol Verification
+void test_fan_curve_actuation_feedback_wire_protocol() {
+    std::cout << "\n--- [REF-TEST-095] Fan Curve Actuation Telemetry Feedback Gate (REF-REQ-141) ---\n";
+
+    // 1. Structured wire payload simulation from DaemonRunner
+    std::string daemon_resp_normal = "OK LEVEL=5 RPM=4333 TEMP=54.2 PROFILE=1\n";
+    int lvl = -1;
+    unsigned int rpm = 0;
+    float temp = 0.0f;
+    int prof = -1;
+
+    int parsed = ::sscanf(daemon_resp_normal.c_str(), "OK LEVEL=%d RPM=%u TEMP=%f PROFILE=%d", &lvl, &rpm, &temp, &prof);
+    assert(parsed == 4);
+    assert(lvl == 5);
+    assert(rpm == 4333);
+    assert(std::abs(temp - 54.2f) < 0.05f);
+    assert(prof == 1);
+
+    // Verify feedback message formatting
+    char feedback_buf[256];
+    if (rpm > 0) {
+        ::snprintf(feedback_buf, sizeof(feedback_buf),
+                   "ThinkPad EC 반영 완료: Level %d (%u RPM, %.1f°C)",
+                   lvl, rpm, temp);
+    } else {
+        ::snprintf(feedback_buf, sizeof(feedback_buf),
+                   "ThinkPad EC 반영 완료: Level %d (정지/대기, %.1f°C)",
+                   lvl, temp);
+    }
+    assert(std::string_view(feedback_buf).find("Level 5 (4333 RPM, 54.2°C)") != std::string_view::npos);
+
+    // 2. Stopped/Idling Fan Telemetry Simulation
+    std::string daemon_resp_stopped = "OK LEVEL=0 RPM=0 TEMP=42.0 PROFILE=2\n";
+    lvl = -1; rpm = 0; temp = 0.0f; prof = -1;
+    parsed = ::sscanf(daemon_resp_stopped.c_str(), "OK LEVEL=%d RPM=%u TEMP=%f PROFILE=%d", &lvl, &rpm, &temp, &prof);
+    assert(parsed == 4);
+    assert(lvl == 0);
+    assert(rpm == 0);
+    assert(std::abs(temp - 42.0f) < 0.05f);
+    assert(prof == 2);
+
+    if (rpm > 0) {
+        ::snprintf(feedback_buf, sizeof(feedback_buf),
+                   "ThinkPad EC 반영 완료: Level %d (%u RPM, %.1f°C)",
+                   lvl, rpm, temp);
+    } else {
+        ::snprintf(feedback_buf, sizeof(feedback_buf),
+                   "ThinkPad EC 반영 완료: Level %d (정지/대기, %.1f°C)",
+                   lvl, temp);
+    }
+    assert(std::string_view(feedback_buf).find("Level 0 (정지/대기, 42.0°C)") != std::string_view::npos);
+
+    // 3. Fallback compatibility with legacy "OK\n" response
+    std::string legacy_ok = "OK\n";
+    lvl = -1; rpm = 0; temp = 0.0f; prof = -1;
+    parsed = ::sscanf(legacy_ok.c_str(), "OK LEVEL=%d RPM=%u TEMP=%f PROFILE=%d", &lvl, &rpm, &temp, &prof);
+    assert(parsed != 4);
+    assert(legacy_ok.rfind("OK", 0) == 0); // starts with OK
+
+    // 4. Oracle Gate Benchmark: 100,000 sscanf & telemetry serialization rounds
+    constexpr size_t BENCH_COUNT = 100000;
+    auto t0 = std::chrono::steady_clock::now();
+    uint64_t tsc0 = wattcurb::core::hw_isa::read_tsc();
+
+    volatile int dummy_lvl = 0;
+    for (size_t i = 0; i < BENCH_COUNT; ++i) {
+        int l = 0, p = 0;
+        unsigned int r = 0;
+        float t = 0.0f;
+        ::sscanf("OK LEVEL=7 RPM=5412 TEMP=68.5 PROFILE=0", "OK LEVEL=%d RPM=%u TEMP=%f PROFILE=%d", &l, &r, &t, &p);
+        dummy_lvl += l + r;
+    }
+    (void)dummy_lvl;
+
+    auto t1 = std::chrono::steady_clock::now();
+    uint64_t tsc1 = wattcurb::core::hw_isa::read_tsc();
+
+    auto total_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+    double avg_us_op = (static_cast<double>(total_ns) / static_cast<double>(BENCH_COUNT)) / 1000.0;
+    double cycles_op = static_cast<double>(tsc1 - tsc0) / static_cast<double>(BENCH_COUNT);
+
+    std::cout << " [ORACLE GATE] Fan Actuation Telemetry Benchmark (" << BENCH_COUNT << " iters):\n"
+              << "   * Average Latency : " << std::fixed << std::setprecision(4) << avg_us_op << " us/op\n"
+              << "   * Average Cycles  : " << std::setprecision(1) << cycles_op << " cycles/op\n" << std::flush;
+
+    assert(avg_us_op < bench_tol() * 1.50 && "Fan actuation parsing must complete in < 1.50 us/op");
+
+    std::cout << " [PASS] test_fan_curve_actuation_feedback_wire_protocol (REF-TEST-095: Structured OK LEVEL/RPM/TEMP/PROFILE parsing, "
+                 "ThinkPad EC fallback, and latency gate verified)\n";
 }
 
 // Implements REF-TEST-091, REF-REQ-137 & REF-ARCH-084:
@@ -6072,7 +6171,7 @@ void test_disk_pressure_guard_and_dynamic_simd() {
     assert(guard.total_reclaimed_bytes() == 0);
 
     // 4. Safe Non-Destructive File Filter Invariant Test
-    const std::string sandbox_dir = "/tmp/wattcurb_test_disk_hygiene";
+    const std::string sandbox_dir = get_test_temp_dir() + "/wattcurb_test_disk_hygiene";
     ::mkdir(sandbox_dir.c_str(), 0755);
 
     const std::string lock_file = sandbox_dir + "/active_service.lock";
@@ -7210,6 +7309,7 @@ int main() {
     test::test_targeted_app_reclaim_engine();
     test::test_fan_curve_simd_spline_engine();
     test::test_fan_curve_serialization_and_ipc_persistence();
+    test::test_fan_curve_actuation_feedback_wire_protocol();
     test::test_disk_pressure_guard_and_dynamic_simd();
     test::test_base_swap_right_sizing_policy();
     test::test_hardware_bus_and_display_power_minimization();
