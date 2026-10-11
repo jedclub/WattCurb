@@ -7278,7 +7278,7 @@ void test_actuation_sandbox_blocks_window_governor() {
     std::cout << "--- [REF-TEST-064] Actuation Sandbox vs Window Governor Live-Write Verification ---\n";
 
     const char* mock_qos_path = "/tmp/wattcurb_sandbox_probe_qos";
-    { int mfd = ::open(mock_qos_path, O_CREAT | O_TRUNC | O_WRONLY, 0600); if (mfd >= 0) ::close(mfd); }
+    { int mfd = ::open(mock_qos_path, O_CREAT | O_TRUNC | O_WRONLY, 0666); if (mfd >= 0) ::close(mfd); }
     PmQosController::set_device_path_for_testing(mock_qos_path);
 
     const bool prev_sandbox = MitigationEngine::actuation_sandboxed();
@@ -7310,9 +7310,21 @@ void test_actuation_sandbox_blocks_window_governor() {
     //    the sandbox - not a permissions failure - is what suppressed it.
     MitigationEngine::set_actuation_sandbox(false);
     WindowAwareGovernor gov2;
-    assert(gov2.engage_active_window(child, "sandbox-probe"));
-    assert(gov2.pm_qos().is_pinned() && "unsandboxed engage must pin the mock device");
-    assert(file_size(mock_qos_path) == static_cast<off_t>(sizeof(int32_t)) &&
+    bool engaged2 = gov2.engage_active_window(child, "sandbox-probe");
+    bool pinned2 = gov2.pm_qos().is_pinned();
+    off_t sz2 = file_size(mock_qos_path);
+    if (!engaged2 || !pinned2 || sz2 != static_cast<off_t>(sizeof(int32_t))) {
+        std::cerr << "[REF-TEST-064 DIAGNOSTIC] engaged=" << engaged2
+                  << " pinned=" << pinned2
+                  << " raw_fd=" << gov2.pm_qos().raw_fd()
+                  << " file_sz=" << sz2
+                  << " s_device_path=" << (PmQosController::device_path() ? PmQosController::device_path() : "null")
+                  << " mock_path=" << mock_qos_path
+                  << " errno=" << errno << " (" << std::strerror(errno) << ")\n";
+    }
+    assert(engaged2 && "unsandboxed engage must succeed");
+    assert(pinned2 && "unsandboxed engage must pin the mock device");
+    assert(sz2 == static_cast<off_t>(sizeof(int32_t)) &&
            "unsandboxed engage must write a 4-byte latency constraint");
     gov2.release_active_window();
 

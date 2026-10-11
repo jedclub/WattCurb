@@ -42,19 +42,13 @@ public:
     [[nodiscard]] int raw_fd() const noexcept { return m_fd; }
 
     // Test support: allow setting custom device path
-    static void set_device_path_for_testing(const char* path) noexcept {
-        s_device_path = path;
-    }
-    static void reset_device_path() noexcept {
-        s_device_path = "/dev/cpu_dma_latency";
-    }
-    static const char* device_path() noexcept {
-        return s_device_path;
-    }
+    static void set_device_path_for_testing(const char* path) noexcept;
+    static void reset_device_path() noexcept;
+    static const char* device_path() noexcept;
 
 private:
     int m_fd{-1};
-    static const char* s_device_path;
+    static const char* volatile s_device_path;
 };
 
 } // namespace wattcurb::policy
