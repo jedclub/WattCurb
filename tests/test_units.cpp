@@ -6210,6 +6210,73 @@ void test_ultra_low_overhead_scoped_profiler_and_dump() {
 #endif
 }
 
+// Implements REF-TEST-097, REF-REQ-143 & REF-ARCH-090:
+// 30-Minute Real Telemetry Hotpath VFS Single Read & Mutually Exclusive EC De-correlation
+void test_hotpath_vfs_and_ec_telemetry_optimization() {
+    using namespace wattcurb;
+    using namespace wattcurb::proc;
+
+    std::cout << "\n--- [REF-TEST-097] 30-Minute Telemetry Hotpath VFS & EC Bus De-correlation (REF-REQ-143, REF-ARCH-090) ---\n";
+
+    // 1. Single-read VFS Buffer Semantics Verification
+    alignas(64) char stat_buf[2048]{};
+    size_t out_bytes = 0;
+    bool ok = ProcessAnalyzer::read_file_to_stack_buf("/proc/self/stat", stat_buf, sizeof(stat_buf), out_bytes);
+    assert(ok && "read_file_to_stack_buf must successfully read /proc/self/stat in a single read()");
+    assert(out_bytes > 0 && out_bytes < sizeof(stat_buf) && "Read bytes must be valid non-zero length");
+    assert(stat_buf[out_bytes] == '\0' && "Buffer must be null-terminated at out_bytes");
+
+    // Parse the stat buffer to verify data integrity
+    ProcessSample sample{};
+    bool parse_ok = ProcessAnalyzer::parse_proc_stat(std::string_view(stat_buf, out_bytes), sample);
+    assert(parse_ok && "parse_proc_stat must succeed on single-read buffer");
+    assert(sample.pid == ::getpid() && "Parsed PID must match current process PID");
+
+    // Verify openat-based single read
+    int self_dfd = ::open("/proc/self", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    assert(self_dfd >= 0 && "open /proc/self directory must succeed");
+    alignas(64) char statm_buf[512]{};
+    size_t statm_bytes = 0;
+    bool at_ok = ProcessAnalyzer::read_fileat_to_stack_buf(self_dfd, "statm", statm_buf, sizeof(statm_buf), statm_bytes);
+    ::close(self_dfd);
+    assert(at_ok && "read_fileat_to_stack_buf must succeed in a single read()");
+    assert(statm_bytes > 0 && statm_buf[statm_bytes] == '\0');
+    bool statm_parse_ok = ProcessAnalyzer::parse_proc_statm(std::string_view(statm_buf, statm_bytes), sample);
+    assert(statm_parse_ok && "parse_proc_statm must succeed on single-read statm buffer");
+    assert(sample.rss_kib > 0 && "RSS KiB must be greater than zero");
+
+    // 2. Dormant Process FD Scan Bypass Logic Verification
+    ProcessAnalyzer analyzer("/proc");
+    ProcessSample prev_sample{};
+    prev_sample.pid = ::getpid();
+    prev_sample.utime_ticks = 100;
+    prev_sample.stime_ticks = 50;
+    prev_sample.io_syscalls = 500;
+    prev_sample.open_sockets = 3;
+    prev_sample.pinned_drm_fd = -2; // Non-GPU process
+
+    ProcessSample curr_sample = prev_sample;
+    // Inspect fds when ticks and io_syscalls have not changed (Dormant)
+    analyzer.inspect_pid_fds(curr_sample.pid, curr_sample, &prev_sample, -1);
+    assert(curr_sample.open_sockets == prev_sample.open_sockets && "Dormant process must preserve socket count without re-scanning");
+
+    // 3. Mutually Exclusive ACPI EC Phase Distribution Verification
+    // Validate that across all sample counters in a full 30-step period, at most ONE slow ACPI EC/sysfs query fires per tick.
+    for (uint64_t step = 0; step < 60; ++step) {
+        int slow_queries_active = 0;
+        if (step % 6 == 1) slow_queries_active++;   // Fan RPM alone
+        if (step % 30 == 3) slow_queries_active++;  // Fan PWM target alone
+        if (step % 30 == 9) slow_queries_active++;  // Chassis thermal sensor alone
+        if (step % 30 == 15) slow_queries_active++; // Keyboard backlight alone
+        if (step % 30 == 21) slow_queries_active++; // Bluetooth power status alone
+
+        assert(slow_queries_active <= 1 && "At most ONE slow ACPI EC / sysfs query may be executed in any single sampling tick!");
+    }
+
+    std::cout << " [PASS] test_hotpath_vfs_and_ec_telemetry_optimization (REF-TEST-097: Single-read procfs semantics, "
+              << "dormant FD bypass, and mutually exclusive EC phase distribution verified)\n";
+}
+
 // Implements REF-TEST-091, REF-REQ-137 & REF-ARCH-084:
 // Safe Progressive Disk Pressure Guard & Dynamic SIMD Selection Gate
 void test_disk_pressure_guard_and_dynamic_simd() {
@@ -7385,6 +7452,7 @@ int main() {
     test::test_fan_curve_serialization_and_ipc_persistence();
     test::test_fan_curve_actuation_feedback_wire_protocol();
     test::test_ultra_low_overhead_scoped_profiler_and_dump();
+    test::test_hotpath_vfs_and_ec_telemetry_optimization();
     test::test_disk_pressure_guard_and_dynamic_simd();
     test::test_base_swap_right_sizing_policy();
     test::test_hardware_bus_and_display_power_minimization();

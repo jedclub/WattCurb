@@ -21,7 +21,9 @@ public:
     }
     [[nodiscard]] ProcessSnapshot capture_snapshot(const ProcessSnapshot* prev_samples = nullptr) const;
 
-    // Exposed for granular unit testing (REF-TEST-002)
+    // Exposed for granular unit testing (REF-TEST-002, REF-TEST-097)
+    static bool read_file_to_stack_buf(const char* path, char* buf, size_t max_len, size_t& out_bytes) noexcept;
+    static bool read_fileat_to_stack_buf(int dirfd, const char* rel_path, char* buf, size_t max_len, size_t& out_bytes) noexcept;
     static bool parse_proc_stat(std::string_view content, ProcessSample& out_sample);
     static bool parse_proc_status(std::string_view content, ProcessSample& out_sample);
     static bool parse_proc_io(std::string_view content, ProcessSample& out_sample);

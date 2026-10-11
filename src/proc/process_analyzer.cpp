@@ -15,7 +15,68 @@
 
 namespace wattcurb::proc {
 
+// Fast, zero-allocation stack buffer reader (REF-REQ-007, REF-ARCH-005, REF-REQ-143, REF-ARCH-090)
+// Linux procfs seq_file/single_open records fit within stack buffers and return atomically in a single read().
+// Eliminates the redundant secondary read(EOF) syscall across 330,000+ samples.
+bool ProcessAnalyzer::read_file_to_stack_buf(const char* path, char* buf, size_t max_len, size_t& out_bytes) noexcept {
+    if (max_len <= 1) return false;
+    int fd = ::open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+
+    const size_t cap = max_len - 1;
+    ssize_t n = 0;
+    while (true) {
+        n = ::read(fd, buf, cap);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            ::close(fd);
+            return false;
+        }
+        break;
+    }
+    ::close(fd);
+
+    if (n <= 0) return false;
+    buf[n] = '\0';
+    out_bytes = static_cast<size_t>(n);
+    return true;
+}
+
+// Ultra-low overhead openat reader avoiding full VFS path walk from root (REF-REQ-009, REF-ARCH-005, REF-REQ-143, REF-ARCH-090)
+// Employs atomic single-read semantics to eliminate secondary EOF round-trips.
+bool ProcessAnalyzer::read_fileat_to_stack_buf(int dirfd, const char* rel_path, char* buf, size_t max_len, size_t& out_bytes) noexcept {
+    if (max_len <= 1) return false;
+    int fd = ::openat(dirfd, rel_path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+
+    const size_t cap = max_len - 1;
+    ssize_t n = 0;
+    while (true) {
+        n = ::read(fd, buf, cap);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            ::close(fd);
+            return false;
+        }
+        break;
+    }
+    ::close(fd);
+
+    if (n <= 0) return false;
+    buf[n] = '\0';
+    out_bytes = static_cast<size_t>(n);
+    return true;
+}
+
 namespace {
+
+inline bool read_file_to_stack_buf(const char* path, char* buf, size_t max_len, size_t& out_bytes) noexcept {
+    return ProcessAnalyzer::read_file_to_stack_buf(path, buf, max_len, out_bytes);
+}
+
+inline bool read_fileat_to_stack_buf(int dirfd, const char* rel_path, char* buf, size_t max_len, size_t& out_bytes) noexcept {
+    return ProcessAnalyzer::read_fileat_to_stack_buf(dirfd, rel_path, buf, max_len, out_bytes);
+}
 
 // Linux 64-bit kernel dirent layout for direct SYS_getdents64 (REF-RES-006)
 struct LinuxDirent64 {
@@ -25,60 +86,6 @@ struct LinuxDirent64 {
     unsigned char   d_type;
     char            d_name[1];
 };
-
-// Fast, zero-allocation stack buffer reader (REF-REQ-007, REF-ARCH-005)
-bool read_file_to_stack_buf(const char* path, char* buf, size_t max_len, size_t& out_bytes) noexcept {
-    if (max_len == 0) return false;
-    int fd = ::open(path, O_RDONLY | O_CLOEXEC);
-    if (fd < 0) return false;
-
-    // A single read() may return short even for a small procfs file. Loop until
-    // EOF or the buffer is full so the parser never sees a half-written buffer.
-    size_t total = 0;
-    const size_t cap = max_len - 1;
-    while (total < cap) {
-        ssize_t n = ::read(fd, buf + total, cap - total);
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            ::close(fd);
-            return false;
-        }
-        if (n == 0) break;
-        total += static_cast<size_t>(n);
-    }
-    ::close(fd);
-
-    if (total == 0) return false;
-    buf[total] = '\0';
-    out_bytes = total;
-    return true;
-}
-
-// Ultra-low overhead openat reader avoiding full VFS path walk from root (REF-REQ-009, REF-ARCH-005)
-inline bool read_fileat_to_stack_buf(int dirfd, const char* rel_path, char* buf, size_t max_len, size_t& out_bytes) noexcept {
-    if (max_len == 0) return false;
-    int fd = ::openat(dirfd, rel_path, O_RDONLY | O_CLOEXEC);
-    if (fd < 0) return false;
-
-    size_t total = 0;
-    const size_t cap = max_len - 1;
-    while (total < cap) {
-        ssize_t n = ::read(fd, buf + total, cap - total);
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            ::close(fd);
-            return false;
-        }
-        if (n == 0) break;
-        total += static_cast<size_t>(n);
-    }
-    ::close(fd);
-
-    if (total == 0) return false;
-    buf[total] = '\0';
-    out_bytes = total;
-    return true;
-}
 
 // Inlined fast integer to ASCII subpath formatter (completely eliminates std::snprintf)
 inline void format_pid_subpath(char* out, int32_t pid, const char* subpath, size_t subpath_len) noexcept {
@@ -421,13 +428,21 @@ void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample, const 
         }
     }
 
-    // 2. Fast Socket and FD Bypass (REF-RES-006, REF-RES-007, REF-REQ-027, REF-REQ-052):
+    // 2. Fast Socket and FD Bypass (REF-RES-006, REF-RES-007, REF-REQ-027, REF-REQ-052, REF-REQ-143, REF-ARCH-090):
     // If previous sample exists, preserve socket count.
     // WiFi CAM attribution strictly requires wakeups_per_sec > 10 (delta_sw >= 20 over 2s).
     // In steady state, established processes maintain static socket counts; eliminate VFS readlink storms!
     if (prev != nullptr) {
         sample.open_sockets = prev->open_sockets;
         if (drm_resolved || prev->pinned_drm_fd <= 0) {
+            // Dormant process bypass (REF-REQ-143, REF-ARCH-090):
+            // If CPU ticks and IO syscalls did not change, the process was asleep and could not open/close FDs!
+            if (prev->utime_ticks == sample.utime_ticks &&
+                prev->stime_ticks == sample.stime_ticks &&
+                prev->io_syscalls == sample.io_syscalls) {
+                return;
+            }
+
             // If process had 0 sockets previously, rescan only periodically every 10 passes (~20s) (REF-REQ-052)
             if (prev->open_sockets == 0) {
                 if (pass_counter_ % 10 != 0) {

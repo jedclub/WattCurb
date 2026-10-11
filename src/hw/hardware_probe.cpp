@@ -1305,13 +1305,23 @@ void HardwareProbe::capture_subsystems(HardwareSample& sample) const {
         }
     }
 
-    // 5. Chassis & Mechanical Thermal
+    // 5. Chassis & Mechanical Thermal (REF-REQ-027, REF-REQ-143, REF-ARCH-090)
     {
         WATTCURB_PROFILE_SCOPE("hw.fan_chassis");
-        // Sub-sample slow ACPI EC fan queries (7~15ms EC bus stall, REF-REQ-027)
+        // Mutually exclusive phase-offset sub-sampling for slow ACPI EC and sysfs queries.
+        // Guarantees zero bus contention (at most 1 slow query per sampling tick):
+        //   - Phase mod 6 == 1 {1, 7, 13, 19, 25}: Fan RPM alone (~12s cadence)
+        //   - Phase mod 30 == 3 : Fan PWM target alone (~60s cadence)
+        //   - Phase mod 30 == 9 : Chassis thermal sensor alone (~60s cadence)
+        //   - Phase mod 30 == 15: Keyboard backlight alone (~60s cadence)
+        //   - Phase mod 30 == 21: Bluetooth power status alone (~60s cadence)
         if (!cached_fan_rpm_.has_value() || (sample_counter_ % 6 == 1)) {
             if (fan_rpm_fd_ >= 0) cached_fan_rpm_ = read_uint32_fd(fan_rpm_fd_);
+        }
+        if (!cached_fan_pwm_.has_value() || (sample_counter_ % 30 == 3)) {
             if (fan_pwm_fd_ >= 0) cached_fan_pwm_ = read_uint32_fd(fan_pwm_fd_);
+        }
+        if (!cached_chassis_temp_.has_value() || (sample_counter_ % 30 == 9)) {
             if (chassis_temp_fd_ >= 0) cached_chassis_temp_ = read_int32_fd(chassis_temp_fd_);
         }
         sample.fan_rpm = cached_fan_rpm_;
@@ -1337,7 +1347,7 @@ void HardwareProbe::capture_subsystems(HardwareSample& sample) const {
         }
 
         if (bluetooth_fd_ >= 0) {
-            if (sample_counter_ % 30 == 1) {
+            if (sample_counter_ % 30 == 21) {
                 std::array<char, 64> bt_buf{};
                 if (read_string_buf(bluetooth_fd_, bt_buf.data(), bt_buf.size())) {
                     cached_bluetooth_enabled_ = (std::strstr(bt_buf.data(), "enabled") != nullptr);
