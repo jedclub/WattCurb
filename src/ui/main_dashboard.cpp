@@ -278,8 +278,8 @@ int main(int argc, char* argv[]) {
                 win->requestActivate();
 
                 // REF-REQ-120: Close window quits the application cleanly
-                QObject::connect(win, &QQuickWindow::closing, &app,
-                                 []() { QCoreApplication::quit(); });
+                QObject::connect(win, &QWindow::visibleChanged, &app,
+                                 [](bool visible) { if (!visible) QCoreApplication::quit(); });
                 win->setFlags(win->flags() & ~Qt::WindowMinimizeButtonHint);
             }
             obj->setProperty("visible", true);
