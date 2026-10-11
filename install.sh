@@ -75,10 +75,13 @@ EOF
     fi
 fi
 
-# 2.0.1. Ensure /etc/wattcurb directory exists for fan curves persistence (REF-REQ-136, REF-REQ-140)
-echo "  • Configuring /etc/wattcurb directory for persistent system-wide configuration..."
-${SUDO} mkdir -p /etc/wattcurb
-${SUDO} chmod 755 /etc/wattcurb
+# 2.0.1. Ensure /var/lib/wattcurb and /etc/wattcurb directories exist for fan curves persistence (REF-REQ-136, REF-REQ-140, REF-REQ-145)
+echo "  • Configuring /var/lib/wattcurb directory for persistent system-wide configuration..."
+${SUDO} mkdir -p /var/lib/wattcurb /etc/wattcurb
+${SUDO} chmod 755 /var/lib/wattcurb /etc/wattcurb
+if [ -f /etc/wattcurb/fan_curves.conf ] && [ ! -f /var/lib/wattcurb/fan_curves.conf ]; then
+    ${SUDO} cp -a /etc/wattcurb/fan_curves.conf /var/lib/wattcurb/fan_curves.conf
+fi
 
 # 2.1. Make ryzenadj reachable for the ROOT daemon (REF-REQ-115.1).
 #

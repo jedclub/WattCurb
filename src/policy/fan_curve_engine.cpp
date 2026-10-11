@@ -8,6 +8,8 @@
 #include <cstring>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <pwd.h>
+#include <unistd.h>
 
 #if defined(__AVX2__)
 #include <immintrin.h>
@@ -442,39 +444,88 @@ bool FanCurveEngine::deserialize_curves(std::string_view data) noexcept {
     return true;
 }
 
+std::string FanCurveEngine::resolve_user_config_path() noexcept {
+    const char* home = ::getenv("HOME");
+    if (!home || home[0] == '\0') {
+        struct passwd* pw = ::getpwuid(::getuid());
+        if (pw && pw->pw_dir) home = pw->pw_dir;
+    }
+    if (!home || home[0] == '\0') return {};
+    return std::string(home) + "/.config/wattcurb/fan_curves.conf";
+}
+
 bool FanCurveEngine::load_from_file(const char* path) noexcept {
     WATTCURB_PROFILE_SCOPE("FanCurve::LoadFile");
-    FILE* fp = std::fopen(path, "r");
-    if (!fp) return false;
+    auto try_load = [this](const char* p) -> bool {
+        if (!p || p[0] == '\0') return false;
+        FILE* fp = std::fopen(p, "r");
+        if (!fp) return false;
 
-    std::fseek(fp, 0, SEEK_END);
-    long sz = std::ftell(fp);
-    std::fseek(fp, 0, SEEK_SET);
+        std::fseek(fp, 0, SEEK_END);
+        long sz = std::ftell(fp);
+        std::fseek(fp, 0, SEEK_SET);
 
-    if (sz <= 0 || sz > 65536) {
+        if (sz <= 0 || sz > 65536) {
+            std::fclose(fp);
+            return false;
+        }
+
+        std::string buf;
+        buf.resize(static_cast<size_t>(sz));
+        size_t read_bytes = std::fread(buf.data(), 1, buf.size(), fp);
         std::fclose(fp);
-        return false;
+        buf.resize(read_bytes);
+
+        return deserialize_curves(buf);
+    };
+
+    if (path && path[0] != '\0') {
+        return try_load(path);
     }
 
-    std::string buf;
-    buf.resize(static_cast<size_t>(sz));
-    size_t read_bytes = std::fread(buf.data(), 1, buf.size(), fp);
-    std::fclose(fp);
-    buf.resize(read_bytes);
+    // 1. Primary: /var/lib/wattcurb/fan_curves.conf
+    if (try_load(DEFAULT_CONFIG_PATH)) return true;
 
-    return deserialize_curves(buf);
+    // 2. Fallback: /etc/wattcurb/fan_curves.conf
+    if (try_load(FALLBACK_CONFIG_PATH)) return true;
+
+    // 3. User local cache: ~/.config/wattcurb/fan_curves.conf
+    std::string user_cfg = resolve_user_config_path();
+    if (!user_cfg.empty() && try_load(user_cfg.c_str())) return true;
+
+    return false;
 }
 
 bool FanCurveEngine::save_to_file(const char* path) const noexcept {
     WATTCURB_PROFILE_SCOPE("FanCurve::SaveFile");
-    ensure_dir_exists(path);
-    FILE* fp = std::fopen(path, "w");
-    if (!fp) return false;
+    auto try_save = [this](const char* p) -> bool {
+        if (!p || p[0] == '\0') return false;
+        ensure_dir_exists(p);
+        FILE* fp = std::fopen(p, "w");
+        if (!fp) return false;
 
-    std::string content = serialize_curves();
-    size_t written = std::fwrite(content.data(), 1, content.size(), fp);
-    std::fclose(fp);
-    return written == content.size();
+        std::string content = serialize_curves();
+        size_t written = std::fwrite(content.data(), 1, content.size(), fp);
+        std::fclose(fp);
+        return written == content.size();
+    };
+
+    if (path && path[0] != '\0') {
+        return try_save(path);
+    }
+
+    // 1. Primary: /var/lib/wattcurb/fan_curves.conf
+    if (try_save(DEFAULT_CONFIG_PATH)) {
+        return true;
+    }
+
+    // 2. User fallback: ~/.config/wattcurb/fan_curves.conf (e.g. non-root client running standalone)
+    std::string user_cfg = resolve_user_config_path();
+    if (!user_cfg.empty() && try_save(user_cfg.c_str())) {
+        return true;
+    }
+
+    return false;
 }
 
 } // namespace wattcurb::policy

@@ -84,12 +84,16 @@ public:
     [[nodiscard]] const ProfileFanCurve& get_profile_curve(int profile_idx) const noexcept;
     [[nodiscard]] bool is_profile_custom(int profile_idx) const noexcept;
 
-    // Persistence & IPC Serialization (REF-REQ-140, REF-ARCH-087)
+    // Persistence & IPC Serialization (REF-REQ-140, REF-ARCH-087, REF-REQ-145, REF-ARCH-092)
+    static constexpr const char* DEFAULT_CONFIG_PATH = "/var/lib/wattcurb/fan_curves.conf";
+    static constexpr const char* FALLBACK_CONFIG_PATH = "/etc/wattcurb/fan_curves.conf";
+
     [[nodiscard]] std::string serialize_curves() const noexcept;
     bool deserialize_curves(std::string_view data) noexcept;
     static bool ensure_dir_exists(const char* file_path) noexcept;
-    bool load_from_file(const char* path = "/etc/wattcurb/fan_curves.conf") noexcept;
-    bool save_to_file(const char* path = "/etc/wattcurb/fan_curves.conf") const noexcept;
+    [[nodiscard]] static std::string resolve_user_config_path() noexcept;
+    bool load_from_file(const char* path = nullptr) noexcept;
+    bool save_to_file(const char* path = nullptr) const noexcept;
 
     // Unit conversion
     [[nodiscard]] static uint8_t pct_to_thinkpad_level(float pct, bool allow_fan_stop) noexcept;

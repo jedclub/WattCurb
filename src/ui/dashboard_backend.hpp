@@ -292,11 +292,11 @@ private:
     void mapSharedMemory() noexcept;
     void unmapSharedMemory() noexcept;
     void sendDaemonCommand(const char* cmd) noexcept;
-    // REF-REQ-121.4: same, but hands back the daemon's answer so a refusal can be
-    // reported instead of silently painting a profile that was not applied.
-    bool sendDaemonCommandQuery(const char* cmd, std::string& out_response) noexcept;
+    // REF-REQ-121.4, REF-REQ-145: hands back the daemon's answer with configurable timeout
+    bool sendDaemonCommandQuery(const char* cmd, std::string& out_response, int timeout_ms = 1000) noexcept;
     bool queryDaemonTelemetry() noexcept;
     void updateFallbackTelemetry() noexcept;
+    void initFanCurves() noexcept;
 
     int shm_fd_{-1};
     const ipc::WattCurbSharedState* shm_state_{nullptr};

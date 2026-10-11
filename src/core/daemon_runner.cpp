@@ -334,8 +334,9 @@ bool DaemonRunner::initialize() {
     policy::MitigationEngine::capture_hardware_baseline();
     hardware_bus_.initialize(); // REF-REQ-131: Capture deep hardware bus & display baseline
 
-    // REF-REQ-136, REF-ARCH-083: Initialize SIMD Profile Fan Curve Engine
+    // REF-REQ-136, REF-ARCH-083, REF-REQ-145: Initialize and restore persisted fan curves
     policy::MitigationEngine::fan_curve_engine().initialize();
+    (void)policy::MitigationEngine::fan_curve_engine().load_from_file();
 
     // Load persisted profile mode if available (REF-REQ-053)
     PowerProfileMode initial_mode = PowerProfileMode::Balanced;
@@ -1143,7 +1144,7 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
         auto& engine = policy::MitigationEngine::fan_curve_engine();
         bool ok = engine.deserialize_curves(payload);
         if (ok) {
-            engine.save_to_file("/etc/wattcurb/fan_curves.conf");
+            engine.save_to_file(); // REF-REQ-145: Persists to /var/lib/wattcurb/fan_curves.conf
             // Immediately actuate fan hardware for current CPU temperature (REF-REQ-141)
             int applied_level = policy::MitigationEngine::apply_fan_for_temp(
                 cached_report_.hardware.cpu_temp_c,
@@ -1179,9 +1180,16 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
                      reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
         }
         return;
+    } else if (req.rfind("GET_FAN_CURVES", 0) == 0) {
+        // REF-REQ-145, REF-ARCH-092: Stream active serialized fan curves to querying clients
+        std::string curves_data = policy::MitigationEngine::fan_curve_engine().serialize_curves();
+        std::string ack = "OK\n" + curves_data;
+        ::sendto(fd, ack.data(), ack.size(), 0,
+                 reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+        return;
     } else if (req.rfind("RELOAD_FAN_CURVES", 0) == 0) {
-        // REF-REQ-136: Reload custom fan curve configuration
-        policy::MitigationEngine::fan_curve_engine().load_from_file("/etc/wattcurb/fan_curves.conf");
+        // REF-REQ-136, REF-REQ-145: Reload custom fan curve configuration
+        policy::MitigationEngine::fan_curve_engine().load_from_file();
         const char ack[] = "OK\n";
         ::sendto(fd, ack, sizeof(ack) - 1, 0,
                  reinterpret_cast<struct sockaddr*>(&client_addr), client_len);

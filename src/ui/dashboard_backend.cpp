@@ -55,8 +55,9 @@ DashboardBackend::DashboardBackend(QObject* parent)
     // Initial battery drain history audit
     generateBatteryReport();
 
-    // REF-REQ-136, REF-ARCH-083: Initialize SIMD Profile Fan Curve Engine
+    // REF-REQ-136, REF-ARCH-083, REF-REQ-145: Initialize and sync SIMD Profile Fan Curve Engine
     fan_curve_engine_.initialize();
+    initFanCurves();
 }
 
 DashboardBackend::~DashboardBackend() {
@@ -578,10 +579,10 @@ QString DashboardBackend::powerProfileName() const {
 
 void DashboardBackend::sendDaemonCommand(const char* cmd) noexcept {
     std::string ignored;
-    (void)sendDaemonCommandQuery(cmd, ignored);
+    (void)sendDaemonCommandQuery(cmd, ignored, 500);
 }
 
-bool DashboardBackend::sendDaemonCommandQuery(const char* cmd, std::string& out_response) noexcept {
+bool DashboardBackend::sendDaemonCommandQuery(const char* cmd, std::string& out_response, int timeout_ms) noexcept {
     // REF-REQ-092 & REF-ARCH-069: Oracle Gate isolation, outbound half.
     //
     // The read side was detached earlier, but this is a WRITE to a live root
@@ -594,7 +595,7 @@ bool DashboardBackend::sendDaemonCommandQuery(const char* cmd, std::string& out_
         return false; // no daemon conversation happened, caller keeps local view
     }
 
-    return core::SingletonLock::query_daemon(cmd, out_response, "wattcurb.lock", 50);
+    return core::SingletonLock::query_daemon(cmd, out_response, "wattcurb.lock", timeout_ms > 0 ? timeout_ms : 1000);
 }
 
 void DashboardBackend::setProfile(int mode) {
@@ -1122,17 +1123,36 @@ void DashboardBackend::resetFanCurveToDefault(int profileIdx) {
     emit fanCurveDataChanged();
 }
 
+void DashboardBackend::initFanCurves() noexcept {
+    WATTCURB_PROFILE_SCOPE("Dashboard::InitFanCurves");
+    // Implements REF-REQ-145, REF-ARCH-092:
+    // Bi-directional IPC fan curve synchronization with local storage fallback
+    std::string reply;
+    if (sendDaemonCommandQuery("GET_FAN_CURVES\n", reply, 1000) && reply.rfind("OK\n", 0) == 0) {
+        std::string_view payload = std::string_view(reply).substr(3);
+        if (fan_curve_engine_.deserialize_curves(payload)) {
+            emit fanCurveDataChanged();
+            return;
+        }
+    }
+
+    // Fallback: load from persistent storage ladder (/var/lib -> /etc -> ~/.config)
+    if (fan_curve_engine_.load_from_file()) {
+        emit fanCurveDataChanged();
+    }
+}
+
 bool DashboardBackend::applyFanCurves() {
     WATTCURB_PROFILE_SCOPE("Dashboard::ApplyFanCurves");
-    // Implements REF-REQ-140, REF-ARCH-087, REF-REQ-141:
+    // Implements REF-REQ-140, REF-ARCH-087, REF-REQ-141, REF-REQ-145, REF-ARCH-092:
     // Atomic Privilege-Separated Fan Curve Persistence & Hardware-Verified Feedback Protocol
     std::string cmd = "SET_FAN_CURVES\n" + fan_curve_engine_.serialize_curves();
     std::string reply;
-    bool daemon_ok = sendDaemonCommandQuery(cmd.c_str(), reply);
+    bool daemon_ok = sendDaemonCommandQuery(cmd.c_str(), reply, 1000);
     bool ok = daemon_ok && (reply.rfind("OK", 0) == 0);
 
-    // Also attempt local write if directory permissions allow
-    (void)fan_curve_engine_.save_to_file("/etc/wattcurb/fan_curves.conf");
+    // Also attempt local user cache write
+    (void)fan_curve_engine_.save_to_file();
 
     is_fan_apply_success_ = ok;
     if (ok) {

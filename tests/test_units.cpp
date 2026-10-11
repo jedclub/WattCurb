@@ -7424,6 +7424,64 @@ void test_ui_responsive_layout_and_overflow_hardening() {
               << "and Battery Report ScrollView container verified)\n";
 }
 
+// Implements REF-TEST-099, REF-REQ-145 & REF-ARCH-092:
+// Fan Curve StateDirectory Persistence & Bi-Directional IPC Synchronization Gate
+void test_fan_curve_statedirectory_persistence_and_ipc_sync() {
+    using namespace wattcurb::policy;
+
+    std::cout << "\n--- [REF-TEST-099] Fan Curve StateDirectory Persistence & Bi-Directional IPC Sync (REF-REQ-145, REF-ARCH-092) ---\n";
+
+    // 1. Path standards assertion
+    assert(std::string_view(FanCurveEngine::DEFAULT_CONFIG_PATH) == "/var/lib/wattcurb/fan_curves.conf");
+    assert(std::string_view(FanCurveEngine::FALLBACK_CONFIG_PATH) == "/etc/wattcurb/fan_curves.conf");
+
+    std::string user_cfg = FanCurveEngine::resolve_user_config_path();
+    assert(!user_cfg.empty() && "User config path must resolve to non-empty string");
+    assert(user_cfg.find(".config/wattcurb/fan_curves.conf") != std::string::npos && "User config path must target .config/wattcurb/");
+
+    // 2. Custom fan curve creation
+    FanCurveEngine src_engine{};
+    FanControlPoint custom_pts[5] = {
+        {30.0f, 15.0f},
+        {40.0f, 30.0f},
+        {50.0f, 60.0f},
+        {60.0f, 85.0f},
+        {70.0f, 100.0f}
+    };
+    assert(src_engine.set_profile_curve(1, custom_pts, 5, /*auto_save=*/false));
+    assert(src_engine.is_profile_custom(1));
+
+    // 3. GET_FAN_CURVES wire protocol roundtrip simulation
+    std::string raw_serialized = src_engine.serialize_curves();
+    assert(!raw_serialized.empty());
+
+    // Daemon reply: "OK\n" + serialized payload
+    std::string daemon_wire_reply = "OK\n" + raw_serialized;
+    assert(daemon_wire_reply.rfind("OK\n", 0) == 0);
+    std::string_view client_payload = std::string_view(daemon_wire_reply).substr(3);
+
+    FanCurveEngine client_engine{};
+    assert(client_engine.deserialize_curves(client_payload));
+    assert(client_engine.is_profile_custom(1));
+    const auto& curve1 = client_engine.get_profile_curve(1);
+    assert(curve1.point_count == 5);
+    assert(std::abs(curve1.points[2].temp_c - 50.0f) < 0.01f);
+    assert(std::abs(curve1.points[2].speed_pct - 60.0f) < 0.01f);
+
+    // 4. File ladder roundtrip test using isolated temp file
+    const std::string tmp_file = get_test_temp_dir() + "/wattcurb_test_statedir_fan_curves.conf";
+    assert(src_engine.save_to_file(tmp_file.c_str()));
+
+    FanCurveEngine restored_engine{};
+    assert(restored_engine.load_from_file(tmp_file.c_str()));
+    assert(restored_engine.is_profile_custom(1));
+    assert(restored_engine.get_fan_level_for_temp(1, 50.0) == src_engine.get_fan_level_for_temp(1, 50.0));
+    ::unlink(tmp_file.c_str());
+
+    std::cout << " [PASS] test_fan_curve_statedirectory_persistence_and_ipc_sync (REF-TEST-099: "
+              << "StateDirectory pathing, GET_FAN_CURVES wire sync, and load ladder verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -7504,6 +7562,7 @@ int main() {
     test::test_ultra_low_overhead_scoped_profiler_and_dump();
     test::test_hotpath_vfs_and_ec_telemetry_optimization();
     test::test_ui_responsive_layout_and_overflow_hardening();
+    test::test_fan_curve_statedirectory_persistence_and_ipc_sync();
     test::test_disk_pressure_guard_and_dynamic_simd();
     test::test_base_swap_right_sizing_policy();
     test::test_hardware_bus_and_display_power_minimization();
