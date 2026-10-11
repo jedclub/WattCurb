@@ -2394,19 +2394,29 @@ void test_adaptive_c1_c2_cluster_dispersion() {
     }
 
     if (topo.cluster_count >= 2) {
-        // Dual-Cluster CPU (e.g. AMD Ryzen 7 4750U with CCX 0: 0..7 and CCX 1: 8..15)
-        for (int32_t c = 0; c < 8 && c < total; ++c) {
-            assert(CPU_ISSET(static_cast<size_t>(c), &c1) && "Cores 0..7 must belong to Cluster 1 (C1)");
-            assert(!CPU_ISSET(static_cast<size_t>(c), &c2) && "Cores 0..7 must NOT belong to Cluster 2 (C2)");
+        // Cluster 1 and Cluster 2 must be non-empty and mutually exclusive
+        int32_t c1_count = 0;
+        int32_t c2_count = 0;
+        for (int32_t c = 0; c < total; ++c) {
+            bool in_c1 = CPU_ISSET(static_cast<size_t>(c), &c1);
+            bool in_c2 = CPU_ISSET(static_cast<size_t>(c), &c2);
+            assert(!(in_c1 && in_c2) && "Cores must not simultaneously belong to C1 and C2");
+            assert((in_c1 || in_c2) && "All online cores must belong to either C1 or C2");
+            if (in_c1) ++c1_count;
+            if (in_c2) ++c2_count;
         }
-        for (int32_t c = 8; c < 16 && c < total; ++c) {
-            assert(CPU_ISSET(static_cast<size_t>(c), &c2) && "Cores 8..15 must belong to Cluster 2 (C2)");
-            assert(!CPU_ISSET(static_cast<size_t>(c), &c1) && "Cores 8..15 must NOT belong to Cluster 1 (C1)");
+        assert(c1_count > 0 && "Cluster 1 must have at least one CPU core");
+        assert(c2_count > 0 && "Cluster 2 must have at least one CPU core");
+
+        // Interactive Headroom must be a non-empty subset of C1
+        int32_t shield_count = 0;
+        for (int32_t c = 0; c < total; ++c) {
+            if (CPU_ISSET(static_cast<size_t>(c), &shield)) {
+                assert(CPU_ISSET(static_cast<size_t>(c), &c1) && "Clean interactive headroom must be within C1");
+                ++shield_count;
+            }
         }
-        // Interactive Headroom within C1 (e.g. Cores 0..3)
-        for (int32_t c = 0; c < 4 && c < total; ++c) {
-            assert(CPU_ISSET(static_cast<size_t>(c), &shield) && "Clean interactive headroom must be within C1");
-        }
+        assert(shield_count > 0 && "Interactive shield must have at least one CPU core");
     }
 
     // 2. Interactive Terminal & Shell Classification (REF-REQ-084 Sec 2.2)
