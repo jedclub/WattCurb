@@ -768,7 +768,7 @@ int DaemonRunner::run() {
 }
 
 void DaemonRunner::handle_ipc_datagram(int fd) {
-    char buf[128];
+    char buf[4096];
     struct sockaddr_un client_addr{};
     socklen_t client_len = sizeof(client_addr);
 
@@ -1174,7 +1174,18 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
                                         static_cast<int>(policy::MitigationEngine::effective_profile()));
             ::sendto(fd, ack, static_cast<size_t>(ack_len), 0,
                      reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+
+            char log_msg[160];
+            std::snprintf(log_msg, sizeof(log_msg),
+                          "Persisted custom fan curves from %s to /var/lib/wattcurb/fan_curves.conf (L%d at %.1f°C)",
+                          requester, applied_level, cached_report_.hardware.cpu_temp_c);
+            EventLogger::log_alert("FAN", log_msg);
         } else {
+            char log_msg[160];
+            std::snprintf(log_msg, sizeof(log_msg),
+                          "Failed to parse SET_FAN_CURVES payload (%zu bytes) from %s",
+                          payload.size(), requester);
+            EventLogger::log_alert("FAN", log_msg);
             const char err[] = "ERROR: failed to parse fan curves\n";
             ::sendto(fd, err, sizeof(err) - 1, 0,
                      reinterpret_cast<struct sockaddr*>(&client_addr), client_len);

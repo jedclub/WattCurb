@@ -8,6 +8,7 @@
 #include <ctime>
 #include <cstdio>
 #include <cstring>
+#include <atomic>
 #include <utility>
 
 namespace wattcurb::core {
@@ -112,9 +113,14 @@ bool SingletonLock::query_daemon(std::string_view command, std::string& out_resp
     int fd = ::socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (fd < 0) return false;
 
-    // Bind client to a unique temporary abstract socket address
+    // Bind client to a collision-free temporary abstract socket address
+    static std::atomic<uint32_t> s_client_seq{0};
+    struct timespec ts{};
+    ::clock_gettime(CLOCK_MONOTONIC, &ts);
     char client_name[64];
-    std::snprintf(client_name, sizeof(client_name), "wattcurb.client.%d.%lx", ::getpid(), static_cast<unsigned long>(::time(nullptr)));
+    std::snprintf(client_name, sizeof(client_name), "wattcurb.client.%d.%lx.%u",
+                  ::getpid(), static_cast<unsigned long>(ts.tv_nsec),
+                  s_client_seq.fetch_add(1, std::memory_order_relaxed));
     struct sockaddr_un client_addr{};
     socklen_t client_len = prepare_abstract_addr(client_name, client_addr);
     if (::bind(fd, reinterpret_cast<struct sockaddr*>(&client_addr), client_len) < 0) {

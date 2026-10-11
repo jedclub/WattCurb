@@ -345,14 +345,22 @@ bool FanCurveEngine::is_profile_custom(int profile_idx) const noexcept {
 }
 
 bool FanCurveEngine::ensure_dir_exists(const char* file_path) noexcept {
-    if (!file_path) return false;
+    if (!file_path || file_path[0] == '\0') return false;
     std::string_view p(file_path);
     auto slash = p.rfind('/');
-    if (slash != std::string_view::npos && slash > 0) {
-        std::string dir(p.substr(0, slash));
-        struct stat st{};
-        if (::stat(dir.c_str(), &st) != 0) {
-            ::mkdir(dir.c_str(), 0755);
+    if (slash == std::string_view::npos || slash == 0) return true;
+
+    std::string dir(p.substr(0, slash));
+    // Recursive directory creation (mkdir -p behavior)
+    for (size_t i = 1; i <= dir.size(); ++i) {
+        if (i == dir.size() || dir[i] == '/') {
+            std::string sub = dir.substr(0, i);
+            struct stat st{};
+            if (::stat(sub.c_str(), &st) != 0) {
+                if (::mkdir(sub.c_str(), 0755) != 0 && errno != EEXIST) {
+                    // Ignore non-fatal intermediate errors
+                }
+            }
         }
     }
     return true;
@@ -382,6 +390,7 @@ bool FanCurveEngine::deserialize_curves(std::string_view data) noexcept {
     WATTCURB_PROFILE_SCOPE("FanCurve::Deserialize");
     if (data.empty()) return false;
 
+    int parsed_profiles = 0;
     size_t pos = 0;
     while (pos < data.size()) {
         size_t next_nl = data.find('\n', pos);
@@ -410,6 +419,7 @@ bool FanCurveEngine::deserialize_curves(std::string_view data) noexcept {
                     std::string_view sub_line = (sub_nl == std::string_view::npos)
                                                 ? data.substr(pos)
                                                 : data.substr(pos, sub_nl - pos);
+                    size_t adv = (sub_nl == std::string_view::npos) ? (data.size() - pos) : (sub_nl - pos + 1);
                     pos = (sub_nl == std::string_view::npos) ? data.size() : sub_nl + 1;
 
                     if (!sub_line.empty() && sub_line.back() == '\r') sub_line.remove_suffix(1);
@@ -429,19 +439,21 @@ bool FanCurveEngine::deserialize_curves(std::string_view data) noexcept {
                     if (std::sscanf(line_buf, "PT_%*d=%f,%f", &t, &s) == 2) {
                         pts[read_idx++] = {t, s};
                     } else if (line_buf[0] == 'P' && std::strncmp(line_buf, "PROFILE_", 8) == 0) {
-                        pos -= (sub_line.size() + 1);
+                        if (pos >= adv) pos -= adv;
                         break;
                     }
                 }
 
                 if (read_idx == static_cast<size_t>(pt_cnt)) {
-                    set_profile_curve(prof, pts, read_idx, /*auto_save=*/false);
-                    m_curves[prof].is_custom = (custom_flag != 0);
+                    if (set_profile_curve(prof, pts, read_idx, /*auto_save=*/false)) {
+                        m_curves[prof].is_custom = (custom_flag != 0);
+                        parsed_profiles++;
+                    }
                 }
             }
         }
     }
-    return true;
+    return parsed_profiles > 0;
 }
 
 std::string FanCurveEngine::resolve_user_config_path() noexcept {

@@ -7482,6 +7482,62 @@ void test_fan_curve_statedirectory_persistence_and_ipc_sync() {
               << "StateDirectory pathing, GET_FAN_CURVES wire sync, and load ladder verified)\n";
 }
 
+void test_fan_curve_payload_buffer_and_deserialization_safety() {
+    using namespace wattcurb::policy;
+
+    std::cout << "\n--- [REF-TEST-100] Fan Curve Payload Buffer Size & Deserialization Safety (REF-REQ-146, REF-ARCH-093) ---\n";
+
+    // 1. Create engine with custom curves on multiple profiles
+    FanCurveEngine src_engine{};
+    FanControlPoint custom_pts[5] = {
+        {30.0f, 25.0f},
+        {40.0f, 45.0f},
+        {50.0f, 65.0f},
+        {60.0f, 85.0f},
+        {70.0f, 100.0f}
+    };
+    assert(src_engine.set_profile_curve(0, custom_pts, 5, /*auto_save=*/false));
+    assert(src_engine.set_profile_curve(1, custom_pts, 5, /*auto_save=*/false));
+
+    // 2. Serialize full curves and verify length exceeds legacy 128-byte truncation limit
+    std::string serialized = src_engine.serialize_curves();
+    assert(serialized.size() > 128 && "Serialized payload must exceed legacy 128-byte limit");
+    assert(serialized.size() < 4096 && "Serialized payload must fit within expanded 4096-byte datagram buffer");
+
+    // 3. Verify that mid-profile truncated payload is safely rejected
+    FanCurveEngine safe_engine{};
+    std::string mid_truncated = serialized.substr(0, 60);
+    bool mid_trunc_ok = safe_engine.deserialize_curves(mid_truncated);
+    assert(!mid_trunc_ok && "Mid-profile truncated stream must fail deserialization cleanly");
+
+    // Verify that legacy 128-byte truncation fails to restore profile 1 (Balanced)
+    FanCurveEngine partial_engine{};
+    (void)partial_engine.deserialize_curves(serialized.substr(0, 128));
+    assert(!partial_engine.is_profile_custom(1) && "Legacy 128-byte truncated stream drops profile 1");
+
+    // 4. Verify that full un-truncated payload deserializes with 100% fidelity
+    FanCurveEngine full_engine{};
+    assert(full_engine.deserialize_curves(serialized));
+    assert(full_engine.is_profile_custom(0));
+    assert(full_engine.is_profile_custom(1));
+    assert(!full_engine.is_profile_custom(2)); // untouched profile remains default
+    const auto& c0 = full_engine.get_profile_curve(0);
+    assert(c0.point_count == 5);
+    assert(std::abs(c0.points[0].speed_pct - 25.0f) < 0.01f);
+
+    // 5. Verify recursive directory creation (mkdir -p) with deep nested directory
+    const std::string nested_dir = get_test_temp_dir() + "/wattcurb_deep_test_dir/level2/level3/fan_curves.conf";
+    assert(full_engine.save_to_file(nested_dir.c_str()) && "Must save to deeply nested path");
+
+    FanCurveEngine nested_loaded{};
+    assert(nested_loaded.load_from_file(nested_dir.c_str()) && "Must load from deeply nested path");
+    assert(nested_loaded.is_profile_custom(0));
+    ::unlink(nested_dir.c_str());
+
+    std::cout << " [PASS] test_fan_curve_payload_buffer_and_deserialization_safety (REF-TEST-100: "
+              << "Buffer overflow prevention, truncation immunity, and nested directory persistence verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -7563,6 +7619,7 @@ int main() {
     test::test_hotpath_vfs_and_ec_telemetry_optimization();
     test::test_ui_responsive_layout_and_overflow_hardening();
     test::test_fan_curve_statedirectory_persistence_and_ipc_sync();
+    test::test_fan_curve_payload_buffer_and_deserialization_safety();
     test::test_disk_pressure_guard_and_dynamic_simd();
     test::test_base_swap_right_sizing_policy();
     test::test_hardware_bus_and_display_power_minimization();
