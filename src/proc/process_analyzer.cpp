@@ -528,6 +528,7 @@ void ProcessAnalyzer::inspect_pid_fds(int32_t pid, ProcessSample& sample, const 
 }
 
 bool ProcessAnalyzer::parse_proc_statm(std::string_view content, ProcessSample& out_sample) {
+    WATTCURB_PROFILE_SCOPE("proc.parse_proc_statm");
     // Format: size resident shared text lib data dirty (in pages)
     const char* cur = content.data();
     const char* end = cur + content.size();
@@ -556,6 +557,7 @@ bool ProcessAnalyzer::parse_proc_statm(std::string_view content, ProcessSample& 
 
 
 bool ProcessAnalyzer::parse_proc_stat(std::string_view content, ProcessSample& out_sample) {
+    WATTCURB_PROFILE_SCOPE("proc.parse_proc_stat");
     // Format: pid (comm) state ppid ...
     const char* start = content.data();
     const char* end = start + content.size();
@@ -646,6 +648,7 @@ bool ProcessAnalyzer::parse_proc_stat(std::string_view content, ProcessSample& o
 
 
 bool ProcessAnalyzer::parse_proc_status(std::string_view content, ProcessSample& out_sample) {
+    WATTCURB_PROFILE_SCOPE("proc.parse_proc_status");
     const char* cur = content.data();
     const char* end = cur + content.size();
 
@@ -681,6 +684,7 @@ bool ProcessAnalyzer::parse_proc_status(std::string_view content, ProcessSample&
 }
 
 bool ProcessAnalyzer::parse_proc_io(std::string_view content, ProcessSample& out_sample) {
+    WATTCURB_PROFILE_SCOPE("proc.parse_proc_io");
     const char* cur = content.data();
     const char* end = cur + content.size();
 
@@ -719,6 +723,7 @@ bool ProcessAnalyzer::parse_proc_io(std::string_view content, ProcessSample& out
 }
 
 bool ProcessAnalyzer::parse_drm_fdinfo(std::string_view content, ProcessSample& out_sample) {
+    WATTCURB_PROFILE_SCOPE("proc.parse_drm_fdinfo");
     const char* cur = content.data();
     const char* end = cur + content.size();
 

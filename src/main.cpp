@@ -71,6 +71,10 @@ DISPLAY & REPORT MODES
         peak power, per-profile efficiency comparisons, C3 residency and
         thermal correlation. Read-only; writes nothing.
 
+  -P, --profile-report
+        Print the fine-grained function-level scoped profiling breakdown
+        (calls, cycles, average us/op, min/max) from the running daemon. (REF-REQ-142)
+
   -l, --live
         PERSISTENT. Continuous interactive terminal dashboard, refreshed every
         -i seconds until Ctrl+C. Low cost, but it is a full-screen redraw loop.
@@ -254,6 +258,23 @@ int query_daemon_status() {
     return 1;
 }
 
+int query_daemon_profile_report() {
+    std::string resp;
+    if (wattcurb::core::SingletonLock::query_daemon("GET_PROFILE_REPORT\n", resp, "wattcurb.lock", 2000)) {
+        std::cout << resp;
+        return 0;
+    }
+    // Fallback: Check persisted profile dump file
+    std::ifstream ifs("/tmp/wattcurb_profile_report.log");
+    if (!ifs.is_open()) ifs.open("/tmp/wattcurb_profile_30min.log");
+    if (ifs.is_open()) {
+        std::cout << ifs.rdbuf();
+        return 0;
+    }
+    std::cerr << "[!] Error: Could not retrieve scoped profiler report. Is wattcurb running with profiling enabled?\n";
+    return 1;
+}
+
 int query_daemon_history() {
     int fd = ::open(wattcurb::ipc::HISTORY_SHM_PATH, O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
@@ -359,6 +380,7 @@ int main(int argc, char* argv[]) {
     bool logs_query = false;
     bool live_mode = false;
     bool dev_profile = false;
+    bool profile_report_query = false;
     bool feature_catalog_mode = false;
     bool extreme_profile_mode = false;
     bool battery_report_mode = false;
@@ -372,6 +394,8 @@ int main(int argc, char* argv[]) {
             feature_catalog_mode = true;
         } else if (arg == "-R" || arg == "--battery-report") {
             battery_report_mode = true;
+        } else if (arg == "-P" || arg == "--profile-report") {
+            profile_report_query = true;
         } else if (arg == "-X" || arg == "--extreme-profile") {
             extreme_profile_mode = true;
             if (duration_sec == 0.0) duration_sec = 30.0;
@@ -409,6 +433,10 @@ int main(int argc, char* argv[]) {
     if (feature_catalog_mode) {
         wattcurb::report::ReportGenerator::render_feature_catalog(std::cout);
         return 0;
+    }
+
+    if (profile_report_query) {
+        return query_daemon_profile_report();
     }
 
     if (status_query) {

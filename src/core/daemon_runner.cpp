@@ -687,6 +687,14 @@ void DaemonRunner::process_observation_cycle() {
 
     // REF-REQ-137: Progressive Disk Full Prevention & Storage Hygiene
     disk_guard_.evaluate_and_actuate();
+
+    // REF-REQ-142, REF-ARCH-089: 30-Minute Continuous Scoped Profiler Session Auto-Dump
+    static uint64_t last_profile_dump_sec = static_cast<uint64_t>(std::time(nullptr));
+    if (now_sec >= last_profile_dump_sec + 1800) { // 30 minutes
+        last_profile_dump_sec = now_sec;
+        ScopedProfilerRegistry::instance().dump_to_file("/tmp/wattcurb_profile_30min.log");
+        EventLogger::log_raw("PROFILER", "30-Minute Scoped Profiler telemetry session dumped to /tmp/wattcurb_profile_30min.log (REF-REQ-142)");
+    }
 }
 
 int DaemonRunner::run() {
@@ -751,6 +759,9 @@ int DaemonRunner::run() {
             }
         }
     }
+
+    // REF-REQ-142: Dump detailed function-level profile on daemon shutdown
+    ScopedProfilerRegistry::instance().dump_to_file("/tmp/wattcurb_profile_report.log");
 
     return 0;
 }
@@ -1173,6 +1184,14 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
         policy::MitigationEngine::fan_curve_engine().load_from_file("/etc/wattcurb/fan_curves.conf");
         const char ack[] = "OK\n";
         ::sendto(fd, ack, sizeof(ack) - 1, 0,
+                 reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+        return;
+    } else if (req.rfind("GET_PROFILE_REPORT", 0) == 0) {
+        // REF-REQ-142: Dump to file and stream profile summary breakdown
+        ScopedProfilerRegistry::instance().dump_to_file("/tmp/wattcurb_profile_report.log");
+        std::string summary = ScopedProfilerRegistry::instance().format_summary();
+        if (summary.empty()) summary = "No profile data captured (Profiler may be disabled or uninitialized).\n";
+        ::sendto(fd, summary.data(), summary.size(), 0,
                  reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
         return;
     } else {

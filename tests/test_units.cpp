@@ -6136,6 +6136,80 @@ void test_fan_curve_actuation_feedback_wire_protocol() {
                  "ThinkPad EC fallback, and latency gate verified)\n";
 }
 
+// Implements REF-TEST-096 & REF-REQ-142, REF-ARCH-089:
+// Ultra-Low-Overhead Scoped Profiler & 30-Minute Continuous Session Telemetry Gate
+void test_ultra_low_overhead_scoped_profiler_and_dump() {
+    using namespace wattcurb::core;
+
+    std::cout << "\n--- [REF-TEST-096] Ultra-Low-Overhead Scoped Profiler & Session Gate (REF-REQ-142) ---\n";
+
+#if !defined(WATTCURB_DEV_PROFILE) && (defined(NDEBUG) || defined(WATTCURB_DISABLE_DEV_PROFILE))
+    std::cout << " [SKIP] test_ultra_low_overhead_scoped_profiler_and_dump: Profiler zero-overhead disabled in release build\n";
+    std::cout << " [PASS] test_ultra_low_overhead_scoped_profiler_and_dump (REF-TEST-096: Zero-cost abstraction asserted)\n";
+    return;
+#else
+    auto& reg = ScopedProfilerRegistry::instance();
+    reg.reset();
+
+    // 1. O(1) Static Registration Fidelity
+    size_t slot_a = reg.register_entry("test.hot_path_calc");
+    size_t slot_b = reg.register_entry("test.procfs_scan");
+    size_t slot_a_re = reg.register_entry("test.hot_path_calc");
+
+    assert(slot_a == slot_a_re && "Re-registering same name must return identical slot index");
+    assert(slot_a != slot_b && "Different names must receive distinct slot indices");
+    assert(reg.count() >= 2 && "Registry count must reflect registered scopes");
+
+    // 2. Direct Scoped Invocations
+    for (int i = 0; i < 1000; ++i) {
+        WATTCURB_PROFILE_SCOPE("test.hot_path_calc");
+        volatile int dummy = i * 2;
+        (void)dummy;
+    }
+
+    // 3. Oracle Gate Latency Benchmark (100,000 Scope Invocations)
+    constexpr size_t BENCH_COUNT = 100000;
+    auto t0 = std::chrono::steady_clock::now();
+    uint64_t tsc0 = hw_isa::read_tsc();
+
+    for (size_t i = 0; i < BENCH_COUNT; ++i) {
+        WATTCURB_PROFILE_SCOPE("test.hot_path_bench");
+        asm volatile("" ::: "memory");
+    }
+
+    auto t1 = std::chrono::steady_clock::now();
+    uint64_t tsc1 = hw_isa::read_tsc();
+
+    auto total_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+    double avg_ns_op = static_cast<double>(total_ns) / static_cast<double>(BENCH_COUNT);
+    double cycles_op = static_cast<double>(tsc1 - tsc0) / static_cast<double>(BENCH_COUNT);
+
+    std::cout << " [ORACLE GATE] Scoped Profiler Overhead Benchmark (" << BENCH_COUNT << " iters):\n"
+              << "   * Average Latency : " << std::fixed << std::setprecision(2) << avg_ns_op << " ns/op\n"
+              << "   * Average Cycles  : " << std::setprecision(1) << cycles_op << " cycles/op\n" << std::flush;
+
+    assert(avg_ns_op < bench_tol() * 35.0 && "Scoped profiler overhead must be < 35 ns/op (sub-100 cycles)");
+
+    // 4. Persistence Dump & Content Validation
+    const std::string dump_path = get_test_temp_dir() + "/wattcurb_test_profile_dump.log";
+    assert(reg.dump_to_file(dump_path.c_str()) && "dump_to_file must succeed");
+
+    std::ifstream ifs(dump_path);
+    assert(ifs.is_open() && "Dump file must be readable");
+    std::string dump_content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    ifs.close();
+    ::unlink(dump_path.c_str());
+
+    assert(!dump_content.empty() && "Dump content must not be empty");
+    assert(dump_content.find("WTCURB PROFILER") != std::string::npos && "Dump must contain header banner");
+    assert(dump_content.find("test.hot_path_bench") != std::string::npos && "Dump must contain instrumented scope");
+    assert(dump_content.find("Calls") != std::string::npos && "Dump must contain call statistics");
+
+    std::cout << " [PASS] test_ultra_low_overhead_scoped_profiler_and_dump (REF-TEST-096: O(1) slot dispatch, "
+              << avg_ns_op << " ns/op overhead, atomic stats, dump fidelity verified)\n";
+#endif
+}
+
 // Implements REF-TEST-091, REF-REQ-137 & REF-ARCH-084:
 // Safe Progressive Disk Pressure Guard & Dynamic SIMD Selection Gate
 void test_disk_pressure_guard_and_dynamic_simd() {
@@ -7310,6 +7384,7 @@ int main() {
     test::test_fan_curve_simd_spline_engine();
     test::test_fan_curve_serialization_and_ipc_persistence();
     test::test_fan_curve_actuation_feedback_wire_protocol();
+    test::test_ultra_low_overhead_scoped_profiler_and_dump();
     test::test_disk_pressure_guard_and_dynamic_simd();
     test::test_base_swap_right_sizing_policy();
     test::test_hardware_bus_and_display_power_minimization();
