@@ -37,4 +37,5 @@ jobs:
 
       - name: Run Oracle Gate Tests
         run: |
+          export QT_QPA_PLATFORM=offscreen
           ./build/wattcurb_tests

@@ -495,6 +495,11 @@ bool FanCurveEngine::load_from_file(const char* path) noexcept {
         return try_load(path);
     }
 
+    // REF-REQ-092 & REF-ARCH-069: Oracle Gate isolation
+    if (::getenv("WATTCURB_TEST_ISOLATE") != nullptr) {
+        return false;
+    }
+
     // 1. Primary: /var/lib/wattcurb/fan_curves.conf
     if (try_load(DEFAULT_CONFIG_PATH)) return true;
 
@@ -524,6 +529,11 @@ bool FanCurveEngine::save_to_file(const char* path) const noexcept {
 
     if (path && path[0] != '\0') {
         return try_save(path);
+    }
+
+    // REF-REQ-092 & REF-ARCH-069: Oracle Gate isolation
+    if (::getenv("WATTCURB_TEST_ISOLATE") != nullptr) {
+        return false;
     }
 
     // 1. Primary: /var/lib/wattcurb/fan_curves.conf
