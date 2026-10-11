@@ -7380,17 +7380,17 @@ void test_process_and_system_memory_shm_persistence() {
     pt.swap_used_mb = 1024;
     pt.top_proc_pss_mb = 512;
 
-    alignas(64) wattcurb::ipc::HistoryRingBufferShm ring{};
-    ring.append(pt);
+    auto ring = std::make_unique<wattcurb::ipc::HistoryRingBufferShm>();
+    ring->append(pt);
 
-    assert(ring.count == 1);
-    assert(ring.entries[0].mem_used_mb == 8192);
-    assert(ring.entries[0].swap_used_mb == 1024);
-    assert(ring.entries[0].top_proc_pss_mb == 512);
+    assert(ring->count == 1);
+    assert(ring->entries[0].mem_used_mb == 8192);
+    assert(ring->entries[0].swap_used_mb == 1024);
+    assert(ring->entries[0].top_proc_pss_mb == 512);
 
     wattcurb::ipc::HistoryPoint snapshot[2]{};
     uint32_t out_count = 0;
-    assert(ring.read_snapshot(snapshot, 2, out_count));
+    assert(ring->read_snapshot(snapshot, 2, out_count));
     assert(out_count == 1);
     assert(snapshot[0].mem_used_mb == 8192);
     assert(snapshot[0].swap_used_mb == 1024);
