@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #if defined(__AVX2__)
 #include <immintrin.h>
@@ -340,46 +342,139 @@ bool FanCurveEngine::is_profile_custom(int profile_idx) const noexcept {
     return m_curves[profile_idx].is_custom;
 }
 
-bool FanCurveEngine::load_from_file(const char* path) noexcept {
-    FILE* fp = std::fopen(path, "r");
-    if (!fp) return false;
+bool FanCurveEngine::ensure_dir_exists(const char* file_path) noexcept {
+    if (!file_path) return false;
+    std::string_view p(file_path);
+    auto slash = p.rfind('/');
+    if (slash != std::string_view::npos && slash > 0) {
+        std::string dir(p.substr(0, slash));
+        struct stat st{};
+        if (::stat(dir.c_str(), &st) != 0) {
+            ::mkdir(dir.c_str(), 0755);
+        }
+    }
+    return true;
+}
 
-    char line[256];
-    while (std::fgets(line, sizeof(line), fp)) {
+std::string FanCurveEngine::serialize_curves() const noexcept {
+    WATTCURB_PROFILE_SCOPE("FanCurve::Serialize");
+    std::string out;
+    out.reserve(1024);
+    char buf[128];
+    for (int p = 0; p < 4; ++p) {
+        const auto& c = m_curves[p];
+        int len = std::snprintf(buf, sizeof(buf), "PROFILE_%d_POINTS=%u\nPROFILE_%d_CUSTOM=%d\n",
+                                p, static_cast<unsigned>(c.point_count),
+                                p, c.is_custom ? 1 : 0);
+        if (len > 0) out.append(buf, static_cast<size_t>(len));
+        for (size_t i = 0; i < c.point_count; ++i) {
+            len = std::snprintf(buf, sizeof(buf), "PT_%zu=%.1f,%.1f\n",
+                                i, c.points[i].temp_c, c.points[i].speed_pct);
+            if (len > 0) out.append(buf, static_cast<size_t>(len));
+        }
+    }
+    return out;
+}
+
+bool FanCurveEngine::deserialize_curves(std::string_view data) noexcept {
+    WATTCURB_PROFILE_SCOPE("FanCurve::Deserialize");
+    if (data.empty()) return false;
+
+    size_t pos = 0;
+    while (pos < data.size()) {
+        size_t next_nl = data.find('\n', pos);
+        std::string_view line = (next_nl == std::string_view::npos)
+                                ? data.substr(pos)
+                                : data.substr(pos, next_nl - pos);
+        pos = (next_nl == std::string_view::npos) ? data.size() : next_nl + 1;
+
+        if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+        if (line.empty()) continue;
+
         int prof = -1, pt_cnt = 0;
-        if (std::sscanf(line, "PROFILE_%d_POINTS=%d", &prof, &pt_cnt) == 2) {
+        char line_buf[128];
+        if (line.size() >= sizeof(line_buf)) continue;
+        std::memcpy(line_buf, line.data(), line.size());
+        line_buf[line.size()] = '\0';
+
+        if (std::sscanf(line_buf, "PROFILE_%d_POINTS=%d", &prof, &pt_cnt) == 2) {
             if (prof >= 0 && prof <= 3 && pt_cnt >= static_cast<int>(MIN_POINTS) && pt_cnt <= static_cast<int>(MAX_POINTS)) {
                 FanControlPoint pts[MAX_POINTS];
                 size_t read_idx = 0;
-                while (read_idx < static_cast<size_t>(pt_cnt) && std::fgets(line, sizeof(line), fp)) {
+                int custom_flag = 1;
+
+                while (pos < data.size() && read_idx < static_cast<size_t>(pt_cnt)) {
+                    size_t sub_nl = data.find('\n', pos);
+                    std::string_view sub_line = (sub_nl == std::string_view::npos)
+                                                ? data.substr(pos)
+                                                : data.substr(pos, sub_nl - pos);
+                    pos = (sub_nl == std::string_view::npos) ? data.size() : sub_nl + 1;
+
+                    if (!sub_line.empty() && sub_line.back() == '\r') sub_line.remove_suffix(1);
+                    if (sub_line.empty()) continue;
+
+                    if (sub_line.size() >= sizeof(line_buf)) continue;
+                    std::memcpy(line_buf, sub_line.data(), sub_line.size());
+                    line_buf[sub_line.size()] = '\0';
+
+                    int c_prof = -1, c_val = 0;
+                    if (std::sscanf(line_buf, "PROFILE_%d_CUSTOM=%d", &c_prof, &c_val) == 2 && c_prof == prof) {
+                        custom_flag = c_val;
+                        continue;
+                    }
+
                     float t = 0.0f, s = 0.0f;
-                    if (std::sscanf(line, "PT_%*d=%f,%f", &t, &s) == 2) {
+                    if (std::sscanf(line_buf, "PT_%*d=%f,%f", &t, &s) == 2) {
                         pts[read_idx++] = {t, s};
+                    } else if (line_buf[0] == 'P' && std::strncmp(line_buf, "PROFILE_", 8) == 0) {
+                        pos -= (sub_line.size() + 1);
+                        break;
                     }
                 }
+
                 if (read_idx == static_cast<size_t>(pt_cnt)) {
                     set_profile_curve(prof, pts, read_idx, /*auto_save=*/false);
+                    m_curves[prof].is_custom = (custom_flag != 0);
                 }
             }
         }
     }
-    std::fclose(fp);
     return true;
 }
 
+bool FanCurveEngine::load_from_file(const char* path) noexcept {
+    WATTCURB_PROFILE_SCOPE("FanCurve::LoadFile");
+    FILE* fp = std::fopen(path, "r");
+    if (!fp) return false;
+
+    std::fseek(fp, 0, SEEK_END);
+    long sz = std::ftell(fp);
+    std::fseek(fp, 0, SEEK_SET);
+
+    if (sz <= 0 || sz > 65536) {
+        std::fclose(fp);
+        return false;
+    }
+
+    std::string buf;
+    buf.resize(static_cast<size_t>(sz));
+    size_t read_bytes = std::fread(buf.data(), 1, buf.size(), fp);
+    std::fclose(fp);
+    buf.resize(read_bytes);
+
+    return deserialize_curves(buf);
+}
+
 bool FanCurveEngine::save_to_file(const char* path) const noexcept {
+    WATTCURB_PROFILE_SCOPE("FanCurve::SaveFile");
+    ensure_dir_exists(path);
     FILE* fp = std::fopen(path, "w");
     if (!fp) return false;
 
-    for (int p = 0; p < 4; ++p) {
-        const auto& c = m_curves[p];
-        std::fprintf(fp, "PROFILE_%d_POINTS=%u\n", p, static_cast<unsigned>(c.point_count));
-        for (size_t i = 0; i < c.point_count; ++i) {
-            std::fprintf(fp, "PT_%zu=%.1f,%.1f\n", i, c.points[i].temp_c, c.points[i].speed_pct);
-        }
-    }
+    std::string content = serialize_curves();
+    size_t written = std::fwrite(content.data(), 1, content.size(), fp);
     std::fclose(fp);
-    return true;
+    return written == content.size();
 }
 
 } // namespace wattcurb::policy

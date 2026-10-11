@@ -1109,6 +1109,44 @@ void DaemonRunner::handle_ipc_datagram(int fd) {
         ::sendto(fd, err, sizeof(err) - 1, 0,
                  reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
         return;
+    } else if (req.rfind("SET_FAN_CURVES", 0) == 0) {
+        // Implements REF-REQ-140, REF-ARCH-087:
+        // Privilege-Separated Fan Curve IPC Transmission & Atomic Persistence
+        if (!have_creds || !peer_authorized) {
+            const char deny[] = "ERROR: not an authorized WattCurb client (REF-REQ-111)\n";
+            ::sendto(fd, deny, sizeof(deny) - 1, 0,
+                     reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+            char detail[160];
+            std::snprintf(detail, sizeof(detail),
+                          "Rejected SET_FAN_CURVES command from %s - not an installed WattCurb client binary",
+                          requester);
+            EventLogger::log_alert("DENY", detail);
+            return;
+        }
+
+        size_t offset = 14;
+        while (offset < req.size() && (req[offset] == ' ' || req[offset] == '\n' || req[offset] == '\r')) {
+            ++offset;
+        }
+        std::string_view payload = req.substr(offset);
+
+        auto& engine = policy::MitigationEngine::fan_curve_engine();
+        bool ok = engine.deserialize_curves(payload);
+        if (ok) {
+            engine.save_to_file("/etc/wattcurb/fan_curves.conf");
+            // Immediately actuate fan hardware for current CPU temperature
+            (void)policy::MitigationEngine::apply_fan_for_temp(
+                cached_report_.hardware.cpu_temp_c,
+                policy::MitigationEngine::effective_profile());
+            const char ack[] = "OK\n";
+            ::sendto(fd, ack, sizeof(ack) - 1, 0,
+                     reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+        } else {
+            const char err[] = "ERROR: failed to parse fan curves\n";
+            ::sendto(fd, err, sizeof(err) - 1, 0,
+                     reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
+        }
+        return;
     } else if (req.rfind("RELOAD_FAN_CURVES", 0) == 0) {
         // REF-REQ-136: Reload custom fan curve configuration
         policy::MitigationEngine::fan_curve_engine().load_from_file("/etc/wattcurb/fan_curves.conf");

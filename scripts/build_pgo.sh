@@ -5,6 +5,8 @@ set -euo pipefail
 # Implements REF-REQ-075 & REF-ARCH-052
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+mkdir -p "${ROOT_DIR}/tmp"
+export TMPDIR="${ROOT_DIR}/tmp"
 BUILD_DIR="${ROOT_DIR}/build"
 BUILD_PGO_GEN="${ROOT_DIR}/build_pgo_gen"
 BUILD_PGO_USE="${ROOT_DIR}/build_pgo"

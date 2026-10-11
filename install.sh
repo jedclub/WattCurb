@@ -75,6 +75,11 @@ EOF
     fi
 fi
 
+# 2.0.1. Ensure /etc/wattcurb directory exists for fan curves persistence (REF-REQ-136, REF-REQ-140)
+echo "  • Configuring /etc/wattcurb directory for persistent system-wide configuration..."
+${SUDO} mkdir -p /etc/wattcurb
+${SUDO} chmod 755 /etc/wattcurb
+
 # 2.1. Make ryzenadj reachable for the ROOT daemon (REF-REQ-115.1).
 #
 # Performance and Balanced raise the SMU power/thermal limits through ryzenadj.

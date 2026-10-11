@@ -5962,6 +5962,81 @@ void test_fan_curve_simd_spline_engine() {
                  << avg_us_op << " us/op verified)\n";
 }
 
+// Implements REF-TEST-094 & REF-REQ-140, REF-ARCH-087:
+// Fan Curve Serialization & Privilege-Separated IPC Persistence Gate
+void test_fan_curve_serialization_and_ipc_persistence() {
+    using namespace wattcurb::policy;
+
+    std::cout << "\n--- [REF-TEST-094] Fan Curve Serialization & IPC Persistence Gate (REF-REQ-140) ---\n";
+
+    FanCurveEngine engine{};
+    FanControlPoint custom_perf[4] = {
+        {30.0f, 25.0f},
+        {45.0f, 50.0f},
+        {60.0f, 80.0f},
+        {70.0f, 100.0f}
+    };
+    FanControlPoint custom_bal[3] = {
+        {30.0f, 10.0f},
+        {50.0f, 40.0f},
+        {70.0f, 100.0f}
+    };
+
+    assert(engine.set_profile_curve(0, custom_perf, 4));
+    assert(engine.set_profile_curve(1, custom_bal, 3));
+    assert(engine.is_profile_custom(0));
+    assert(engine.is_profile_custom(1));
+    assert(!engine.is_profile_custom(2)); // Default
+    assert(!engine.is_profile_custom(3)); // Default
+
+    // 1. Serialization
+    std::string wire_payload = engine.serialize_curves();
+    assert(!wire_payload.empty());
+    assert(wire_payload.find("PROFILE_0_CUSTOM=1") != std::string::npos);
+    assert(wire_payload.find("PROFILE_1_CUSTOM=1") != std::string::npos);
+    assert(wire_payload.find("PROFILE_2_CUSTOM=0") != std::string::npos);
+    assert(wire_payload.find("PROFILE_3_CUSTOM=0") != std::string::npos);
+
+    // 2. Deserialization into fresh engine
+    FanCurveEngine remote_engine{};
+    assert(remote_engine.deserialize_curves(wire_payload));
+    assert(remote_engine.is_profile_custom(0));
+    assert(remote_engine.is_profile_custom(1));
+    assert(!remote_engine.is_profile_custom(2));
+    assert(!remote_engine.is_profile_custom(3));
+
+    // Verify control point fidelity
+    const auto& c0 = remote_engine.get_profile_curve(0);
+    assert(c0.point_count == 4);
+    assert(std::abs(c0.points[1].temp_c - 45.0f) < 0.01f);
+    assert(std::abs(c0.points[1].speed_pct - 50.0f) < 0.01f);
+
+    const auto& c1 = remote_engine.get_profile_curve(1);
+    assert(c1.point_count == 3);
+    assert(std::abs(c1.points[1].temp_c - 50.0f) < 0.01f);
+    assert(std::abs(c1.points[1].speed_pct - 40.0f) < 0.01f);
+
+    // 3. Fast lookup level equivalence
+    for (int t = 30; t <= 70; ++t) {
+        assert(engine.get_fan_level_for_temp(0, t) == remote_engine.get_fan_level_for_temp(0, t));
+        assert(engine.get_fan_level_for_temp(1, t) == remote_engine.get_fan_level_for_temp(1, t));
+    }
+
+    // 4. File roundtrip with nested directory creation
+    const char* test_file = "/tmp/wattcurb_test_ipc_nested/fan_curves.conf";
+    assert(remote_engine.save_to_file(test_file));
+    FanCurveEngine file_engine{};
+    assert(file_engine.load_from_file(test_file));
+    assert(file_engine.is_profile_custom(0));
+    assert(file_engine.is_profile_custom(1));
+    assert(!file_engine.is_profile_custom(2));
+    ::unlink(test_file);
+    ::rmdir("/tmp/wattcurb_test_ipc_nested");
+
+    std::cout << " [PASS] test_fan_curve_serialization_and_ipc_persistence (REF-TEST-094: Wire serialization, "
+                 "is_profile_custom flag retention, fast LUT equivalence, nested mkdir persistence verified)\n";
+}
+
 // Implements REF-TEST-091, REF-REQ-137 & REF-ARCH-084:
 // Safe Progressive Disk Pressure Guard & Dynamic SIMD Selection Gate
 void test_disk_pressure_guard_and_dynamic_simd() {
@@ -7134,6 +7209,7 @@ int main() {
     test::test_tri_stage_memory_hygiene_engine();
     test::test_targeted_app_reclaim_engine();
     test::test_fan_curve_simd_spline_engine();
+    test::test_fan_curve_serialization_and_ipc_persistence();
     test::test_disk_pressure_guard_and_dynamic_simd();
     test::test_base_swap_right_sizing_policy();
     test::test_hardware_bus_and_display_power_minimization();

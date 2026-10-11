@@ -691,7 +691,7 @@ Item {
                         if (ok) {
                             studioRoot.statusToast = "✅ 팬 커브가 성공적으로 저장 및 데몬에 적용되었습니다.";
                         } else {
-                            studioRoot.statusToast = "⚠️ 저장 완료 (데몬 상태 확인 필요)";
+                            studioRoot.statusToast = "❌ 팬 커브 적용 실패 (데몬 응답 확인 필요)";
                         }
                         statusToastTimer.restart();
                         canvasContainer.requestPaint();

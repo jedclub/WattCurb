@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <string>
 #include <string_view>
 #include "core/types.hpp"
 #include "core/scoped_profiler.hpp"
@@ -83,7 +84,10 @@ public:
     [[nodiscard]] const ProfileFanCurve& get_profile_curve(int profile_idx) const noexcept;
     [[nodiscard]] bool is_profile_custom(int profile_idx) const noexcept;
 
-    // Persistence
+    // Persistence & IPC Serialization (REF-REQ-140, REF-ARCH-087)
+    [[nodiscard]] std::string serialize_curves() const noexcept;
+    bool deserialize_curves(std::string_view data) noexcept;
+    static bool ensure_dir_exists(const char* file_path) noexcept;
     bool load_from_file(const char* path = "/etc/wattcurb/fan_curves.conf") noexcept;
     bool save_to_file(const char* path = "/etc/wattcurb/fan_curves.conf") const noexcept;
 

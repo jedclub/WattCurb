@@ -1123,8 +1123,17 @@ void DashboardBackend::resetFanCurveToDefault(int profileIdx) {
 }
 
 bool DashboardBackend::applyFanCurves() {
-    bool ok = fan_curve_engine_.save_to_file("/etc/wattcurb/fan_curves.conf");
-    sendDaemonCommand("RELOAD_FAN_CURVES\n");
+    WATTCURB_PROFILE_SCOPE("Dashboard::ApplyFanCurves");
+    // Implements REF-REQ-140, REF-ARCH-087:
+    // Atomic Privilege-Separated Fan Curve Persistence & Daemon Enforcement
+    std::string cmd = "SET_FAN_CURVES\n" + fan_curve_engine_.serialize_curves();
+    std::string reply;
+    bool daemon_ok = sendDaemonCommandQuery(cmd.c_str(), reply);
+    bool ok = daemon_ok && (reply.rfind("OK", 0) == 0);
+
+    // Also attempt local write if directory permissions allow
+    (void)fan_curve_engine_.save_to_file("/etc/wattcurb/fan_curves.conf");
+
     return ok;
 }
 
