@@ -60,6 +60,7 @@ $$W_{domain} = \text{est}_{domain} \times S$$
 1. **Wi-Fi TxPower Capping & Baseline Roundtrip**:
    - `MitigationEngine::set_wifi_txpower_limit(1200)` sets `hardware_baseline().wifi_txpower_capped == true`.
    - `MitigationEngine::restore_wifi_txpower()` clears `hardware_baseline().wifi_txpower_capped == false`.
+   - In sandboxed test environments (`s_actuation_sandbox == true`), the state machine transition is verified even on headless/CI virtual machines where physical wireless interfaces (`/sys/class/net/*/wireless`) do not exist, ensuring deterministic Oracle Gate verification without requiring netlink hardware emission.
 2. **Decomposition Mathematical Invariant**:
    - For arbitrary system power inputs, verify $|(\sum W_{domain}) - \text{plat\_w}| < 10^{-9}$.
    - Verify non-zero attribution across all 4 domains under real hardware workloads.

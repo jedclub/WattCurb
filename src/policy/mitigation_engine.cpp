@@ -1349,6 +1349,11 @@ bool MitigationEngine::restore_nvme_apst_baseline() noexcept {
 }
 
 bool MitigationEngine::set_wifi_powersave(bool enable) noexcept {
+    if (s_actuation_sandbox) {
+        s_hardware_baseline.wifi_power_save_disabled = !enable;
+        return true;
+    }
+
     char ifname[32];
     if (!detect_wireless_ifname(ifname, sizeof(ifname))) {
         s_hardware_baseline.wifi_power_save_disabled = false;
@@ -3747,19 +3752,29 @@ bool MitigationEngine::set_baloo_suspended(bool suspend) noexcept {
 }
 
 bool MitigationEngine::set_wifi_txpower_limit(uint32_t mbm) noexcept {
+    // The Oracle Gate verifies the cap/restore state machine rather than the
+    // radio, so a sandboxed run reports the actuation as performed (matching the
+    // previous hw_system() semantics) without emitting the netlink command or requiring WiFi.
+    if (s_actuation_sandbox) {
+        s_hardware_baseline.wifi_txpower_capped = true;
+        return true;
+    }
+
     char ifname[32];
     if (!detect_wireless_ifname(ifname, sizeof(ifname))) return false;
 
-    // The Oracle Gate verifies the cap/restore state machine rather than the
-    // radio, so a sandboxed run reports the actuation as performed (matching the
-    // previous hw_system() semantics) without emitting the netlink command.
-    const bool ok = s_actuation_sandbox || nl80211_set_tx_power(ifname, false, mbm);
+    const bool ok = nl80211_set_tx_power(ifname, false, mbm);
     s_hardware_baseline.wifi_txpower_capped = true;
     return ok;
 }
 
 bool MitigationEngine::restore_wifi_txpower() noexcept {
     if (!s_hardware_baseline.wifi_txpower_capped) return false;
+
+    if (s_actuation_sandbox) {
+        s_hardware_baseline.wifi_txpower_capped = false;
+        return true;
+    }
 
     char ifname[32];
     if (!detect_wireless_ifname(ifname, sizeof(ifname))) {
@@ -3769,7 +3784,7 @@ bool MitigationEngine::restore_wifi_txpower() noexcept {
         return false;
     }
 
-    const bool ok = s_actuation_sandbox || nl80211_set_tx_power(ifname, true, 0);
+    const bool ok = nl80211_set_tx_power(ifname, true, 0);
     s_hardware_baseline.wifi_txpower_capped = false;
     return ok;
 }
