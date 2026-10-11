@@ -54,7 +54,7 @@ public:
 
 private:
     int m_fd{-1};
-    inline static const char* s_device_path = "/dev/cpu_dma_latency";
+    static const char* s_device_path;
 };
 
 } // namespace wattcurb::policy

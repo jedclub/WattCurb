@@ -3,6 +3,8 @@
 
 namespace wattcurb::policy {
 
+const char* PmQosController::s_device_path = "/dev/cpu_dma_latency";
+
 // Implements REF-REQ-085, REF-ARCH-062, REF-RES-021:
 // PM QoS Hardware Latency Pinning Actuation
 bool PmQosController::pin_c0_latency(int32_t max_latency_us) noexcept {
