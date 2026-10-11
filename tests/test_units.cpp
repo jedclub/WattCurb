@@ -7260,6 +7260,7 @@ void test_desktop_session_token_shell_safety() {
 
     std::cout << " [PASS] test_desktop_session_token_shell_safety (REF-TEST-063: "
               << "16 hostile socket names + 11 hostile runtime dirs rejected)\n";
+    std::cout.flush();
 }
 
 // Implements REF-TEST-064 (REF-REQ-092): with the actuation sandbox engaged the
@@ -7276,6 +7277,7 @@ void test_actuation_sandbox_blocks_window_governor() {
     using namespace wattcurb::policy;
 
     std::cout << "--- [REF-TEST-064] Actuation Sandbox vs Window Governor Live-Write Verification ---\n";
+    std::cout.flush();
 
     const char* mock_qos_path = "/tmp/wattcurb_sandbox_probe_qos";
     { int mfd = ::open(mock_qos_path, O_CREAT | O_TRUNC | O_WRONLY, 0666); if (mfd >= 0) ::close(mfd); }
@@ -7289,12 +7291,12 @@ void test_actuation_sandbox_blocks_window_governor() {
         ::pause();
         ::_exit(0);
     }
-    assert(child > 0 && "fork should succeed");
+    ::dprintf(2, "[REF-TEST-064 TRACE 1] child=%d\n", child);
 
     // 1. Sandbox ON: the mock device must not be opened or written.
     WindowAwareGovernor gov;
-    assert(gov.engage_active_window(child, "sandbox-probe"));
-    assert(!gov.pm_qos().is_pinned() && "sandbox must not pin the PM QoS device");
+    bool eng1 = gov.engage_active_window(child, "sandbox-probe");
+    bool pin1 = gov.pm_qos().is_pinned();
     auto file_size = [](const char* p) -> off_t {
         int fd = ::open(p, O_RDONLY | O_CLOEXEC);
         if (fd < 0) return -1;
@@ -7302,7 +7304,11 @@ void test_actuation_sandbox_blocks_window_governor() {
         ::close(fd);
         return sz;
     };
-    assert(file_size(mock_qos_path) == 0 && "sandbox must not write the PM QoS device");
+    off_t sz1 = file_size(mock_qos_path);
+    ::dprintf(2, "[REF-TEST-064 TRACE 2] sandbox ON: eng1=%d, pin1=%d, sz1=%ld\n", eng1, pin1, (long)sz1);
+    assert(eng1);
+    assert(!pin1 && "sandbox must not pin the PM QoS device");
+    assert(sz1 == 0 && "sandbox must not write the PM QoS device");
     gov.release_active_window();
     assert(!gov.is_active_window_engaged());
 
@@ -7313,20 +7319,15 @@ void test_actuation_sandbox_blocks_window_governor() {
     bool engaged2 = gov2.engage_active_window(child, "sandbox-probe");
     bool pinned2 = gov2.pm_qos().is_pinned();
     off_t sz2 = file_size(mock_qos_path);
-    if (!engaged2 || !pinned2 || sz2 != static_cast<off_t>(sizeof(int32_t))) {
-        std::cerr << "[REF-TEST-064 DIAGNOSTIC] engaged=" << engaged2
-                  << " pinned=" << pinned2
-                  << " raw_fd=" << gov2.pm_qos().raw_fd()
-                  << " file_sz=" << sz2
-                  << " s_device_path=" << (PmQosController::device_path() ? PmQosController::device_path() : "null")
-                  << " mock_path=" << mock_qos_path
-                  << " errno=" << errno << " (" << std::strerror(errno) << ")\n";
-    }
+    ::dprintf(2, "[REF-TEST-064 TRACE 3] sandbox OFF: engaged2=%d, pinned2=%d, raw_fd=%d, sz2=%ld, s_path=%s, err=%d\n",
+              engaged2, pinned2, gov2.pm_qos().raw_fd(), (long)sz2,
+              PmQosController::device_path() ? PmQosController::device_path() : "null", errno);
     assert(engaged2 && "unsandboxed engage must succeed");
     assert(pinned2 && "unsandboxed engage must pin the mock device");
     assert(sz2 == static_cast<off_t>(sizeof(int32_t)) &&
            "unsandboxed engage must write a 4-byte latency constraint");
     gov2.release_active_window();
+    ::dprintf(2, "[REF-TEST-064 TRACE 4] release done\n");
 
     ::kill(child, SIGKILL);
     ::waitpid(child, nullptr, 0);
@@ -7334,9 +7335,11 @@ void test_actuation_sandbox_blocks_window_governor() {
     PmQosController::reset_device_path();
     ::unlink(mock_qos_path);
     MitigationEngine::set_actuation_sandbox(prev_sandbox);
+    ::dprintf(2, "[REF-TEST-064 TRACE 5] all cleanup done\n");
 
     std::cout << " [PASS] test_actuation_sandbox_blocks_window_governor (REF-TEST-064: "
               << "mock PM QoS untouched under sandbox, 4-byte pin when off)\n";
+    std::cout.flush();
 }
 
 // Implements REF-TEST-083, REF-REQ-129 & REF-ARCH-076: Low-Overhead Memory Metrics SHM Persistence
