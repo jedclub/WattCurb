@@ -7374,6 +7374,56 @@ void test_process_and_system_memory_shm_persistence() {
               << "32B POD/HistoryPoint memory fields, zero-allocation propagation verified)\n";
 }
 
+// Implements REF-TEST-098, REF-REQ-144 & REF-ARCH-091:
+// UI Responsive Layout & Overflow Hardening Gate
+void test_ui_responsive_layout_and_overflow_hardening() {
+    std::cout << "\n--- [REF-TEST-098] UI Responsive Layout & Overflow Hardening Gate (REF-REQ-144, REF-ARCH-091) ---\n";
+
+    auto read_file = [](const std::string& path) -> std::string {
+        std::ifstream ifs(path);
+        assert(ifs.is_open() && ("File must exist and be readable: " + path).c_str());
+        std::stringstream buffer;
+        buffer << ifs.rdbuf();
+        return buffer.str();
+    };
+
+    auto check_braces = [](const std::string& content, const std::string& label) {
+        int depth = 0;
+        for (char c : content) {
+            if (c == '{') depth++;
+            else if (c == '}') depth--;
+            assert(depth >= 0 && ("Unmatched closing brace in " + label).c_str());
+        }
+        assert(depth == 0 && ("Unclosed opening brace in " + label).c_str());
+    };
+
+    // 1. DashboardWindow.qml Verification
+    std::string dash_qml = read_file("src/ui/qml/DashboardWindow.qml");
+    check_braces(dash_qml, "DashboardWindow.qml");
+    assert(dash_qml.find("id: tab0Scroll") != std::string::npos && "DashboardWindow must wrap Tab 0 in ScrollView (tab0Scroll)");
+    assert(dash_qml.find("Layout.preferredHeight: 190") != std::string::npos && "Lower power share deck must have preferredHeight: 190");
+    assert(dash_qml.find("preferredHeight: Math.max(540, tab0Scroll.height - 198)") != std::string::npos && "Upper matrix row must dynamically scale with tab0Scroll");
+    assert(dash_qml.find("columnSpacing: 8") != std::string::npos && "CARD B 2-column legend must have compact columnSpacing");
+    assert(dash_qml.find("rowSpacing: 2") != std::string::npos && "Legend grids must use tight rowSpacing: 2 to prevent text cutoff");
+
+    // 2. FanCurveStudioView.qml Verification
+    std::string fan_qml = read_file("src/ui/qml/FanCurveStudioView.qml");
+    check_braces(fan_qml, "FanCurveStudioView.qml");
+    assert(fan_qml.find("readonly property real padBottom: 56") != std::string::npos && "Fan curve canvas must reserve padBottom: 56 for X-axis labels");
+    assert(fan_qml.find("Layout.maximumWidth: 260") != std::string::npos && "Header subtitle must be capped to 260px with elide");
+    assert(fan_qml.find("Layout.maximumWidth: 320") != std::string::npos && "Feedback banner in action bar must be flexible with maximumWidth: 320");
+
+    // 3. BatteryReportView.qml Verification
+    std::string report_qml = read_file("src/ui/qml/BatteryReportView.qml");
+    check_braces(report_qml, "BatteryReportView.qml");
+    assert(report_qml.find("id: reportScroll") != std::string::npos && "BatteryReportView must wrap content in ScrollView (reportScroll)");
+    assert(report_qml.find("Math.max(340, reportScroll.height - 380)") != std::string::npos && "Main split row must dynamically scale with reportScroll.height");
+
+    std::cout << " [PASS] test_ui_responsive_layout_and_overflow_hardening (REF-TEST-098: "
+              << "Dashboard Tab 0 ScrollView hierarchy, Fan Studio X-axis padBottom & flexible action bar, "
+              << "and Battery Report ScrollView container verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -7453,6 +7503,7 @@ int main() {
     test::test_fan_curve_actuation_feedback_wire_protocol();
     test::test_ultra_low_overhead_scoped_profiler_and_dump();
     test::test_hotpath_vfs_and_ec_telemetry_optimization();
+    test::test_ui_responsive_layout_and_overflow_hardening();
     test::test_disk_pressure_guard_and_dynamic_simd();
     test::test_base_swap_right_sizing_policy();
     test::test_hardware_bus_and_display_power_minimization();

@@ -114,10 +114,17 @@ Item {
         }
     }
 
-    ColumnLayout {
+    ScrollView {
+        id: reportScroll
         anchors.fill: parent
-        anchors.margins: 14
-        spacing: 10
+        anchors.margins: 10
+        clip: true
+        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+        ScrollBar.vertical.policy: contentHeight > height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+
+        ColumnLayout {
+            width: reportScroll.availableWidth
+            spacing: 10
 
         // =============================================================
         // 1. REPORT HEADER & ACTION BAR
@@ -514,6 +521,7 @@ Item {
         // =============================================================
         RowLayout {
             Layout.fillWidth: true
+            Layout.preferredHeight: Math.max(340, reportScroll.height - 380)
             Layout.fillHeight: true
             spacing: 10
 
@@ -992,4 +1000,5 @@ Item {
             }
         }
     }
+}
 }

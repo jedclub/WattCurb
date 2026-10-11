@@ -69,13 +69,15 @@ Item {
                             text: "FAN CURVE STUDIO (SIMD VECTORIZED)"
                             color: studioRoot.colCyan
                             font.bold: true
-                            font.pixelSize: 15
+                            font.pixelSize: 14
                             font.family: "Monospace"
                         }
                         Text {
-                            text: "ThinkPad EC Monotone Hermite Spline · 30°C~70°C (최대 10포인트 · 70°C 풀스피드 안전 잠금)"
+                            text: "ThinkPad EC Monotone Spline · 30°C~70°C (최대 10pt · 70°C 풀스피드 안전잠금)"
                             color: studioRoot.textDim
                             font.pixelSize: 11
+                            elide: Text.ElideRight
+                            Layout.maximumWidth: 260
                         }
                     }
                 }
@@ -84,13 +86,13 @@ Item {
 
                 // Profile Selector Pills
                 RowLayout {
-                    spacing: 6
+                    spacing: 5
                     Repeater {
                         model: 4
                         delegate: Rectangle {
                             id: profPill
-                            height: 34
-                            implicitWidth: pillText.implicitWidth + 24
+                            height: 32
+                            implicitWidth: pillText.implicitWidth + 18
                             radius: 6
                             color: backend.selectedFanProfile === index ? 
                                 Qt.rgba(studioRoot.profileColors[index].r, studioRoot.profileColors[index].g, studioRoot.profileColors[index].b, 0.25) : 
@@ -101,17 +103,17 @@ Item {
                             RowLayout {
                                 id: pillLayout
                                 anchors.centerIn: parent
-                                spacing: 6
+                                spacing: 5
                                 Text {
                                     text: studioRoot.profileIcons[index]
-                                    font.pixelSize: 13
+                                    font.pixelSize: 12
                                 }
                                 Text {
                                     id: pillText
                                     text: studioRoot.profileNames[index]
                                     color: backend.selectedFanProfile === index ? "#ffffff" : studioRoot.textDim
                                     font.bold: backend.selectedFanProfile === index
-                                    font.pixelSize: 12
+                                    font.pixelSize: 11
                                 }
                             }
 
@@ -128,12 +130,12 @@ Item {
                     }
                 }
 
-                Rectangle { width: 1; height: 26; color: studioRoot.borderPanel }
+                Rectangle { width: 1; height: 24; color: studioRoot.borderPanel }
 
                 // Status Badge
                 Rectangle {
                     height: 28
-                    implicitWidth: statusText.implicitWidth + 16
+                    implicitWidth: statusText.implicitWidth + 14
                     radius: 4
                     color: backend.isCustomFanCurve ? "#3b1e0a" : "#0d2e24"
                     border.color: backend.isCustomFanCurve ? studioRoot.colOrange : studioRoot.colGreen
@@ -141,7 +143,7 @@ Item {
                     Text {
                         id: statusText
                         anchors.centerIn: parent
-                        text: backend.isCustomFanCurve ? "⚙️ 커스텀 커브 활성" : "🔒 기본 팩토리 커브"
+                        text: backend.isCustomFanCurve ? "⚙️ 커스텀 커브" : "🔒 팩토리 커브"
                         color: backend.isCustomFanCurve ? studioRoot.colOrange : studioRoot.colGreen
                         font.bold: true
                         font.pixelSize: 11
@@ -152,14 +154,14 @@ Item {
                 Rectangle {
                     visible: backend.daemonFanLevel >= 0
                     height: 28
-                    implicitWidth: hwSyncText.implicitWidth + 20
+                    implicitWidth: hwSyncText.implicitWidth + 16
                     radius: 4
                     color: backend.isFanApplySuccess ? "#052e16" : "#2d1515"
                     border.color: backend.isFanApplySuccess ? "#22c55e" : "#ef4444"
                     border.width: 1
                     RowLayout {
                         anchors.centerIn: parent
-                        spacing: 6
+                        spacing: 5
                         Text {
                             text: backend.isFanApplySuccess ? "🟢" : "🔴"
                             font.pixelSize: 10
@@ -192,7 +194,7 @@ Item {
             readonly property real padLeft: 60
             readonly property real padRight: 70
             readonly property real padTop: 40
-            readonly property real padBottom: 50
+            readonly property real padBottom: 56
 
             readonly property real plotW: width - padLeft - padRight
             readonly property real plotH: height - padTop - padBottom
@@ -657,31 +659,32 @@ Item {
         // =====================================================================
         Rectangle {
             Layout.fillWidth: true
-            height: 60
+            height: 52
             color: studioRoot.bgPanel
             border.color: studioRoot.borderPanel
             radius: 8
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 16
-                anchors.rightMargin: 16
-                spacing: 12
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
+                spacing: 8
 
                 // Selected Point Quick Editors
                 RowLayout {
-                    spacing: 8
+                    spacing: 6
                     visible: studioRoot.activePointIndex >= 0 && studioRoot.activePointIndex < backend.fanControlPoints.length
                     Text {
-                        text: "선택 포인트 [#" + (studioRoot.activePointIndex + 1) + "]:"
+                        text: "포인트 [#" + (studioRoot.activePointIndex + 1) + "]:"
                         color: studioRoot.colCyan
                         font.bold: true
-                        font.pixelSize: 12
+                        font.pixelSize: 11
                     }
 
                     // Delete point button
                     Button {
                         text: "🗑️ 삭제"
+                        implicitHeight: 32
                         enabled: backend.fanPointCount > 2
                         onClicked: {
                             backend.removeFanPoint(studioRoot.activePointIndex);
@@ -694,9 +697,9 @@ Item {
                 // Add Point button when no point selected
                 Button {
                     visible: studioRoot.activePointIndex < 0 && backend.fanPointCount < 10
-                    text: "➕ 포인트 추가 (더블클릭 또는 클릭)"
+                    text: "➕ 포인트 추가"
+                    implicitHeight: 32
                     onClicked: {
-                        // Add mid point
                         var curPts = backend.fanControlPoints;
                         var t = 50.0;
                         var p = 50.0;
@@ -714,8 +717,10 @@ Item {
                 // Actuation Feedback Banner (REF-REQ-141, REF-ARCH-088)
                 Rectangle {
                     visible: (studioRoot.statusToast.length > 0) || (backend.fanApplyFeedback.length > 0)
-                    Layout.maximumWidth: 440
-                    height: 36
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 80
+                    Layout.maximumWidth: 320
+                    height: 32
                     radius: 6
                     color: backend.isFanApplySuccess ? "#052e16" : "#2d1515"
                     border.color: backend.isFanApplySuccess ? "#10b981" : "#ef4444"
@@ -723,12 +728,12 @@ Item {
 
                     RowLayout {
                         anchors.fill: parent
-                        anchors.leftMargin: 10
-                        anchors.rightMargin: 10
-                        spacing: 8
+                        anchors.leftMargin: 8
+                        anchors.rightMargin: 8
+                        spacing: 6
                         Text {
                             text: backend.isFanApplySuccess ? "✅" : "⚠️"
-                            font.pixelSize: 13
+                            font.pixelSize: 12
                         }
                         Text {
                             Layout.fillWidth: true
@@ -745,6 +750,7 @@ Item {
                 // Reset to Default button
                 Button {
                     text: "🔄 기본값 복원"
+                    implicitHeight: 32
                     onClicked: {
                         backend.resetFanCurveToDefault(backend.selectedFanProfile);
                         studioRoot.statusToast = "프로파일이 팩토리 기본값으로 복원되었습니다.";
@@ -757,6 +763,7 @@ Item {
                 Button {
                     id: applyBtn
                     text: "💾 커브 적용 (데몬 반영)"
+                    implicitHeight: 32
                     highlighted: true
                     onClicked: {
                         var ok = backend.applyFanCurves();

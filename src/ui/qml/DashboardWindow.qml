@@ -336,13 +336,23 @@ ApplicationWindow {
             // ---------------------------------------------------------
             // TAB 0: ORIGINAL DENSE HARDWARE & PROCESS MATRIX HUD
             // ---------------------------------------------------------
-            Item {
+            ScrollView {
+                id: tab0Scroll
                 anchors.fill: parent
                 visible: backend.currentDashboardTab === 0
+                clip: true
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                ScrollBar.vertical.policy: contentHeight > height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
 
-                RowLayout {
-                    anchors.fill: parent
+                ColumnLayout {
+                    width: tab0Scroll.availableWidth
                     spacing: 8
+
+                    // 1. TOP MAIN MATRIX (RowLayout: Left Column + Right Column)
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: Math.max(540, tab0Scroll.height - 198)
+                        spacing: 8
 
             // ---------------------------------------------------------
             // LEFT COLUMN: DENSE HARDWARE METRICS WITH SPARKLINE GRAPHS (460px)
@@ -358,7 +368,7 @@ ApplicationWindow {
                 // CARD 1: CPU & Memory Subsystem (RAPL) + Real-Time Sparkline
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 252
+                    Layout.preferredHeight: 240
                     color: cpuMa.containsMouse ? "#161b24" : root.bgPanel
                     border.color: cpuMa.containsMouse ? root.colCyan : root.borderPanel
                     radius: 6
@@ -572,7 +582,7 @@ ApplicationWindow {
                 // CARD 2: Battery & Electrical Telemetry (BAT0) + Discharge Sparkline
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 185
+                    Layout.preferredHeight: 174
                     color: batMa.containsMouse ? "#161b24" : root.bgPanel
                     border.color: batMa.containsMouse ? root.colGreen : root.borderPanel
                     radius: 6
@@ -1308,20 +1318,20 @@ ApplicationWindow {
                             Layout.fillHeight: true
                             Layout.alignment: Qt.AlignVCenter
                             columns: 2
-                            columnSpacing: 10
-                            rowSpacing: 3
+                            columnSpacing: 8
+                            rowSpacing: 2
 
                             Repeater {
                                 model: backend.devicePowerShares
                                 delegate: RowLayout {
                                     Layout.fillWidth: true
-                                    spacing: 4
+                                    spacing: 3
 
-                                    Rectangle { width: 8; height: 8; radius: 2; color: modelData.color }
+                                    Rectangle { width: 7; height: 7; radius: 2; color: modelData.color }
                                     Text {
                                         text: modelData.name
                                         color: root.textMain
-                                        font.pixelSize: 12
+                                        font.pixelSize: 11
                                         font.bold: true
                                         Layout.fillWidth: true
                                         elide: Text.ElideRight
@@ -1329,15 +1339,15 @@ ApplicationWindow {
                                     Text {
                                         text: modelData.watts.toFixed(1) + "W"
                                         color: modelData.color
-                                        font.pixelSize: 12
+                                        font.pixelSize: 11
                                         font.family: "Monospace"
                                     }
                                     Text {
                                         text: modelData.pct.toFixed(0) + "%"
                                         color: root.textDim
-                                        font.pixelSize: 12
+                                        font.pixelSize: 11
                                         font.family: "Monospace"
-                                        Layout.preferredWidth: 28
+                                        Layout.preferredWidth: 26
                                         horizontalAlignment: Text.AlignRight
                                     }
                                 }
@@ -1472,20 +1482,20 @@ ApplicationWindow {
                             Layout.fillHeight: true
                             Layout.alignment: Qt.AlignVCenter
                             columns: 2
-                            columnSpacing: 16
-                            rowSpacing: 3
+                            columnSpacing: 10
+                            rowSpacing: 2
 
                             Repeater {
                                 model: backend.processPowerShares
                                 delegate: RowLayout {
                                     Layout.fillWidth: true
-                                    spacing: 5
+                                    spacing: 4
 
-                                    Rectangle { width: 8; height: 8; radius: 2; color: modelData.color }
+                                    Rectangle { width: 7; height: 7; radius: 2; color: modelData.color }
                                     Text {
                                         text: modelData.name + (modelData.pid > 0 ? (" (" + modelData.pid + ")") : "")
                                         color: root.textMain
-                                        font.pixelSize: 12
+                                        font.pixelSize: 11
                                         font.bold: true
                                         Layout.fillWidth: true
                                         elide: Text.ElideRight
@@ -1493,15 +1503,15 @@ ApplicationWindow {
                                     Text {
                                         text: modelData.watts.toFixed(1) + "W"
                                         color: modelData.color
-                                        font.pixelSize: 12
+                                        font.pixelSize: 11
                                         font.family: "Monospace"
                                     }
                                     Text {
                                         text: modelData.pct.toFixed(0) + "%"
                                         color: root.textDim
-                                        font.pixelSize: 12
+                                        font.pixelSize: 11
                                         font.family: "Monospace"
-                                        Layout.preferredWidth: 28
+                                        Layout.preferredWidth: 26
                                         horizontalAlignment: Text.AlignRight
                                     }
                                 }
@@ -1509,9 +1519,12 @@ ApplicationWindow {
                         }
                     }
                 }
-            }
-        } // Right Column ColumnLayout & Main Workspace RowLayout
-    } // Tab 0 Item (Original Dense Matrix HUD)
+        } // Lower Power Share Deck RowLayout
+            } // tab0 ColumnLayout
+        } // tab0Scroll ScrollView
+    }
+
+
 
             // ---------------------------------------------------------
             // TAB 1: DEEP BATTERY DRAIN AUDIT REPORT
