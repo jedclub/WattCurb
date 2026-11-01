@@ -9,12 +9,13 @@
 
 namespace wattcurb::policy {
 
-// Implements REF-REQ-136, REF-ARCH-083:
-// SIMD-Vectorized Profile Fan Curve Engine & Failsafe Controller
+// Implements REF-REQ-136, REF-ARCH-083, REF-REQ-147, REF-ARCH-094:
+// SIMD-Vectorized Profile Fan Curve Engine & Dual-Tier Failsafe Controller
 //
 // Generates monotone cubic Hermite splines for ThinkPad EC cooling fans across
 // the [30°C, 70°C] domain, evaluating 41 integer temperature points with SIMD
-// vectorization and guaranteeing a 100% full-speed safety ceiling at >= 70°C.
+// vectorization. Supports customizable per-profile MAX speed ceilings and guarantees
+// a 100% full-speed safety ceiling at >= 85°C (REF-REQ-147).
 // Supports up to 10 control points per profile with L1D cache-line aligned SoA lookup.
 
 struct FanControlPoint {
@@ -36,6 +37,7 @@ class FanCurveEngine {
 public:
     static constexpr float MIN_TEMP_C = 30.0f;
     static constexpr float MAX_TEMP_C = 70.0f;
+    static constexpr float EMERGENCY_TEMP_C = 85.0f; // REF-REQ-147: Dual-Tier Hardware Failsafe
     static constexpr size_t LOOKUP_TABLE_SIZE = 41; // 70 - 30 + 1
     static constexpr size_t MAX_POINTS = 10;        // Expanded to 10 control points
     static constexpr size_t MIN_POINTS = 2;
@@ -63,7 +65,10 @@ public:
         WATTCURB_PROFILE_SCOPE("FanCurve::GetLevel");
         if (profile_idx < 0 || profile_idx > 3) [[unlikely]] profile_idx = 1;
         if (temp_c <= 0.0) [[unlikely]] return 0;
-        if (temp_c >= MAX_TEMP_C) [[unlikely]] return FAN_LEVEL_FULL_SPEED;
+        // REF-REQ-147: Dual-Tier Failsafe - 85°C triggers unconditional 100% full-speed
+        if (temp_c >= EMERGENCY_TEMP_C) [[unlikely]] return FAN_LEVEL_FULL_SPEED;
+        // REF-REQ-147: 70°C <= temp < 85°C holds profile's maximum configured ceiling (LUT index 40)
+        if (temp_c >= MAX_TEMP_C) [[unlikely]] return m_fast_levels[profile_idx][LOOKUP_TABLE_SIZE - 1];
         if (temp_c <= MIN_TEMP_C) [[unlikely]] return m_fast_levels[profile_idx][0];
 
         int idx = static_cast<int>(temp_c) - static_cast<int>(MIN_TEMP_C);
@@ -74,7 +79,10 @@ public:
         WATTCURB_PROFILE_SCOPE("FanCurve::GetPct");
         if (profile_idx < 0 || profile_idx > 3) [[unlikely]] profile_idx = 1;
         if (temp_c <= 0.0) [[unlikely]] return 0.0f;
-        if (temp_c >= MAX_TEMP_C) [[unlikely]] return 100.0f;
+        // REF-REQ-147: Dual-Tier Failsafe - 85°C triggers unconditional 100% full-speed
+        if (temp_c >= EMERGENCY_TEMP_C) [[unlikely]] return 100.0f;
+        // REF-REQ-147: 70°C <= temp < 85°C holds profile's maximum configured ceiling (LUT index 40)
+        if (temp_c >= MAX_TEMP_C) [[unlikely]] return m_fast_pcts[profile_idx][LOOKUP_TABLE_SIZE - 1];
         if (temp_c <= MIN_TEMP_C) [[unlikely]] return m_fast_pcts[profile_idx][0];
 
         int idx = static_cast<int>(temp_c) - static_cast<int>(MIN_TEMP_C);

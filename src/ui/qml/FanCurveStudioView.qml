@@ -73,7 +73,7 @@ Item {
                             font.family: "Monospace"
                         }
                         Text {
-                            text: "ThinkPad EC Monotone Spline · 30°C~70°C (최대 10pt · 70°C 풀스피드 안전잠금)"
+                            text: "ThinkPad EC Monotone Spline · 30°C~70°C (프로파일별 MAX 팬속도 설정 · 85°C 비상 보호)"
                             color: studioRoot.textDim
                             font.pixelSize: 11
                             elide: Text.ElideRight
@@ -256,11 +256,11 @@ Item {
                     ctx.fillStyle = "#0d1117";
                     ctx.fillRect(pl, pt, w, h);
 
-                    // 2. Failsafe Zone Pattern (>= 70°C area on right pad)
+                    // 2. Dual-Tier Safety Zone Pattern (Right margin)
                     var x70 = pl + w;
-                    ctx.fillStyle = "rgba(239, 68, 68, 0.12)";
+                    ctx.fillStyle = "rgba(245, 158, 11, 0.08)";
                     ctx.fillRect(x70, pt, pr, h);
-                    ctx.strokeStyle = "rgba(239, 68, 68, 0.4)";
+                    ctx.strokeStyle = "rgba(245, 158, 11, 0.25)";
                     ctx.lineWidth = 1;
                     ctx.beginPath();
                     for (var hx = x70; hx < x70 + pr; hx += 10) {
@@ -270,11 +270,14 @@ Item {
                     ctx.stroke();
 
                     // Failsafe label
+                    ctx.fillStyle = "#f59e0b";
+                    ctx.font = "bold 10px Monospace";
+                    ctx.fillText("MAX CAP", x70 + 6, pt + 18);
+                    ctx.font = "9px Monospace";
+                    ctx.fillText("70°~84°C", x70 + 6, pt + 30);
                     ctx.fillStyle = "#ef4444";
-                    ctx.font = "bold 11px Monospace";
-                    ctx.fillText("FAILSAFE 100%", x70 + 6, pt + 20);
-                    ctx.font = "10px Monospace";
-                    ctx.fillText("≥ 70°C FULL", x70 + 6, pt + 34);
+                    ctx.font = "bold 9px Monospace";
+                    ctx.fillText("≥85°C 비상", x70 + 6, pt + 44);
 
                     // 3. Horizontal Grid Lines (0%, 20%, 40%, 60%, 80%, 100%)
                     ctx.strokeStyle = "#1b2330";
@@ -410,7 +413,7 @@ Item {
             Item {
                 id: crosshairItem
                 anchors.fill: parent
-                visible: backend.cpuTempC >= 25 && backend.cpuTempC <= 85
+                visible: backend.cpuTempC >= 25 && backend.cpuTempC <= 95
 
                 readonly property real curTemp: backend.cpuTempC
                 readonly property real curRpm: backend.fanRpm
@@ -420,8 +423,10 @@ Item {
                     if (curTemp >= 30 && curTemp <= 70 && luts && luts.length >= 41) {
                         var idx = Math.min(40, Math.max(0, Math.round(curTemp - 30)));
                         return canvasContainer.pctToY(luts[idx]);
-                    } else if (curTemp > 70) {
-                        return canvasContainer.padTop;
+                    } else if (curTemp > 70 && curTemp < 85 && luts && luts.length >= 41) {
+                        return canvasContainer.pctToY(luts[40]); // REF-REQ-147: hold custom max cap
+                    } else if (curTemp >= 85) {
+                        return canvasContainer.padTop; // REF-REQ-147: 85°C emergency 100% full speed
                     }
                     return canvasContainer.padTop + canvasContainer.plotH;
                 }

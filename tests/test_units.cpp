@@ -7564,6 +7564,76 @@ void test_fan_curve_payload_buffer_and_deserialization_safety() {
               << "Buffer overflow prevention, truncation immunity, and nested directory persistence verified)\n";
 }
 
+// Implements REF-TEST-101, REF-REQ-147 & REF-ARCH-094:
+// Per-Profile Max Fan Speed Ceiling & 85°C Dual-Tier Failsafe Verification Gate
+void test_max_fan_speed_ceiling_and_emergency_failsafe() {
+    using namespace wattcurb::policy;
+
+    std::cout << "\n--- [REF-TEST-101] Per-Profile Max Fan Speed Ceiling & 85°C Failsafe Gate (REF-REQ-147) ---\n";
+
+    FanCurveEngine engine{};
+    assert(engine.initialize());
+
+    // 1. Configure custom PowerSaver curve with 55% max fan speed ceiling at 70°C
+    FanControlPoint custom_save[5] = {
+        {30.0f, 10.0f},
+        {40.0f, 20.0f},
+        {50.0f, 30.0f},
+        {60.0f, 45.0f},
+        {70.0f, 55.0f} // User custom max ceiling
+    };
+    assert(engine.set_profile_curve(2, custom_save, 5, /*auto_save=*/false));
+    assert(engine.is_profile_custom(2));
+
+    const auto& save_curve = engine.get_profile_curve(2);
+    assert(save_curve.point_count == 5);
+    // Invariant: 70°C endpoint must NOT be forced to 100% (REF-REQ-147.1)
+    assert(std::abs(save_curve.points[4].speed_pct - 55.0f) < 0.01f);
+    assert(std::abs(save_curve.lookup_pcts[40] - 55.0f) < 0.01f);
+
+    uint8_t ceiling_lvl = save_curve.lookup_levels[40];
+    assert(ceiling_lvl != FanCurveEngine::FAN_LEVEL_FULL_SPEED && "Ceiling must not be full speed");
+
+    // 2. Regulated Tier & Acoustic Plateau (70°C <= T < 85°C)
+    // Must hold custom 55% ceiling and prevent thermal runaway noise (REF-REQ-147.2)
+    assert(std::abs(engine.get_fan_pct_for_temp(2, 70.0) - 55.0f) < 0.01f);
+    assert(std::abs(engine.get_fan_pct_for_temp(2, 75.0) - 55.0f) < 0.01f);
+    assert(std::abs(engine.get_fan_pct_for_temp(2, 84.0) - 55.0f) < 0.01f);
+    assert(engine.get_fan_level_for_temp(2, 70.0) == ceiling_lvl);
+    assert(engine.get_fan_level_for_temp(2, 75.0) == ceiling_lvl);
+    assert(engine.get_fan_level_for_temp(2, 84.9) == ceiling_lvl);
+
+    // 3. Emergency Thermal Failsafe Tier (T >= 85°C)
+    // Silicon protection: must unconditionally command 100% full-speed (REF-REQ-147.2)
+    assert(engine.get_fan_pct_for_temp(2, 85.0) == 100.0f);
+    assert(engine.get_fan_level_for_temp(2, 85.0) == FanCurveEngine::FAN_LEVEL_FULL_SPEED);
+    assert(engine.get_fan_pct_for_temp(2, 92.5) == 100.0f);
+    assert(engine.get_fan_level_for_temp(2, 92.5) == FanCurveEngine::FAN_LEVEL_FULL_SPEED);
+
+    // 4. Inversion Prevention: endpoint speed cannot fall below predecessor point
+    FanControlPoint invalid_pts[4] = {
+        {30.0f, 15.0f},
+        {45.0f, 35.0f},
+        {60.0f, 50.0f},
+        {70.0f, 30.0f} // Lower than 60°C (50%)
+    };
+    assert(engine.set_profile_curve(1, invalid_pts, 4, /*auto_save=*/false));
+    const auto& clamped_curve = engine.get_profile_curve(1);
+    assert(clamped_curve.points[3].speed_pct >= 50.0f && "Endpoint must clamp to predecessor point");
+
+    // 5. Persistence and IPC wire round-trip
+    std::string wire = engine.serialize_curves();
+    FanCurveEngine wire_engine{};
+    assert(wire_engine.deserialize_curves(wire));
+    assert(wire_engine.is_profile_custom(2));
+    assert(std::abs(wire_engine.get_profile_curve(2).points[4].speed_pct - 55.0f) < 0.01f);
+    assert(wire_engine.get_fan_level_for_temp(2, 75.0) == ceiling_lvl);
+    assert(wire_engine.get_fan_level_for_temp(2, 85.0) == FanCurveEngine::FAN_LEVEL_FULL_SPEED);
+
+    std::cout << " [PASS] test_max_fan_speed_ceiling_and_emergency_failsafe (REF-TEST-101: "
+              << "Per-profile max ceiling mutability, 70°C~84°C holding, 85°C emergency full-speed, and wire fidelity verified)\n";
+}
+
 } // namespace test
 
 int main() {
@@ -7646,6 +7716,7 @@ int main() {
     test::test_ui_responsive_layout_and_overflow_hardening();
     test::test_fan_curve_statedirectory_persistence_and_ipc_sync();
     test::test_fan_curve_payload_buffer_and_deserialization_safety();
+    test::test_max_fan_speed_ceiling_and_emergency_failsafe();
     test::test_disk_pressure_guard_and_dynamic_simd();
     test::test_base_swap_right_sizing_policy();
     test::test_hardware_bus_and_display_power_minimization();

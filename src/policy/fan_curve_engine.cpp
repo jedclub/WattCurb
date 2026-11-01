@@ -233,7 +233,12 @@ bool FanCurveEngine::set_profile_curve(int profile_idx, const FanControlPoint* p
     // Force endpoints to span [30, 70]
     c.points[0].temp_c = MIN_TEMP_C;
     c.points[count - 1].temp_c = MAX_TEMP_C;
-    c.points[count - 1].speed_pct = 100.0f; // REF-REQ-136.3: 70°C ceiling is strictly 100% full speed
+    // REF-REQ-147: Eliminate hardcoded 100% ceiling. Honor user-configured profile max speed ceiling.
+    const float min_endpoint_pct = (profile_idx == 3) ? 0.0f : 10.0f;
+    c.points[count - 1].speed_pct = std::clamp(points[count - 1].speed_pct, min_endpoint_pct, 100.0f);
+    if (count >= 2 && c.points[count - 1].speed_pct < c.points[count - 2].speed_pct) {
+        c.points[count - 1].speed_pct = c.points[count - 2].speed_pct;
+    }
 
     c.is_custom = true;
     bool allow_fan_stop = (profile_idx == 3);
@@ -318,8 +323,8 @@ bool FanCurveEngine::compute_spline_lookup(const FanControlPoint* points, size_t
         static const SplineEvalFn s_eval_fn = resolve_spline_eval();
         s_eval_fn(points, n_intervals, h, c0, c1, c2, c3, raw_pcts);
 
-        // Final element index 40 (70°C) is unconditionally 100% full speed ceiling
-        raw_pcts[LOOKUP_TABLE_SIZE - 1] = 100.0f;
+        // REF-REQ-147: Final element index 40 (70°C) is the user's custom max speed ceiling
+        raw_pcts[LOOKUP_TABLE_SIZE - 1] = points[count - 1].speed_pct;
     }
 
     // Convert to ThinkPad EC hardware fan levels
@@ -327,9 +332,6 @@ bool FanCurveEngine::compute_spline_lookup(const FanControlPoint* points, size_t
         out_pcts[t] = raw_pcts[t];
         out_levels[t] = pct_to_thinkpad_level(raw_pcts[t], allow_fan_stop);
     }
-
-    // Ensure last element is FAN_LEVEL_FULL_SPEED
-    out_levels[LOOKUP_TABLE_SIZE - 1] = FAN_LEVEL_FULL_SPEED;
 
     return true;
 }
