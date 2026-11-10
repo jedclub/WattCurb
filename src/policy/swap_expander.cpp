@@ -120,6 +120,24 @@ void SwapExpander::initialize() noexcept {
             core::EventLogger::log_alert("SWAP", detail);
         }
     }
+
+    // Self-healing: Reclaim orphaned base migration temporary file (REF-REQ-138)
+    struct stat st_new {};
+    if (::stat(BASE_SWAP_NEW_PATH, &st_new) == 0) {
+        if (is_swap_active(BASE_SWAP_NEW_PATH)) {
+            if (!MitigationEngine::actuation_sandboxed()) {
+                ::swapoff(BASE_SWAP_NEW_PATH);
+            }
+        }
+        if (!MitigationEngine::actuation_sandboxed()) {
+            ::unlink(BASE_SWAP_NEW_PATH);
+            char detail[192];
+            std::snprintf(detail, sizeof(detail),
+                          "Removed orphaned base swapfile (%s) left by interrupted migration (REF-REQ-138)",
+                          BASE_SWAP_NEW_PATH);
+            core::EventLogger::log_alert("SWAP", detail);
+        }
+    }
 }
 
 pid_t SwapExpander::spawn_create(const char* path) const noexcept {
@@ -384,8 +402,14 @@ void SwapExpander::evaluate_base_right_sizing(uint64_t now_sec, uint64_t swap_to
 
     if (MitigationEngine::actuation_sandboxed()) return;
 
-    // Clean up stale temporary file if any
+    // Self-healing: clean up stale temporary file if any and ensure it is not active
+    if (is_swap_active(BASE_SWAP_NEW_PATH)) {
+        ::swapoff(BASE_SWAP_NEW_PATH);
+    }
     ::unlink(BASE_SWAP_NEW_PATH);
+    if (::access(BASE_SWAP_NEW_PATH, F_OK) == 0) {
+        return; // Still exists, do not attempt to recreate to avoid EEXIST loop
+    }
 
     const pid_t pid = spawn_create_size(BASE_SWAP_NEW_PATH, TARGET_BASE_SIZE_BYTES);
     if (pid < 0) return;
@@ -417,8 +441,13 @@ void SwapExpander::poll_base_migration() noexcept {
 
     if (m_base_migration_state == BaseMigrationState::CreatingNew) {
         if (!child_ok) {
+            if (is_swap_active(BASE_SWAP_NEW_PATH)) {
+                ::swapoff(BASE_SWAP_NEW_PATH);
+            }
             ::unlink(BASE_SWAP_NEW_PATH);
             m_base_migration_state = BaseMigrationState::Idle;
+            m_last_migration_sec = static_cast<uint64_t>(::time(nullptr));
+            m_window_start_sec = 0;
             char detail[192];
             std::snprintf(detail, sizeof(detail),
                           "Base swap creation failed for %s; aborting migration (REF-REQ-138)",
@@ -431,6 +460,8 @@ void SwapExpander::poll_base_migration() noexcept {
         if (::swapon(BASE_SWAP_NEW_PATH, 0) != 0) {
             ::unlink(BASE_SWAP_NEW_PATH);
             m_base_migration_state = BaseMigrationState::Idle;
+            m_last_migration_sec = static_cast<uint64_t>(::time(nullptr));
+            m_window_start_sec = 0;
             char detail[192];
             std::snprintf(detail, sizeof(detail),
                           "swapon() failed for %s; aborting migration (REF-REQ-138)",
@@ -445,6 +476,8 @@ void SwapExpander::poll_base_migration() noexcept {
             ::swapoff(BASE_SWAP_NEW_PATH);
             ::unlink(BASE_SWAP_NEW_PATH);
             m_base_migration_state = BaseMigrationState::Idle;
+            m_last_migration_sec = static_cast<uint64_t>(::time(nullptr));
+            m_window_start_sec = 0;
             return;
         }
 
@@ -465,6 +498,8 @@ void SwapExpander::poll_base_migration() noexcept {
             ::swapoff(BASE_SWAP_NEW_PATH);
             ::unlink(BASE_SWAP_NEW_PATH);
             m_base_migration_state = BaseMigrationState::Idle;
+            m_last_migration_sec = static_cast<uint64_t>(::time(nullptr));
+            m_window_start_sec = 0;
             char detail[192];
             std::snprintf(detail, sizeof(detail),
                           "swapoff() failed for old %s; migration aborted (REF-REQ-138)",
